@@ -50,7 +50,6 @@ export const APP_TEMPLATE = `
       <div class="top-actions">
         <button id="btn-capture">Capture</button>
         <label class="upload-btn">Upload<input id="image-upload" type="file" accept="image/*"></label>
-        <button id="btn-aot-toggle">Always On Top: On</button>
         <span id="status-text"></span>
       </div>
       <div class="cards-container">

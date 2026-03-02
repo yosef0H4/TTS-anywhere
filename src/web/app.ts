@@ -263,15 +263,12 @@ export class WebApp {
     const minimizeButton = this.must<HTMLButtonElement>("btn-minimize");
     const maximizeButton = this.must<HTMLButtonElement>("btn-maximize");
     const closeButton = this.must<HTMLButtonElement>("btn-close");
-    const alwaysOnTopButton = this.must<HTMLButtonElement>("btn-aot-toggle");
 
     if (!window.electronAPI) {
       pinButton.disabled = true;
       minimizeButton.disabled = true;
       maximizeButton.disabled = true;
       closeButton.disabled = true;
-      alwaysOnTopButton.disabled = true;
-      alwaysOnTopButton.textContent = "Always On Top: Unavailable";
       this.setStatus("Desktop window controls unavailable (running in browser mode).");
       return;
     }
@@ -295,26 +292,10 @@ export class WebApp {
       const pinned = await window.electronAPI?.togglePinWindow();
       if (pinned) {
         pinButton.classList.add("active-pin");
-        alwaysOnTopButton.textContent = "Always On Top: On";
-        alwaysOnTopButton.classList.add("active-aot");
+        this.setStatus("Always on top: On");
       } else {
         pinButton.classList.remove("active-pin");
-        alwaysOnTopButton.textContent = "Always On Top: Off";
-        alwaysOnTopButton.classList.remove("active-aot");
-      }
-    });
-
-    alwaysOnTopButton.classList.add("active-aot");
-    alwaysOnTopButton.addEventListener("click", async () => {
-      const pinned = await window.electronAPI?.togglePinWindow();
-      if (pinned) {
-        pinButton.classList.add("active-pin");
-        alwaysOnTopButton.textContent = "Always On Top: On";
-        alwaysOnTopButton.classList.add("active-aot");
-      } else {
-        pinButton.classList.remove("active-pin");
-        alwaysOnTopButton.textContent = "Always On Top: Off";
-        alwaysOnTopButton.classList.remove("active-aot");
+        this.setStatus("Always on top: Off");
       }
     });
   }

@@ -19,7 +19,7 @@ function createMainWindow(): BrowserWindow {
     backgroundColor: "#fff0f5",
     show: false,
     alwaysOnTop: true,
-    skipTaskbar: true,
+    skipTaskbar: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
