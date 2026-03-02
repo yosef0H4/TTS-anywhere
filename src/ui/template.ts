@@ -121,6 +121,14 @@ export const APP_TEMPLATE = `
               </select>
             </div>
           </div>
+          <div class="setting-grid">
+            <div class="setting-group"><label>Stream Window</label><input type="number" id="stream-window-size" min="1"></div>
+            <div class="setting-group"><label>Concurrency</label><input type="number" id="chunk-concurrency" min="1"></div>
+          </div>
+          <div class="setting-grid">
+            <div class="setting-group"><label>Retries / Chunk</label><input type="number" id="chunk-retry-count" min="0"></div>
+            <div class="setting-group"><label>Timeout (ms)</label><input type="number" id="chunk-timeout-ms" min="1000" step="1000"></div>
+          </div>
         </section>
 
         <section class="setting-section" data-section="system">

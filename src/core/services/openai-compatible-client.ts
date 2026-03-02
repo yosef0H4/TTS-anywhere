@@ -22,7 +22,7 @@ interface TtsClient {
         voice: string;
         speed: number;
         response_format: "mp3" | "wav" | "opus";
-      }) => Promise<{ arrayBuffer: () => Promise<ArrayBuffer> }>;
+      }, requestOptions?: { signal?: AbortSignal }) => Promise<{ arrayBuffer: () => Promise<ArrayBuffer> }>;
     };
   };
 }
@@ -93,8 +93,20 @@ export class OpenAiCompatibleLlmService {
 export class OpenAiCompatibleTtsService {
   constructor(private readonly clientFactory: (config: TtsConfig) => TtsClient = (config) => createClient(config.baseUrl, config.apiKey)) {}
 
-  async synthesize(text: string, config: TtsConfig): Promise<TtsAudioResult> {
+  async synthesize(text: string, config: TtsConfig, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<TtsAudioResult> {
     const endpoint = normalizeOpenAiBaseUrl(config.baseUrl);
+    const timeoutMs = Math.max(1000, options?.timeoutMs ?? 30000);
+    const timeoutController = new AbortController();
+    const mergedController = new AbortController();
+    const timeout = setTimeout(() => timeoutController.abort(), timeoutMs);
+
+    const onAbort = (): void => {
+      mergedController.abort();
+    };
+
+    timeoutController.signal.addEventListener("abort", onAbort);
+    options?.signal?.addEventListener("abort", onAbort);
+
     try {
       const response = await this.clientFactory(config).audio.speech.create({
         model: config.model,
@@ -102,12 +114,16 @@ export class OpenAiCompatibleTtsService {
         voice: config.voice,
         speed: config.speed,
         response_format: config.format
-      });
+      }, { signal: mergedController.signal });
 
       const audioArrayBuffer = await response.arrayBuffer();
       return { audioBlob: new Blob([audioArrayBuffer]) };
     } catch (error) {
       throw new Error(`TTS request failed (${endpoint}/audio/speech): ${extractErrorMessage(error)}`);
+    } finally {
+      clearTimeout(timeout);
+      timeoutController.signal.removeEventListener("abort", onAbort);
+      options?.signal?.removeEventListener("abort", onAbort);
     }
   }
 }

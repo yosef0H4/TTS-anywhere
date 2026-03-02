@@ -19,7 +19,11 @@ export const DEFAULT_CONFIG: AppConfig = {
     minWordsPerChunk: 3,
     maxWordsPerChunk: 8,
     wpmBase: 180,
-    punctuationPauseMode: "low"
+    punctuationPauseMode: "low",
+    streamWindowSize: 3,
+    chunkRequestConcurrency: 2,
+    chunkRetryCount: 2,
+    chunkTimeoutMs: 30000
   },
   ui: {
     volume: 80,

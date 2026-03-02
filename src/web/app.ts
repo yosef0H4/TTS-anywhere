@@ -31,6 +31,11 @@ export class WebApp {
   private ttsModelSelect: TomSelect | null = null;
   private ttsVoiceSelect: TomSelect | null = null;
   private settingsPeekOpen = false;
+  private chunkPlaybackMode = false;
+  private chunkPlaybackSession = 0;
+  private readonly chunkAudioUrls = new Map<number, string>();
+  private readonly chunkInFlight = new Map<number, Promise<string>>();
+  private readonly chunkAbortControllers = new Map<number, AbortController>();
 
   mount(root: HTMLElement): void {
     root.innerHTML = APP_TEMPLATE;
@@ -376,6 +381,10 @@ export class WebApp {
       "chunk-min",
       "chunk-max",
       "wpm",
+      "stream-window-size",
+      "chunk-concurrency",
+      "chunk-retry-count",
+      "chunk-timeout-ms",
       "ui-density",
       "punctuation-pause"
     ];
@@ -403,7 +412,16 @@ export class WebApp {
       this.setStatus("Settings reset to defaults.");
     });
 
-    this.must<HTMLTextAreaElement>("raw-text").addEventListener("input", () => this.updateTimelineFromRawText());
+    this.must<HTMLTextAreaElement>("raw-text").addEventListener("input", () => {
+      const shouldRestart = this.chunkPlaybackMode;
+      const resumeFrom = this.activeChunkIndex;
+      this.updateTimelineFromRawText();
+      if (shouldRestart) {
+        this.restartPlaybackFromIndex(resumeFrom);
+      } else {
+        this.resetChunkPlaybackState();
+      }
+    });
   }
 
   private syncConfigFromInputs(): void {
@@ -419,6 +437,13 @@ export class WebApp {
       ? Math.max(this.config.reading.minWordsPerChunk, Math.floor(maxWords))
       : this.config.reading.minWordsPerChunk;
     this.config.reading.wpmBase = Number(this.must<HTMLInputElement>("wpm").value);
+    this.config.reading.streamWindowSize = Math.max(1, Math.floor(Number(this.must<HTMLInputElement>("stream-window-size").value) || 1));
+    this.config.reading.chunkRequestConcurrency = Math.max(
+      1,
+      Math.floor(Number(this.must<HTMLInputElement>("chunk-concurrency").value) || 1)
+    );
+    this.config.reading.chunkRetryCount = Math.max(0, Math.floor(Number(this.must<HTMLInputElement>("chunk-retry-count").value) || 0));
+    this.config.reading.chunkTimeoutMs = Math.max(1000, Math.floor(Number(this.must<HTMLInputElement>("chunk-timeout-ms").value) || 30000));
     const punctuationMode = this.must<HTMLSelectElement>("punctuation-pause").value;
     this.config.reading.punctuationPauseMode = ["off", "low", "medium", "high"].includes(punctuationMode)
       ? (punctuationMode as AppConfig["reading"]["punctuationPauseMode"])
@@ -440,6 +465,10 @@ export class WebApp {
     this.must<HTMLInputElement>("chunk-min").value = String(this.config.reading.minWordsPerChunk);
     this.must<HTMLInputElement>("chunk-max").value = String(this.config.reading.maxWordsPerChunk);
     this.must<HTMLInputElement>("wpm").value = String(this.config.reading.wpmBase);
+    this.must<HTMLInputElement>("stream-window-size").value = String(this.config.reading.streamWindowSize);
+    this.must<HTMLInputElement>("chunk-concurrency").value = String(this.config.reading.chunkRequestConcurrency);
+    this.must<HTMLInputElement>("chunk-retry-count").value = String(this.config.reading.chunkRetryCount);
+    this.must<HTMLInputElement>("chunk-timeout-ms").value = String(this.config.reading.chunkTimeoutMs);
     this.must<HTMLSelectElement>("punctuation-pause").value = this.config.reading.punctuationPauseMode;
     this.must<HTMLSelectElement>("ui-density").value = this.config.ui.settingsDensity;
     this.must<HTMLInputElement>("ui-advanced-hints").checked = this.config.ui.showAdvancedHints;
@@ -607,8 +636,7 @@ export class WebApp {
 
     this.must<HTMLButtonElement>("btn-play").addEventListener("click", async () => {
       if (this.audio.paused) {
-        await this.ensureAudioForCurrentText();
-        await this.audio.play();
+        await this.startOrResumePlayback();
       } else {
         this.audio.pause();
       }
@@ -619,8 +647,24 @@ export class WebApp {
     this.must<HTMLButtonElement>("btn-next").addEventListener("click", () => this.seekChunk(this.activeChunkIndex + 1));
 
     this.audio.addEventListener("timeupdate", () => {
+      if (this.chunkPlaybackMode) {
+        return;
+      }
       this.activeChunkIndex = findChunkIndexByTime(this.timeline, this.audio.currentTime * 1000);
       this.renderReadingPreview();
+    });
+
+    this.audio.addEventListener("ended", () => {
+      if (!this.chunkPlaybackMode) return;
+      const nextIndex = this.activeChunkIndex + 1;
+      if (nextIndex >= this.timeline.chunks.length) {
+        this.chunkPlaybackMode = false;
+        this.setStatus("Ready");
+        this.renderPlayState();
+        return;
+      }
+      this.releaseChunksBefore(nextIndex);
+      void this.playChunkAtIndex(nextIndex, this.chunkPlaybackSession);
     });
 
     this.audio.addEventListener("play", () => this.renderPlayState());
@@ -637,14 +681,8 @@ export class WebApp {
       this.timeline = result.timeline;
       this.activeChunkIndex = 0;
       this.renderReadingPreview();
-
-      const oldObjectUrl = this.audio.src;
-      this.audio.src = URL.createObjectURL(result.audioBlob);
+      this.resetChunkPlaybackState();
       this.lastSynthText = result.text;
-      if (oldObjectUrl.startsWith("blob:")) {
-        URL.revokeObjectURL(oldObjectUrl);
-      }
-      this.audio.currentTime = 0;
       this.setStatus("Ready");
     } catch (error) {
       this.setStatus(`Pipeline error: ${String(error)}`);
@@ -662,32 +700,109 @@ export class WebApp {
     this.renderReadingPreview();
   }
 
-  private async ensureAudioForCurrentText(): Promise<void> {
+  private async startOrResumePlayback(): Promise<void> {
     const text = this.must<HTMLTextAreaElement>("raw-text").value.trim();
     if (!text) {
       this.setStatus("Enter text first.");
       return;
     }
 
-    const needsSynthesis = !this.audio.src || this.lastSynthText !== text;
-    if (!needsSynthesis) {
+    if (this.chunkPlaybackMode && this.audio.src) {
+      await this.audio.play();
       return;
     }
 
-    this.setStatus("Synthesizing text...");
-    try {
-      const audioBlob = await this.pipeline.synthesizeText(text, this.config);
-      const oldObjectUrl = this.audio.src;
-      this.audio.src = URL.createObjectURL(audioBlob);
-      this.audio.currentTime = 0;
+    if (this.lastSynthText !== text) {
+      this.updateTimelineFromRawText();
+      this.activeChunkIndex = 0;
       this.lastSynthText = text;
-      if (oldObjectUrl.startsWith("blob:")) {
-        URL.revokeObjectURL(oldObjectUrl);
-      }
-      this.setStatus("Ready");
-    } catch (error) {
-      this.setStatus(`TTS error: ${String(error)}`);
+      this.resetChunkPlaybackState();
     }
+
+    if (this.timeline.chunks.length === 0) {
+      this.setStatus("Nothing to read.");
+      return;
+    }
+
+    if (!this.chunkPlaybackMode) {
+      this.chunkPlaybackMode = true;
+      this.chunkPlaybackSession += 1;
+      this.releaseChunksBefore(this.activeChunkIndex);
+    }
+    await this.playChunkAtIndex(this.activeChunkIndex, this.chunkPlaybackSession);
+  }
+
+  private async playChunkAtIndex(index: number, session: number): Promise<void> {
+    const chunk = this.timeline.chunks[index];
+    if (!chunk) return;
+    if (session !== this.chunkPlaybackSession) return;
+
+    this.activeChunkIndex = chunk.index;
+    this.renderReadingPreview();
+    this.scheduleWindowPrefetch(session);
+    this.setStatus(`Buffering chunk ${chunk.index + 1}/${this.timeline.chunks.length}...`);
+
+    try {
+      const audioUrl = await this.getChunkAudioUrl(chunk.index, session);
+      if (session !== this.chunkPlaybackSession) return;
+      this.audio.src = audioUrl;
+      this.audio.currentTime = 0;
+      await this.audio.play();
+      this.setStatus(`Playing chunk ${chunk.index + 1}/${this.timeline.chunks.length}`);
+      this.scheduleWindowPrefetch(session);
+    } catch (error) {
+      if (session !== this.chunkPlaybackSession) return;
+      const nextIndex = this.activeChunkIndex + 1;
+      if (nextIndex < this.timeline.chunks.length) {
+        this.setStatus(`Skipping chunk ${this.activeChunkIndex + 1}: ${String(error)}`);
+        await this.playChunkAtIndex(nextIndex, session);
+        return;
+      }
+      this.chunkPlaybackMode = false;
+      this.setStatus("Ready");
+    }
+  }
+
+  private async getChunkAudioUrl(index: number, session: number): Promise<string> {
+    const cached = this.chunkAudioUrls.get(index);
+    if (cached) return cached;
+    const inflight = this.chunkInFlight.get(index);
+    if (inflight) return inflight;
+    const chunk = this.timeline.chunks[index];
+    if (!chunk) throw new Error("Invalid chunk index");
+    const controller = new AbortController();
+    this.chunkAbortControllers.set(index, controller);
+    const requestPromise = this.synthesizeChunkWithRetry(index, chunk.text, session, controller.signal)
+      .then((audioBlob) => {
+        if (session !== this.chunkPlaybackSession) {
+          throw new Error("Cancelled");
+        }
+        const url = URL.createObjectURL(audioBlob);
+        this.chunkAudioUrls.set(index, url);
+        return url;
+      })
+      .finally(() => {
+        this.chunkInFlight.delete(index);
+        this.chunkAbortControllers.delete(index);
+      });
+    this.chunkInFlight.set(index, requestPromise);
+    return requestPromise;
+  }
+
+  private resetChunkPlaybackState(): void {
+    this.chunkPlaybackMode = false;
+    this.chunkPlaybackSession += 1;
+    this.audio.pause();
+    this.audio.src = "";
+    this.chunkAbortControllers.forEach((controller) => controller.abort());
+    this.chunkAbortControllers.clear();
+    this.chunkInFlight.clear();
+    this.chunkAudioUrls.forEach((url) => {
+      if (url.startsWith("blob:")) {
+        URL.revokeObjectURL(url);
+      }
+    });
+    this.chunkAudioUrls.clear();
   }
 
   private renderReadingPreview(): void {
@@ -709,9 +824,85 @@ export class WebApp {
   private seekChunk(index: number): void {
     const chunk = this.timeline.chunks[index];
     if (!chunk) return;
-    this.audio.currentTime = chunk.startMs / 1000;
     this.activeChunkIndex = chunk.index;
     this.renderReadingPreview();
+    if (!this.chunkPlaybackMode) return;
+    this.restartPlaybackFromIndex(chunk.index);
+  }
+
+  private restartPlaybackFromIndex(index: number): void {
+    const wasPlaying = !this.audio.paused;
+    this.chunkPlaybackSession += 1;
+    this.chunkAbortControllers.forEach((controller) => controller.abort());
+    this.chunkAbortControllers.clear();
+    this.chunkInFlight.clear();
+    this.releaseChunksBefore(index);
+    this.activeChunkIndex = Math.max(0, Math.min(index, this.timeline.chunks.length - 1));
+    if (!this.timeline.chunks[this.activeChunkIndex]) {
+      this.chunkPlaybackMode = false;
+      this.setStatus("Nothing to read.");
+      return;
+    }
+    this.chunkPlaybackMode = true;
+    if (wasPlaying) {
+      void this.playChunkAtIndex(this.activeChunkIndex, this.chunkPlaybackSession);
+    } else {
+      this.setStatus(`Ready at chunk ${this.activeChunkIndex + 1}/${this.timeline.chunks.length}`);
+    }
+  }
+
+  private releaseChunksBefore(index: number): void {
+    this.chunkAudioUrls.forEach((url, key) => {
+      if (key < index && url.startsWith("blob:")) {
+        URL.revokeObjectURL(url);
+        this.chunkAudioUrls.delete(key);
+      }
+    });
+  }
+
+  private scheduleWindowPrefetch(session: number): void {
+    if (session !== this.chunkPlaybackSession) return;
+    const windowSize = Math.max(1, this.config.reading.streamWindowSize);
+    const maxInFlight = Math.max(1, this.config.reading.chunkRequestConcurrency);
+    const start = this.activeChunkIndex;
+    const end = Math.min(this.timeline.chunks.length - 1, start + windowSize);
+
+    for (let idx = start; idx <= end; idx += 1) {
+      if (this.chunkAudioUrls.has(idx) || this.chunkInFlight.has(idx)) {
+        continue;
+      }
+      if (this.chunkInFlight.size >= maxInFlight) {
+        break;
+      }
+      void this.getChunkAudioUrl(idx, session).catch(() => {
+        // Playback path handles retries/errors; prefetch is best effort.
+      });
+    }
+  }
+
+  private async synthesizeChunkWithRetry(index: number, text: string, session: number, signal: AbortSignal): Promise<Blob> {
+    const retries = Math.max(0, this.config.reading.chunkRetryCount);
+    const maxAttempts = retries + 1;
+    let lastError: unknown = new Error("Unknown TTS failure");
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      if (session !== this.chunkPlaybackSession || signal.aborted) {
+        throw new Error("Cancelled");
+      }
+      try {
+        return await this.pipeline.synthesizeText(text, this.config, {
+          signal,
+          timeoutMs: this.config.reading.chunkTimeoutMs
+        });
+      } catch (error) {
+        lastError = error;
+        if (attempt < maxAttempts) {
+          this.setStatus(`Retrying chunk ${index + 1}/${this.timeline.chunks.length} (${attempt}/${retries})...`);
+          continue;
+        }
+      }
+    }
+    throw lastError;
   }
 
   private renderPlayState(): void {

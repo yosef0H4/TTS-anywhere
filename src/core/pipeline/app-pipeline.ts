@@ -5,7 +5,6 @@ import { OpenAiCompatibleLlmService, OpenAiCompatibleTtsService } from "../servi
 export interface PipelineResult {
   text: string;
   timeline: ReadingTimeline;
-  audioBlob: Blob;
 }
 
 export class AppPipeline {
@@ -22,12 +21,11 @@ export class AppPipeline {
       config.reading.maxWordsPerChunk,
       config.reading.wpmBase
     );
-    const tts = await this.tts.synthesize(ocr.text, config.tts);
-    return { text: ocr.text, timeline, audioBlob: tts.audioBlob };
+    return { text: ocr.text, timeline };
   }
 
-  async synthesizeText(text: string, config: AppConfig): Promise<Blob> {
-    const tts = await this.tts.synthesize(text, config.tts);
+  async synthesizeText(text: string, config: AppConfig, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<Blob> {
+    const tts = await this.tts.synthesize(text, config.tts, options);
     return tts.audioBlob;
   }
 }

@@ -19,6 +19,10 @@ export interface ReadingConfig {
   maxWordsPerChunk: number;
   wpmBase: number;
   punctuationPauseMode: "off" | "low" | "medium" | "high";
+  streamWindowSize: number;
+  chunkRequestConcurrency: number;
+  chunkRetryCount: number;
+  chunkTimeoutMs: number;
 }
 
 export interface UiConfig {
