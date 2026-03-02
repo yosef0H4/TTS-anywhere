@@ -266,27 +266,44 @@ class PiperRuntime:
         if self.settings.piper_speaker is not None:
             cmd.extend(["--speaker", str(self.settings.piper_speaker)])
 
-        completed = subprocess.run(
-            cmd,
-            input=text,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
+        try:
+            completed = subprocess.run(
+                cmd,
+                input=text.encode("utf-8"),
+                text=False,
+                capture_output=True,
+                check=False,
+            )
+        except OSError as error:
+            out_path.unlink(missing_ok=True)
+            logger.error("Piper process launch failed: %s", error)
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": {
+                        "message": f"Piper launch failed: {error}",
+                        "type": "server_error",
+                        "code": "piper_launch_failed",
+                    }
+                },
+            ) from error
+
+        stderr_text = completed.stderr.decode("utf-8", errors="replace").strip()
+        stdout_text = completed.stdout.decode("utf-8", errors="replace").strip()
         if completed.returncode != 0:
             out_path.unlink(missing_ok=True)
             logger.error(
                 "Piper synthesis failed model='%s' code=%d stderr=%s stdout=%s",
                 effective_model,
                 completed.returncode,
-                completed.stderr.strip(),
-                completed.stdout.strip(),
+                stderr_text,
+                stdout_text,
             )
             raise HTTPException(
                 status_code=500,
                 detail={
                     "error": {
-                        "message": f"Piper failed: {completed.stderr.strip() or completed.stdout.strip()}",
+                        "message": f"Piper failed: {stderr_text or stdout_text}",
                         "type": "server_error",
                         "code": "piper_failed",
                     }

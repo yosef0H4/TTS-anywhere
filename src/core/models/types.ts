@@ -19,10 +19,16 @@ export interface ReadingConfig {
   wpmBase: number;
 }
 
+export interface UiConfig {
+  volume: number;
+  playbackRate: number;
+}
+
 export interface AppConfig {
   llm: LlmConfig;
   tts: TtsConfig;
   reading: ReadingConfig;
+  ui: UiConfig;
 }
 
 export interface Chunk {

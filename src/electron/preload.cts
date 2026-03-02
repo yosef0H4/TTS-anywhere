@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   closeWindow: () => {
     ipcRenderer.send("window:close");
   },
+  getPinState: () => {
+    return ipcRenderer.invoke("window:get-pin") as Promise<boolean>;
+  },
   togglePinWindow: () => {
     return ipcRenderer.invoke("window:toggle-pin") as Promise<boolean>;
   }

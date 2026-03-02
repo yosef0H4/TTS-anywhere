@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 
 import edge_tts
+from edge_tts.exceptions import NoAudioReceived
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -12,6 +13,7 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger("tts_edge_adapter")
+EDGE_MODEL_ID = "edge"
 
 
 class Settings(BaseSettings):
@@ -81,8 +83,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/v1/models")
     async def models(_: None = Depends(auth)) -> dict:
         logger.info("Listing models")
-        voices = await runtime.list_voices()
-        data = [{"id": name, "object": "model", "owned_by": "edge-tts"} for name in voices]
+        data = [{"id": EDGE_MODEL_ID, "object": "model", "owned_by": "edge"}]
         return {"object": "list", "data": data}
 
     @app.get("/v1/voices")
@@ -105,8 +106,66 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             request.response_format,
             request.speed,
         )
-        voice = request.voice or request.model or cfg.edge_default_voice
-        out = await runtime.synth_to_mp3(request.input.strip(), voice)
+        if request.model and request.model != EDGE_MODEL_ID:
+            logger.warning("Received unknown model '%s'; expected '%s'. Continuing with Edge TTS voice.", request.model, EDGE_MODEL_ID)
+        text = request.input.strip()
+        if not text:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "message": "Input text is empty",
+                        "type": "invalid_request_error",
+                        "code": "empty_input",
+                    }
+                },
+            )
+
+        voice = (request.voice or cfg.edge_default_voice).strip()
+        available_voices = await runtime.list_voices()
+        if voice not in available_voices:
+            fallback = cfg.edge_default_voice if cfg.edge_default_voice in available_voices else (available_voices[0] if available_voices else "")
+            if not fallback:
+                raise HTTPException(
+                    status_code=500,
+                    detail={
+                        "error": {
+                            "message": "No voices available from edge-tts",
+                            "type": "server_error",
+                            "code": "no_voices_available",
+                        }
+                    },
+                )
+            logger.warning("Requested voice '%s' is unavailable; falling back to '%s'", voice, fallback)
+            voice = fallback
+
+        try:
+            out = await runtime.synth_to_mp3(text, voice)
+        except NoAudioReceived as error:
+            logger.error("edge-tts returned no audio for voice='%s': %s", voice, error)
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "message": f"No audio received from edge-tts for voice '{voice}'",
+                        "type": "invalid_request_error",
+                        "code": "no_audio_received",
+                    }
+                },
+            ) from error
+        except Exception as error:
+            logger.exception("edge-tts synthesis failed for voice='%s'", voice)
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": {
+                        "message": f"edge-tts synthesis failed: {error}",
+                        "type": "server_error",
+                        "code": "edge_tts_failed",
+                    }
+                },
+            ) from error
+
         return FileResponse(path=out, media_type="audio/mpeg", filename="speech.mp3")
 
     @app.get("/healthz")

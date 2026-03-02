@@ -18,5 +18,9 @@ export const DEFAULT_CONFIG: AppConfig = {
   reading: {
     chunkSize: 5,
     wpmBase: 180
+  },
+  ui: {
+    volume: 80,
+    playbackRate: 1
   }
 };

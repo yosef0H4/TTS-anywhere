@@ -292,7 +292,14 @@ export class WebApp {
       window.electronAPI?.closeWindow();
     });
 
-    pinButton.classList.add("active-pin");
+    void window.electronAPI?.getPinState().then((pinned) => {
+      if (pinned) {
+        pinButton.classList.add("active-pin");
+      } else {
+        pinButton.classList.remove("active-pin");
+      }
+    });
+
     pinButton.addEventListener("click", async () => {
       const pinned = await window.electronAPI?.togglePinWindow();
       if (pinned) {
@@ -341,6 +348,10 @@ export class WebApp {
     this.must<HTMLInputElement>("tts-key").value = this.config.tts.apiKey;
     this.must<HTMLInputElement>("chunk-size").value = String(this.config.reading.chunkSize);
     this.must<HTMLInputElement>("wpm").value = String(this.config.reading.wpmBase);
+    this.must<HTMLInputElement>("vol-slider").value = String(this.config.ui.volume);
+    this.must<HTMLInputElement>("speed-slider").value = String(this.config.ui.playbackRate);
+    this.audio.volume = Math.max(0, Math.min(1, this.config.ui.volume / 100));
+    this.audio.playbackRate = this.config.ui.playbackRate;
 
     this.applyOptions(this.llmModelSelect, [{ value: this.config.llm.model, label: this.config.llm.model }], this.config.llm.model);
     this.applyOptions(this.ttsModelSelect, [{ value: this.config.tts.model, label: this.config.tts.model }], this.config.tts.model);
@@ -399,11 +410,15 @@ export class WebApp {
     this.must<HTMLInputElement>("vol-slider").addEventListener("input", (event) => {
       const value = Number((event.currentTarget as HTMLInputElement).value);
       this.audio.volume = value / 100;
+      this.config.ui.volume = value;
+      this.store.save(this.config);
     });
 
     this.must<HTMLInputElement>("speed-slider").addEventListener("input", (event) => {
       const value = Number((event.currentTarget as HTMLInputElement).value);
       this.audio.playbackRate = value;
+      this.config.ui.playbackRate = value;
+      this.store.save(this.config);
     });
 
     this.must<HTMLButtonElement>("btn-play").addEventListener("click", async () => {

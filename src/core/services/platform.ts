@@ -7,6 +7,7 @@ export interface ElectronApi {
   minimizeWindow: () => void;
   toggleMaximizeWindow: () => Promise<boolean>;
   closeWindow: () => void;
+  getPinState: () => Promise<boolean>;
   togglePinWindow: () => Promise<boolean>;
 }
 

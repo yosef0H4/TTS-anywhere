@@ -12,7 +12,8 @@ export class SettingsStore {
       return {
         llm: { ...DEFAULT_CONFIG.llm, ...parsed.llm },
         tts: { ...DEFAULT_CONFIG.tts, ...parsed.tts },
-        reading: { ...DEFAULT_CONFIG.reading, ...parsed.reading }
+        reading: { ...DEFAULT_CONFIG.reading, ...parsed.reading },
+        ui: { ...DEFAULT_CONFIG.ui, ...parsed.ui }
       };
     } catch {
       return DEFAULT_CONFIG;
