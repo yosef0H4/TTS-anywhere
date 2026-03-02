@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TTS Snipper - Final Build</title>
+    <!-- Fonts: DM Sans for UI, Lora for Reading -->
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+    <style>
+        /* =========================================
+           GLOBAL & RESET
+           ========================================= */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body, html { width: 100%; height: 100%; overflow: hidden; font-family: 'DM Sans', sans-serif; background: #000; }
+        
+        #desktop { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; position: relative; }
+
+        /* =========================================
+           THE APP CONTAINER
+           ========================================= */
+        #app {
+            width: 950px; height: 600px; position: relative;
+            background: #fff0f5; /* Lavender Blush base */
+            border-radius: 12px;
+            box-shadow: 0 25px 80px rgba(0,0,0,0.5);
+            overflow: hidden; /* Contains the blurry background */
+            display: flex;
+            color: #831843;
+        }
+
+        /* The Blurry Dot Background */
+        .bg-layer {
+            position: absolute; inset: 0; z-index: 0; pointer-events: none;
+            background-image: radial-gradient(#db2777 1.5px, transparent 1.5px);
+            background-size: 24px 24px;
+            opacity: 0.12; 
+            filter: blur(1px); /* Soft focus as requested */
+        }
+
+        /* =========================================
+           THE SIDEBAR (Visuals of 1, Logic of 2)
+           ========================================= */
+        .sidebar {
+            position: absolute; left: 0; top: 0; bottom: 0; z-index: 20;
+            width: 68px; /* Collapsed width */
+            background: #fff;
+            border-right: 1px solid #f9a8d4;
+            display: flex; flex-direction: column; align-items: flex-start;
+            padding: 30px 0;
+            overflow: hidden;
+            /* The "Pop" Animation */
+            transition: width 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.1); 
+            box-shadow: 4px 0 20px rgba(219, 39, 119, 0.05);
+        }
+
+        /* Hover Interaction */
+        .sidebar:hover {
+            width: 300px; /* Expanded width */
+            box-shadow: 10px 0 40px rgba(219, 39, 119, 0.15);
+        }
+
+        .sidebar-icon-area {
+            width: 68px; height: 40px; display: flex; justify-content: center; align-items: center;
+            flex-shrink: 0; color: #db2777;
+        }
+
+        /* Settings Content (Hidden until hover) */
+        .settings-content {
+            opacity: 0; width: 230px; margin-left: 68px;
+            display: flex; flex-direction: column; gap: 25px; margin-top: 10px;
+            transition: opacity 0.2s ease;
+            position: absolute; top: 80px;
+        }
+        .sidebar:hover .settings-content { opacity: 1; transition-delay: 0.15s; }
+
+        .setting-group { display: flex; flex-direction: column; gap: 8px; }
+        .setting-group label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #be185d; }
+        .setting-group input { 
+            padding: 12px; border-radius: 6px; border: 1px solid #fbcfe8; 
+            font-family: 'DM Sans'; font-size: 14px; color: #831843; background: #fff0f5; outline: none;
+            width: 100%; transition: 0.2s;
+        }
+        .setting-group input:focus { border-color: #db2777; background: #fff; box-shadow: 0 0 0 3px rgba(219, 39, 119, 0.1); }
+
+        /* The Arrow Toggle (Visual cue only, since hover works) */
+        .sidebar-toggle {
+            margin-top: auto; margin-left: 17px; /* Centered in collapsed state */
+            width: 34px; height: 34px; border-radius: 50%;
+            background: #fce7f3; color: #db2777; border: 1px solid #fbcfe8;
+            display: flex; justify-content: center; align-items: center;
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), background 0.2s;
+        }
+        .sidebar:hover .sidebar-toggle { transform: rotate(180deg); background: #db2777; color: #fff; border-color: #db2777; }
+
+        /* =========================================
+           MAIN CONTENT AREA
+           ========================================= */
+        .main-content {
+            flex: 1; margin-left: 68px; /* Offset by collapsed sidebar width */
+            padding: 40px; display: flex; flex-direction: column; position: relative; z-index: 1;
+            gap: 25px;
+        }
+
+        .cards-container { display: flex; gap: 25px; flex: 1; min-height: 0; }
+
+        /* The Cards (Sharp Journal Style) */
+        .card {
+            background: #fff; border: 1px solid #f9a8d4; border-radius: 12px;
+            box-shadow: 0 4px 0 #fce7f3; /* The "Pop" shadow */
+            padding: 20px; display: flex; flex-direction: column;
+        }
+
+        .image-card { width: 35%; padding: 12px; align-items: center; justify-content: center; }
+        .text-card { flex: 1; gap: 15px; }
+
+        /* Reading Preview Typography */
+        textarea { width: 100%; resize: none; border: none; outline: none; font-family: 'DM Sans', sans-serif; font-size: 15px; color: #831843; line-height: 1.6; }
+        
+        .reading-preview { font-family: 'Lora', serif; font-size: 17px; line-height: 1.8; color: #500724; overflow-y: auto; flex: 1; }
+        
+        /* Interactive Highlight Logic */
+        .reading-preview span { 
+            transition: all 0.15s; cursor: pointer; border-radius: 4px; padding: 2px 4px; margin: 0 1px; display: inline-block; 
+        }
+        .reading-preview span:hover { background: #fce7f3; transform: translateY(-1px); }
+        .reading-preview span.active-chunk { 
+            background: #db2777; color: #fff; 
+            box-shadow: 0 4px 10px rgba(219, 39, 119, 0.3);
+        }
+
+        /* =========================================
+           CONTROLS BAR
+           ========================================= */
+        .controls-bar {
+            background: #fff; border: 1px solid #f9a8d4; border-radius: 60px; padding: 12px 35px;
+            display: flex; justify-content: space-between; align-items: center;
+            box-shadow: 0 4px 0 #fce7f3;
+        }
+
+        .btn-group { display: flex; gap: 15px; align-items: center; }
+        
+        /* Buttons */
+        button {
+            width: 42px; height: 42px; border-radius: 50%; border: 1px solid #fbcfe8; background: #fff;
+            color: #db2777; cursor: pointer; display: flex; justify-content: center; align-items: center;
+            transition: transform 0.1s, background 0.2s;
+        }
+        button:hover { background: #fff0f5; }
+        button:active { transform: translateY(2px); box-shadow: inset 0 2px 4px rgba(0,0,0,0.05); }
+        
+        button.play-btn { background: #db2777; color: #fff; border: none; width: 54px; height: 54px; box-shadow: 0 4px 10px rgba(219, 39, 119, 0.3); }
+        button.play-btn:hover { background: #be185d; }
+
+        /* Sliders */
+        .slider-group { display: flex; gap: 25px; align-items: center; }
+        .slider-wrap { display: flex; align-items: center; gap: 10px; }
+        
+        input[type="range"] { -webkit-appearance: none; appearance: none; background: transparent; cursor: pointer; width: 100px; }
+        input[type="range"]::-webkit-slider-track { height: 6px; background: #fbcfe8; border-radius: 3px; }
+        input[type="range"]::-webkit-slider-thumb { 
+            -webkit-appearance: none; height: 16px; width: 16px; background: #db2777; 
+            border: 2px solid #fff; border-radius: 50%; margin-top: -5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); 
+        }
+
+        /* SVG Icons */
+        .icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; display: block; }
+        .icon-fill { fill: currentColor; stroke: none; }
+        .icon-lg { width: 24px; height: 24px; }
+        img.snippet { display: block; width: 100%; height: 100%; object-fit: contain; background: #000; border-radius: 6px; }
+
+    </style>
+</head>
+<body>
+
+    <!-- ICONS -->
+    <svg style="display: none;">
+        <symbol id="icon-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"></polygon></symbol>
+        <symbol id="icon-pause" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></symbol>
+        <symbol id="icon-next" viewBox="0 0 24 24"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></symbol>
+        <symbol id="icon-prev" viewBox="0 0 24 24"><polygon points="19 20 9 12 19 4 19 20"></polygon><line x1="5" y1="19" x2="5" y2="5"></line></symbol>
+        <symbol id="icon-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></symbol>
+        <symbol id="icon-vol" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></symbol>
+        <symbol id="icon-speed" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></symbol>
+        <symbol id="icon-arrow" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"></polyline></symbol>
+    </svg>
+
+    <div id="desktop">
+        
+        <div id="app">
+            <!-- Blurry Background Layer -->
+            <div class="bg-layer"></div>
+
+            <!-- Sidebar (Hover to Expand) -->
+            <div class="sidebar">
+                <div class="sidebar-icon-area">
+                    <svg class="icon"><use href="#icon-settings"></use></svg>
+                </div>
+
+                <div class="settings-content">
+                    <div class="setting-group">
+                        <label>OpenAI API Key</label>
+                        <input type="password" value="sk-pro-key-12345...">
+                    </div>
+                    <div class="setting-group">
+                        <label>Voice Model</label>
+                        <input type="text" value="Alloy" readonly style="cursor: pointer;">
+                    </div>
+                    <div class="setting-group">
+                        <label>Chunk Size</label>
+                        <input type="number" id="chunk-size" value="5" onchange="updateChunks()">
+                    </div>
+                </div>
+
+                <div class="sidebar-toggle">
+                    <svg class="icon"><use href="#icon-arrow"></use></svg>
+                </div>
+            </div>
+
+            <!-- Main Content -->
+            <div class="main-content">
+                <div class="cards-container">
+                    <!-- Image Card -->
+                    <div class="card image-card">
+                        <img class="snippet" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='900' height='500' viewBox='0 0 900 500'><rect width='900' height='500' fill='%23000000'/><rect x='48' y='120' width='804' height='250' fill='%23000000' stroke='%23ffffff' stroke-width='8'/><text x='78' y='190' fill='%23ffffff' font-family='monospace' font-size='48'>* You feel like you're going to</text><text x='118' y='250' fill='%23ffffff' font-family='monospace' font-size='48'>have a bad time.</text></svg>">
+                    </div>
+
+                    <!-- Text Card -->
+                    <div class="card text-card">
+                        <textarea id="raw-text" oninput="updateChunks()">This is the final design. It combines the structure of the "Push" layout (sharp borders, clean white cards) with the logic of the "Hover" sidebar (smooth expansion without squishing content). The background is a subtle, blurry pink dot grid. The text highlight is sharp and vibrant. Click any word below to jump!</textarea>
+                        
+                        <div style="height: 1px; background: #fce7f3; width: 100%;"></div>
+                        
+                        <div class="reading-preview" id="preview-box">
+                            <!-- JS will inject spans here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Controls -->
+                <div class="controls-bar">
+                    <div class="btn-group">
+                        <button onclick="prevChunk()"><svg class="icon icon-fill"><use href="#icon-prev"></use></svg></button>
+                        <button class="play-btn" id="btn-play" onclick="togglePlay()"><svg class="icon icon-fill icon-lg"><use href="#icon-play"></use></svg></button>
+                        <button onclick="nextChunk()"><svg class="icon icon-fill"><use href="#icon-next"></use></svg></button>
+                    </div>
+
+                    <div class="slider-group">
+                        <div class="slider-wrap">
+                            <svg class="icon" style="color: #db2777;"><use href="#icon-vol"></use></svg>
+                            <input type="range" min="0" max="100" value="80">
+                        </div>
+                        <div class="slider-wrap">
+                            <svg class="icon" style="color: #db2777;"><use href="#icon-speed"></use></svg>
+                            <input type="range" id="speed-dial" min="0.5" max="2" step="0.1" value="1">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- LOGIC -->
+    <script>
+        let chunks =[];
+        let currentChunkIndex = 0;
+        let isPlaying = false;
+        let playInterval = null;
+
+        const rawTextEl = document.getElementById('raw-text');
+        const previewBox = document.getElementById('preview-box');
+        const chunkSizeEl = document.getElementById('chunk-size');
+        const btnPlay = document.getElementById('btn-play');
+        const speedDial = document.getElementById('speed-dial');
+
+        function updateChunks() {
+            const text = rawTextEl.value.trim();
+            const words = text.split(/\s+/).filter(w => w.length > 0);
+            const size = parseInt(chunkSizeEl.value) || 5;
+            
+            chunks =[];
+            for (let i = 0; i < words.length; i += size) {
+                chunks.push(words.slice(i, i + size).join(" "));
+            }
+            if(currentChunkIndex >= chunks.length) currentChunkIndex = 0;
+            renderPreview();
+        }
+
+        function renderPreview() {
+            previewBox.innerHTML = '';
+            chunks.forEach((chunkText, index) => {
+                const span = document.createElement('span');
+                span.innerText = chunkText;
+                span.id = `chunk-${index}`;
+                
+                // CLICK TO JUMP LOGIC
+                span.onclick = () => {
+                    currentChunkIndex = index;
+                    if (isPlaying) {
+                        stopPlaying();
+                        highlightCurrentChunk();
+                        startPlaying();
+                    } else {
+                        highlightCurrentChunk();
+                    }
+                };
+                
+                previewBox.appendChild(span);
+                previewBox.appendChild(document.createTextNode(" "));
+            });
+            highlightCurrentChunk();
+        }
+
+        function highlightCurrentChunk() {
+            document.querySelectorAll('.reading-preview span').forEach(el => el.classList.remove('active-chunk'));
+            if (chunks.length > 0 && currentChunkIndex < chunks.length) {
+                const activeSpan = document.getElementById(`chunk-${currentChunkIndex}`);
+                if (activeSpan) {
+                    activeSpan.classList.add('active-chunk');
+                    activeSpan.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                }
+            } else if (currentChunkIndex >= chunks.length && isPlaying) {
+                stopPlaying();
+            }
+        }
+
+        function togglePlay() { isPlaying ? stopPlaying() : startPlaying(); }
+
+        function startPlaying() {
+            if (chunks.length === 0) return;
+            if (currentChunkIndex >= chunks.length) currentChunkIndex = 0;
+            isPlaying = true;
+            btnPlay.innerHTML = `<svg class="icon icon-fill icon-lg"><use href="#icon-pause"></use></svg>`;
+            highlightCurrentChunk();
+
+            const step = () => {
+                const wordsInChunk = chunks[currentChunkIndex] ? chunks[currentChunkIndex].split(" ").length : parseInt(chunkSizeEl.value);
+                const delay = (wordsInChunk * 300) / parseFloat(speedDial.value);
+                playInterval = setTimeout(() => {
+                    currentChunkIndex++;
+                    if (currentChunkIndex >= chunks.length) stopPlaying();
+                    else { highlightCurrentChunk(); step(); }
+                }, delay);
+            };
+            step();
+        }
+
+        function stopPlaying() {
+            isPlaying = false;
+            btnPlay.innerHTML = `<svg class="icon icon-fill icon-lg"><use href="#icon-play"></use></svg>`;
+            clearTimeout(playInterval);
+        }
+
+        function nextChunk() { if (currentChunkIndex < chunks.length - 1) { currentChunkIndex++; highlightCurrentChunk(); } }
+        function prevChunk() { if (currentChunkIndex > 0) { currentChunkIndex--; highlightCurrentChunk(); } }
+
+        window.onload = updateChunks;
+    </script>
+</body>
+</html>
