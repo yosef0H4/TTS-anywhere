@@ -2,6 +2,11 @@ node_modules/
 dist/
 dist-electron/
 services/tts-adapter/.venv/
+services/tts-adapter/.mypy_cache/
+services/tts-adapter/.pytest_cache/
+services/tts-adapter/.ruff_cache/
+services/tts-adapter/**/__pycache__/
+services/tts-adapter/**/*.pyc
 *.log
 .DS_Store
 .vscode/
