@@ -444,7 +444,7 @@ export class WebApp {
   }
 
   private async runPipeline(dataUrl: string): Promise<void> {
-    this.must<HTMLImageElement>("preview-img").src = dataUrl;
+    this.setPreviewImage(dataUrl);
     this.setStatus("Running OCR + TTS...");
 
     try {
@@ -548,6 +548,14 @@ export class WebApp {
       return this.fileToDataUrl(blob);
     }
     return null;
+  }
+
+  private setPreviewImage(dataUrl: string): void {
+    const image = this.must<HTMLImageElement>("preview-img");
+    const emptyState = this.must<HTMLDivElement>("image-empty");
+    image.src = dataUrl;
+    image.classList.remove("hidden");
+    emptyState.classList.add("hidden");
   }
 
   private fileToDataUrl(file: Blob): Promise<string> {

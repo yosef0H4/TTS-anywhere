@@ -50,6 +50,24 @@ html, body { width: 100%; height: 100%; overflow: hidden; font-family: "DM Sans"
 .image-card { width: 35%; display: flex; align-items: center; justify-content: center; }
 .text-card { flex: 1; display: flex; flex-direction: column; gap: 10px; }
 .snippet { width: 100%; height: 100%; object-fit: contain; background: #000; border-radius: 8px; }
+.snippet.hidden { display: none; }
+.image-empty {
+  width: 100%;
+  height: 100%;
+  min-height: 220px;
+  border: 1px dashed #f3b3d4;
+  border-radius: 8px;
+  background: #fff8fc;
+  color: #b34b7f;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.image-empty .ui-icon { width: 20px; height: 20px; }
+.image-empty.hidden { display: none; }
 #raw-text { width: 100%; min-height: 100px; border: none; outline: none; resize: vertical; font-size: 15px; color: #831843; }
 .divider { height: 1px; background: #fce7f3; }
 .reading-preview { flex: 1; overflow: auto; font-family: "Lora", serif; line-height: 1.8; }

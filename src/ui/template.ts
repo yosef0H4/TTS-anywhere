@@ -53,7 +53,13 @@ export const APP_TEMPLATE = `
         <span id="status-text"></span>
       </div>
       <div class="cards-container">
-        <div class="card image-card"><img id="preview-img" class="snippet" alt="Capture"></div>
+        <div class="card image-card">
+          <div id="image-empty" class="image-empty">
+            <i data-lucide="image-plus" class="ui-icon"></i>
+            <span>No capture yet</span>
+          </div>
+          <img id="preview-img" class="snippet hidden" alt="Capture">
+        </div>
         <div class="card text-card">
           <textarea id="raw-text" placeholder="Text will appear here..."></textarea>
           <div class="divider"></div>
