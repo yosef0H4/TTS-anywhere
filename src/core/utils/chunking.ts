@@ -4,20 +4,79 @@ export function normalizeText(input: string): string {
   return input.replace(/\s+/g, " ").trim();
 }
 
-export function splitIntoChunks(text: string, chunkSize: number): string[] {
-  const normalized = normalizeText(text);
-  if (!normalized) return [];
-  const safeChunkSize = Math.max(1, Math.floor(chunkSize));
-  const words = normalized.split(" ");
-  const out: string[] = [];
-  for (let i = 0; i < words.length; i += safeChunkSize) {
-    out.push(words.slice(i, i + safeChunkSize).join(" "));
-  }
-  return out;
+function countWords(text: string): number {
+  return normalizeText(text).split(" ").filter(Boolean).length;
 }
 
-export function buildReadingTimeline(text: string, chunkSize: number, wpm: number): ReadingTimeline {
-  const chunksText = splitIntoChunks(text, chunkSize);
+function splitSentenceLikeUnits(text: string): string[] {
+  const prepared = text.replace(/\r\n/g, "\n");
+  return prepared
+    .split(/(?<=[.!?,،؛:؟])\s+|\n+/u)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function rebalanceUnits(units: string[], maxWordsPerChunk: number, minWordsPerChunk: number): string[] {
+  const queue = [...units];
+  const rebalanced: string[] = [];
+
+  let i = 0;
+  while (i < queue.length) {
+    let current = normalizeText(queue[i] ?? "");
+    if (!current) {
+      i += 1;
+      continue;
+    }
+
+    let wordCount = countWords(current);
+
+    if (wordCount > maxWordsPerChunk) {
+      const words = current.split(" ");
+      for (let start = 0; start < words.length; start += maxWordsPerChunk) {
+        rebalanced.push(words.slice(start, start + maxWordsPerChunk).join(" "));
+      }
+      i += 1;
+      continue;
+    }
+
+    while (wordCount < minWordsPerChunk && i + 1 < queue.length) {
+      const next = normalizeText(queue[i + 1] ?? "");
+      if (!next) {
+        i += 1;
+        continue;
+      }
+      const merged = `${current} ${next}`.trim();
+      const mergedCount = countWords(merged);
+      if (mergedCount > maxWordsPerChunk) {
+        break;
+      }
+      current = merged;
+      wordCount = mergedCount;
+      i += 1;
+    }
+
+    rebalanced.push(current);
+    i += 1;
+  }
+
+  return rebalanced;
+}
+
+export function splitIntoChunks(text: string, minWordsPerChunk: number, maxWordsPerChunk: number): string[] {
+  if (!normalizeText(text)) return [];
+  const safeMinWords = Math.max(1, Math.floor(minWordsPerChunk));
+  const safeMaxWords = Math.max(safeMinWords, Math.floor(maxWordsPerChunk));
+  const sentenceUnits = splitSentenceLikeUnits(text);
+  return rebalanceUnits(sentenceUnits, safeMaxWords, safeMinWords);
+}
+
+export function buildReadingTimeline(
+  text: string,
+  minWordsPerChunk: number,
+  maxWordsPerChunk: number,
+  wpm: number
+): ReadingTimeline {
+  const chunksText = splitIntoChunks(text, minWordsPerChunk, maxWordsPerChunk);
   const safeWpm = Math.max(1, wpm);
   const msPerWord = 60000 / safeWpm;
 

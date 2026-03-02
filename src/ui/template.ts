@@ -47,7 +47,8 @@ export const APP_TEMPLATE = `
             <button id="tts-voice-refetch" class="refetch-btn" type="button" title="Refetch TTS voices"><i data-lucide="refresh-cw" class="ui-icon"></i></button>
           </div>
         </div>
-        <div class="setting-group"><label>Chunk Size</label><input type="number" id="chunk-size" min="1"></div>
+        <div class="setting-group"><label>Min Words / Chunk</label><input type="number" id="chunk-min" min="1"></div>
+        <div class="setting-group"><label>Max Words / Chunk</label><input type="number" id="chunk-max" min="1"></div>
         <div class="setting-group"><label>WPM</label><input type="number" id="wpm" min="1"></div>
       </div>
       <div class="sidebar-toggle">›</div>
@@ -80,8 +81,8 @@ export const APP_TEMPLATE = `
           <button id="btn-next" title="Next chunk"><i data-lucide="skip-forward" class="ui-icon"></i></button>
         </div>
         <div class="slider-group">
-          <div class="slider-wrap"><i data-lucide="volume-2" class="ui-icon"></i><input type="range" id="vol-slider" min="0" max="100" value="80"></div>
-          <div class="slider-wrap"><i data-lucide="timer" class="ui-icon"></i><input type="range" id="speed-slider" min="0.5" max="2" step="0.1" value="1"></div>
+          <div class="slider-wrap"><i data-lucide="volume-2" class="ui-icon"></i><input type="range" id="vol-slider" min="0" max="100" value="80"><input type="number" id="vol-input" class="slider-number-input" min="0" max="100"></div>
+          <div class="slider-wrap"><i data-lucide="timer" class="ui-icon"></i><input type="range" id="speed-slider" min="0.5" max="2" step="0.1" value="1"><input type="number" id="speed-input" class="slider-number-input" min="0.5" max="2" step="0.1"></div>
         </div>
       </div>
     </div>

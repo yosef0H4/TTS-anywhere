@@ -319,7 +319,7 @@ export class WebApp {
   }
 
   private bindSettings(): void {
-    const basicIds = ["llm-url", "llm-key", "llm-prompt", "tts-url", "tts-key", "chunk-size", "wpm", "ui-theme"];
+    const basicIds = ["llm-url", "llm-key", "llm-prompt", "tts-url", "tts-key", "chunk-min", "chunk-max", "wpm", "ui-theme"];
     basicIds.forEach((id) => {
       this.must<HTMLInputElement>(id).addEventListener("change", () => {
         this.syncConfigFromInputs();
@@ -335,7 +335,12 @@ export class WebApp {
     this.config.llm.promptTemplate = this.must<HTMLInputElement>("llm-prompt").value;
     this.config.tts.baseUrl = this.must<HTMLInputElement>("tts-url").value;
     this.config.tts.apiKey = this.must<HTMLInputElement>("tts-key").value;
-    this.config.reading.chunkSize = Number(this.must<HTMLInputElement>("chunk-size").value);
+    const minWords = Number(this.must<HTMLInputElement>("chunk-min").value);
+    const maxWords = Number(this.must<HTMLInputElement>("chunk-max").value);
+    this.config.reading.minWordsPerChunk = Number.isFinite(minWords) ? Math.max(1, Math.floor(minWords)) : 1;
+    this.config.reading.maxWordsPerChunk = Number.isFinite(maxWords)
+      ? Math.max(this.config.reading.minWordsPerChunk, Math.floor(maxWords))
+      : this.config.reading.minWordsPerChunk;
     this.config.reading.wpmBase = Number(this.must<HTMLInputElement>("wpm").value);
     const theme = this.must<HTMLSelectElement>("ui-theme").value;
     this.config.ui.theme = theme === "pink" ? "pink" : "zen";
@@ -350,11 +355,14 @@ export class WebApp {
     this.must<HTMLInputElement>("llm-prompt").value = this.config.llm.promptTemplate;
     this.must<HTMLInputElement>("tts-url").value = this.config.tts.baseUrl;
     this.must<HTMLInputElement>("tts-key").value = this.config.tts.apiKey;
-    this.must<HTMLInputElement>("chunk-size").value = String(this.config.reading.chunkSize);
+    this.must<HTMLInputElement>("chunk-min").value = String(this.config.reading.minWordsPerChunk);
+    this.must<HTMLInputElement>("chunk-max").value = String(this.config.reading.maxWordsPerChunk);
     this.must<HTMLInputElement>("wpm").value = String(this.config.reading.wpmBase);
     this.must<HTMLSelectElement>("ui-theme").value = this.config.ui.theme;
     this.must<HTMLInputElement>("vol-slider").value = String(this.config.ui.volume);
+    this.must<HTMLInputElement>("vol-input").value = String(this.config.ui.volume);
     this.must<HTMLInputElement>("speed-slider").value = String(this.config.ui.playbackRate);
+    this.must<HTMLInputElement>("speed-input").value = String(this.config.ui.playbackRate);
     this.audio.volume = Math.max(0, Math.min(1, this.config.ui.volume / 100));
     this.audio.playbackRate = this.config.ui.playbackRate;
     this.applyTheme(this.config.ui.theme);
@@ -413,19 +421,31 @@ export class WebApp {
   }
 
   private bindPlayback(): void {
-    this.must<HTMLInputElement>("vol-slider").addEventListener("input", (event) => {
-      const value = Number((event.currentTarget as HTMLInputElement).value);
-      this.audio.volume = value / 100;
-      this.config.ui.volume = value;
-      this.store.save(this.config);
-    });
+    const volSlider = this.must<HTMLInputElement>("vol-slider");
+    const volInput = this.must<HTMLInputElement>("vol-input");
+    const speedSlider = this.must<HTMLInputElement>("speed-slider");
+    const speedInput = this.must<HTMLInputElement>("speed-input");
 
-    this.must<HTMLInputElement>("speed-slider").addEventListener("input", (event) => {
-      const value = Number((event.currentTarget as HTMLInputElement).value);
-      this.audio.playbackRate = value;
-      this.config.ui.playbackRate = value;
+    const updateVol = (val: number) => {
+      this.audio.volume = val / 100;
+      this.config.ui.volume = val;
+      volSlider.value = String(val);
+      volInput.value = String(val);
       this.store.save(this.config);
-    });
+    };
+
+    const updateSpeed = (val: number) => {
+      this.audio.playbackRate = val;
+      this.config.ui.playbackRate = val;
+      speedSlider.value = String(val);
+      speedInput.value = String(val);
+      this.store.save(this.config);
+    };
+
+    volSlider.addEventListener("input", () => updateVol(Number(volSlider.value)));
+    volInput.addEventListener("input", () => updateVol(Number(volInput.value)));
+    speedSlider.addEventListener("input", () => updateSpeed(Number(speedSlider.value)));
+    speedInput.addEventListener("input", () => updateSpeed(Number(speedInput.value)));
 
     this.must<HTMLButtonElement>("btn-play").addEventListener("click", async () => {
       if (this.audio.paused) {
@@ -475,7 +495,12 @@ export class WebApp {
 
   private updateTimelineFromRawText(): void {
     const text = this.must<HTMLTextAreaElement>("raw-text").value;
-    this.timeline = buildReadingTimeline(text, this.config.reading.chunkSize, this.config.reading.wpmBase);
+    this.timeline = buildReadingTimeline(
+      text,
+      this.config.reading.minWordsPerChunk,
+      this.config.reading.maxWordsPerChunk,
+      this.config.reading.wpmBase
+    );
     this.renderReadingPreview();
   }
 

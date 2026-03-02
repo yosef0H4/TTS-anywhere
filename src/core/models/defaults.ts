@@ -16,7 +16,9 @@ export const DEFAULT_CONFIG: AppConfig = {
     speed: 1
   },
   reading: {
-    chunkSize: 5,
+    minWordsPerChunk: 3,
+    maxWordsPerChunk: 8,
+    chunkSize: 6,
     wpmBase: 180
   },
   ui: {

@@ -15,6 +15,8 @@ export interface TtsConfig {
 }
 
 export interface ReadingConfig {
+  minWordsPerChunk: number;
+  maxWordsPerChunk: number;
   chunkSize: number;
   wpmBase: number;
 }
