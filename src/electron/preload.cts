@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   minimizeWindow: () => {
     ipcRenderer.send("window:minimize");
   },
+  toggleMaximizeWindow: () => {
+    return ipcRenderer.invoke("window:toggle-maximize") as Promise<boolean>;
+  },
   closeWindow: () => {
     ipcRenderer.send("window:close");
   },

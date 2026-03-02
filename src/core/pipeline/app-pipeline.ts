@@ -20,4 +20,9 @@ export class AppPipeline {
     const tts = await this.tts.synthesize(ocr.text, config.tts);
     return { text: ocr.text, timeline, audioBlob: tts.audioBlob };
   }
+
+  async synthesizeText(text: string, config: AppConfig): Promise<Blob> {
+    const tts = await this.tts.synthesize(text, config.tts);
+    return tts.audioBlob;
+  }
 }

@@ -5,7 +5,9 @@ html, body { width: 100%; height: 100%; overflow: hidden; font-family: "DM Sans"
 .window-header { position: absolute; left: 68px; right: 0; top: 0; z-index: 30; height: 36px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px 0 16px; background: rgba(255, 240, 245, 0.9); border-bottom: 1px solid #f9a8d4; -webkit-app-region: drag; }
 .window-title { font-size: 12px; font-weight: 700; color: #9d174d; text-transform: uppercase; letter-spacing: 0.8px; }
 .window-actions { display: flex; gap: 6px; -webkit-app-region: no-drag; }
-.window-btn { width: 26px; height: 22px; border: 1px solid #fbcfe8; border-radius: 6px; background: #fff; color: #be185d; cursor: pointer; font-size: 12px; }
+.window-btn { width: 30px; height: 24px; border: 1px solid #f9a8d4; border-radius: 6px; background: #fff; color: #9d174d; cursor: pointer; font-size: 14px; font-weight: 700; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
+.window-btn:hover { background: #ffe4ef; }
+.window-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .window-btn.close:hover { background: #be185d; color: #fff; border-color: #be185d; }
 .window-btn.active-pin { background: #db2777; color: #fff; border-color: #db2777; }
 .bg-layer { position: absolute; inset: 0; z-index: 0; pointer-events: none; background-image: radial-gradient(#db2777 1.5px, transparent 1.5px); background-size: 24px 24px; opacity: 0.12; filter: blur(1px); }
@@ -25,6 +27,7 @@ html, body { width: 100%; height: 100%; overflow: hidden; font-family: "DM Sans"
 .main-content { margin-left: 68px; margin-top: 36px; z-index: 1; flex: 1; display: flex; flex-direction: column; gap: 16px; padding: 24px; }
 .top-actions { display: flex; gap: 12px; align-items: center; }
 .top-actions button, .upload-btn { border: 1px solid #fbcfe8; background: #fff; color: #be185d; border-radius: 20px; padding: 6px 12px; cursor: pointer; -webkit-app-region: no-drag; }
+.top-actions button:disabled { opacity: 0.55; cursor: not-allowed; }
 .top-actions #btn-aot-toggle.active-aot { background: #db2777; color: #fff; border-color: #db2777; }
 .upload-btn input { display: none; }
 #status-text { font-size: 12px; color: #9d174d; }

@@ -5,6 +5,7 @@ export interface PlatformBridge {
 export interface ElectronApi {
   onCaptureRequested: (handler: () => void) => void;
   minimizeWindow: () => void;
+  toggleMaximizeWindow: () => Promise<boolean>;
   closeWindow: () => void;
   togglePinWindow: () => Promise<boolean>;
 }

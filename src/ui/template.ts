@@ -6,6 +6,7 @@ export const APP_TEMPLATE = `
       <div class="window-actions">
         <button id="btn-pin" class="window-btn" title="Toggle always-on-top">📌</button>
         <button id="btn-minimize" class="window-btn" title="Minimize">—</button>
+        <button id="btn-maximize" class="window-btn" title="Maximize">□</button>
         <button id="btn-close" class="window-btn close" title="Close">✕</button>
       </div>
     </div>
@@ -32,7 +33,13 @@ export const APP_TEMPLATE = `
             <button id="tts-refetch" class="refetch-btn" type="button" title="Refetch TTS model/voice list">↻</button>
           </div>
         </div>
-        <div class="setting-group"><label>TTS Voice</label><select id="tts-voice"></select></div>
+        <div class="setting-group">
+          <label>TTS Voice</label>
+          <div class="setting-inline">
+            <select id="tts-voice"></select>
+            <button id="tts-voice-refetch" class="refetch-btn" type="button" title="Refetch TTS voices">↻</button>
+          </div>
+        </div>
         <div class="setting-group"><label>Chunk Size</label><input type="number" id="chunk-size" min="1"></div>
         <div class="setting-group"><label>WPM</label><input type="number" id="wpm" min="1"></div>
       </div>

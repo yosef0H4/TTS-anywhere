@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import platform
 import subprocess
 import tempfile
@@ -11,10 +12,13 @@ from typing import Any
 import shutil
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from huggingface_hub import hf_hub_download
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger("tts_piper_adapter")
 
 
 class Settings(BaseSettings):
@@ -32,7 +36,7 @@ class Settings(BaseSettings):
 
 
 class SpeechRequest(BaseModel):
-    model: str
+    model: str | None = None
     input: str
     voice: str | None = None
     response_format: str = "wav"
@@ -182,6 +186,7 @@ class PiperRuntime:
         config_file = self.model_dir / f"{model_key}.onnx.json"
 
         if model_file.exists() and config_file.exists():
+            logger.info("Using cached Piper model '%s' at %s", model_key, model_file)
             return str(model_file)
 
         voices = self._load_voices_catalog()
@@ -217,6 +222,7 @@ class PiperRuntime:
 
         Path(downloaded_onnx).replace(model_file)
         Path(downloaded_json).replace(config_file)
+        logger.info("Downloaded Piper model '%s' to %s", model_key, model_file)
         return str(model_file)
 
     def local_models(self) -> dict[str, str]:
@@ -249,6 +255,7 @@ class PiperRuntime:
     def synth_to_wav(self, text: str, model_id: str) -> Path:
         effective_model = model_id or self.settings.piper_default_model
         model_path = self.resolve_model_path(effective_model)
+        logger.info("Synth request model='%s' resolved_path='%s' chars=%d", effective_model, model_path, len(text))
 
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_wav:
             out_path = Path(temp_wav.name)
@@ -267,6 +274,13 @@ class PiperRuntime:
         )
         if completed.returncode != 0:
             out_path.unlink(missing_ok=True)
+            logger.error(
+                "Piper synthesis failed model='%s' code=%d stderr=%s stdout=%s",
+                effective_model,
+                completed.returncode,
+                completed.stderr.strip(),
+                completed.stdout.strip(),
+            )
             raise HTTPException(
                 status_code=500,
                 detail={
@@ -308,26 +322,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     auth = _auth(cfg.api_key)
 
     app = FastAPI(title="TTS Piper Adapter", version="0.1.0")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.get("/v1/models")
     def models(_: None = Depends(auth)) -> dict:
+        logger.info("Listing models")
         data = [{"id": model_id, "object": "model", "owned_by": "piper"} for model_id in runtime.known_models()]
         return {"object": "list", "data": data}
 
+    @app.get("/v1/voices")
+    def voices(_: None = Depends(auth)) -> dict:
+        logger.info("Listing voices")
+        voice_ids = runtime.known_models()
+        return {"voices": [{"id": voice_id, "name": voice_id} for voice_id in voice_ids]}
+
+    @app.get("/v1/audio/voices")
+    def audio_voices(_: None = Depends(auth)) -> dict:
+        voice_ids = runtime.known_models()
+        return {"voices": [{"id": voice_id, "name": voice_id} for voice_id in voice_ids]}
+
     @app.post("/v1/audio/speech")
     def speech(request: SpeechRequest, _: None = Depends(auth)):
-        if request.response_format != "wav":
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "error": {
-                        "message": "Piper adapter supports only response_format=wav",
-                        "type": "invalid_request_error",
-                        "code": "unsupported_format",
-                    }
-                },
-            )
-        wav_path = runtime.synth_to_wav(request.input.strip(), request.model)
+        logger.info(
+            "POST /v1/audio/speech model=%s voice=%s format=%s speed=%s",
+            request.model,
+            request.voice,
+            request.response_format,
+            request.speed,
+        )
+        wav_path = runtime.synth_to_wav(request.input.strip(), request.model or cfg.piper_default_model)
         return FileResponse(path=wav_path, media_type="audio/wav", filename="speech.wav")
 
     @app.get("/healthz")

@@ -21,9 +21,10 @@ function createMainWindow(): BrowserWindow {
     alwaysOnTop: true,
     skipTaskbar: true,
     webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
+      preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      sandbox: false
     }
   });
 
@@ -60,6 +61,18 @@ app.whenReady().then(() => {
 
 ipcMain.on("window:minimize", () => {
   mainWindow?.minimize();
+});
+
+ipcMain.handle("window:toggle-maximize", () => {
+  if (!mainWindow) {
+    return false;
+  }
+  if (mainWindow.isMaximized()) {
+    mainWindow.unmaximize();
+    return false;
+  }
+  mainWindow.maximize();
+  return true;
 });
 
 ipcMain.on("window:close", () => {

@@ -22,6 +22,7 @@ export class WebApp {
   private readonly pipeline = new AppPipeline();
   private readonly config: AppConfig = this.store.load();
   private readonly audio = new Audio();
+  private lastSynthText = "";
   private timeline: ReadingTimeline = { chunks: [], durationMs: 0 };
   private activeChunkIndex = 0;
   private readonly optionCache = new Map<string, NamedOption[]>();
@@ -72,6 +73,9 @@ export class WebApp {
     this.must<HTMLButtonElement>("tts-refetch").addEventListener("click", async () => {
       await this.fetchTtsModels(true);
       await this.fetchTtsVoices(true);
+    });
+    this.must<HTMLButtonElement>("tts-voice-refetch").addEventListener("click", () => {
+      void this.fetchTtsVoices(true);
     });
 
     this.llmModelSelect.on("change", (value: string) => {
@@ -257,19 +261,29 @@ export class WebApp {
   private bindWindowControls(): void {
     const pinButton = this.must<HTMLButtonElement>("btn-pin");
     const minimizeButton = this.must<HTMLButtonElement>("btn-minimize");
+    const maximizeButton = this.must<HTMLButtonElement>("btn-maximize");
     const closeButton = this.must<HTMLButtonElement>("btn-close");
     const alwaysOnTopButton = this.must<HTMLButtonElement>("btn-aot-toggle");
 
     if (!window.electronAPI) {
-      pinButton.style.display = "none";
-      minimizeButton.style.display = "none";
-      closeButton.style.display = "none";
-      alwaysOnTopButton.style.display = "none";
+      pinButton.disabled = true;
+      minimizeButton.disabled = true;
+      maximizeButton.disabled = true;
+      closeButton.disabled = true;
+      alwaysOnTopButton.disabled = true;
+      alwaysOnTopButton.textContent = "Always On Top: Unavailable";
+      this.setStatus("Desktop window controls unavailable (running in browser mode).");
       return;
     }
 
     minimizeButton.addEventListener("click", () => {
       window.electronAPI?.minimizeWindow();
+    });
+
+    maximizeButton.addEventListener("click", async () => {
+      const isMaximized = await window.electronAPI?.toggleMaximizeWindow();
+      maximizeButton.textContent = isMaximized ? "❐" : "□";
+      maximizeButton.title = isMaximized ? "Restore" : "Maximize";
     });
 
     closeButton.addEventListener("click", () => {
@@ -408,6 +422,7 @@ export class WebApp {
 
     this.must<HTMLButtonElement>("btn-play").addEventListener("click", async () => {
       if (this.audio.paused) {
+        await this.ensureAudioForCurrentText();
         await this.audio.play();
       } else {
         this.audio.pause();
@@ -440,6 +455,7 @@ export class WebApp {
 
       const oldObjectUrl = this.audio.src;
       this.audio.src = URL.createObjectURL(result.audioBlob);
+      this.lastSynthText = result.text;
       if (oldObjectUrl.startsWith("blob:")) {
         URL.revokeObjectURL(oldObjectUrl);
       }
@@ -454,6 +470,34 @@ export class WebApp {
     const text = this.must<HTMLTextAreaElement>("raw-text").value;
     this.timeline = buildReadingTimeline(text, this.config.reading.chunkSize, this.config.reading.wpmBase);
     this.renderReadingPreview();
+  }
+
+  private async ensureAudioForCurrentText(): Promise<void> {
+    const text = this.must<HTMLTextAreaElement>("raw-text").value.trim();
+    if (!text) {
+      this.setStatus("Enter text first.");
+      return;
+    }
+
+    const needsSynthesis = !this.audio.src || this.lastSynthText !== text;
+    if (!needsSynthesis) {
+      return;
+    }
+
+    this.setStatus("Synthesizing text...");
+    try {
+      const audioBlob = await this.pipeline.synthesizeText(text, this.config);
+      const oldObjectUrl = this.audio.src;
+      this.audio.src = URL.createObjectURL(audioBlob);
+      this.audio.currentTime = 0;
+      this.lastSynthText = text;
+      if (oldObjectUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(oldObjectUrl);
+      }
+      this.setStatus("Ready");
+    } catch (error) {
+      this.setStatus(`TTS error: ${String(error)}`);
+    }
   }
 
   private renderReadingPreview(): void {
