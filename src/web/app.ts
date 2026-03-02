@@ -1,5 +1,6 @@
 import TomSelect from "tom-select";
 import "tom-select/dist/css/tom-select.css";
+import { createIcons, icons } from "lucide";
 import { DEFAULT_CONFIG } from "../core/models/defaults";
 import type { AppConfig, ReadingTimeline } from "../core/models/types";
 import { AppPipeline } from "../core/pipeline/app-pipeline";
@@ -32,6 +33,7 @@ export class WebApp {
 
   mount(root: HTMLElement): void {
     root.innerHTML = APP_TEMPLATE;
+    this.renderIcons();
     this.bindWindowControls();
     this.bindModelSelectors();
     this.bindSettings();
@@ -279,7 +281,10 @@ export class WebApp {
 
     maximizeButton.addEventListener("click", async () => {
       const isMaximized = await window.electronAPI?.toggleMaximizeWindow();
-      maximizeButton.textContent = isMaximized ? "❐" : "□";
+      maximizeButton.innerHTML = isMaximized
+        ? '<i data-lucide="copy" class="ui-icon"></i>'
+        : '<i data-lucide="square" class="ui-icon"></i>';
+      this.renderIcons();
       maximizeButton.title = isMaximized ? "Restore" : "Maximize";
     });
 
@@ -506,7 +511,14 @@ export class WebApp {
   }
 
   private renderPlayState(): void {
-    this.must<HTMLButtonElement>("btn-play").textContent = this.audio.paused ? "▶" : "⏸";
+    this.must<HTMLButtonElement>("btn-play").innerHTML = this.audio.paused
+      ? '<i data-lucide="play" class="ui-icon"></i>'
+      : '<i data-lucide="pause" class="ui-icon"></i>';
+    this.renderIcons();
+  }
+
+  private renderIcons(): void {
+    createIcons({ icons });
   }
 
   private async pickImageFromClipboard(): Promise<string | null> {

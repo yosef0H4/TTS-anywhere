@@ -32,6 +32,7 @@
     "wait-on": "^9.0.4"
   },
   "dependencies": {
+    "lucide": "^0.576.0",
     "openai": "^6.25.0",
     "tom-select": "^2.5.2"
   }

@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger("tts_piper_adapter")
+PIPER_MODEL_ID = "piper"
 
 
 class Settings(BaseSettings):
@@ -332,7 +333,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/v1/models")
     def models(_: None = Depends(auth)) -> dict:
         logger.info("Listing models")
-        data = [{"id": model_id, "object": "model", "owned_by": "piper"} for model_id in runtime.known_models()]
+        data = [{"id": PIPER_MODEL_ID, "object": "model", "owned_by": "piper"}]
         return {"object": "list", "data": data}
 
     @app.get("/v1/voices")
@@ -355,7 +356,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             request.response_format,
             request.speed,
         )
-        wav_path = runtime.synth_to_wav(request.input.strip(), request.model or cfg.piper_default_model)
+        if request.model and request.model != PIPER_MODEL_ID:
+            logger.warning("Received unknown model '%s'; expected '%s'. Continuing with Piper voice.", request.model, PIPER_MODEL_ID)
+        selected_voice = (request.voice or "").strip() or cfg.piper_default_model
+        wav_path = runtime.synth_to_wav(request.input.strip(), selected_voice)
         return FileResponse(path=wav_path, media_type="audio/wav", filename="speech.wav")
 
     @app.get("/healthz")
