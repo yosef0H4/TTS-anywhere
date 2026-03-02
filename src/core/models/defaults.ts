@@ -16,22 +16,25 @@ export const DEFAULT_CONFIG: AppConfig = {
     speed: 1
   },
   reading: {
-    minWordsPerChunk: 3,
-    maxWordsPerChunk: 8,
+    minWordsPerChunk: 6,
+    maxWordsPerChunk: 25,
     wpmBase: 180,
     punctuationPauseMode: "low",
     streamWindowSize: 3,
     chunkRequestConcurrency: 2,
     chunkRetryCount: 2,
-    chunkTimeoutMs: 30000
+    chunkTimeoutMs: 30000,
+    largeEditResetRatio: 0.35,
+    failureCooldownMs: 5000,
+    sessionChunkCacheLimit: 300,
+    sessionAudioByteLimit: 120000000
   },
   ui: {
     volume: 80,
     playbackRate: 1,
     theme: "zen",
-    settingsDensity: "comfortable",
-    showAdvancedHints: true,
-    settingsDrawerOpen: false
+    settingsDrawerOpen: false,
+    showChunkDiagnostics: true
   },
   system: {
     diagnosticsEnabled: true,

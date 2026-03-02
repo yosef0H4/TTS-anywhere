@@ -47,17 +47,6 @@ export const APP_TEMPLATE = `
               <span class="theme-swatch swatch-pink"></span>
             </button>
           </div>
-          <div class="setting-group">
-            <label>Density</label>
-            <select id="ui-density">
-              <option value="comfortable">Comfortable</option>
-              <option value="compact">Compact</option>
-            </select>
-          </div>
-          <div class="setting-group setting-toggle-row">
-            <label for="ui-advanced-hints">Show Advanced Hints</label>
-            <input id="ui-advanced-hints" type="checkbox">
-          </div>
         </section>
 
         <section class="setting-section" data-section="ocr">
@@ -129,6 +118,18 @@ export const APP_TEMPLATE = `
             <div class="setting-group"><label>Retries / Chunk</label><input type="number" id="chunk-retry-count" min="0"></div>
             <div class="setting-group"><label>Timeout (ms)</label><input type="number" id="chunk-timeout-ms" min="1000" step="1000"></div>
           </div>
+          <div class="setting-grid">
+            <div class="setting-group"><label>Large Edit Reset Ratio</label><input type="number" id="large-edit-reset-ratio" min="0" max="1" step="0.01"></div>
+            <div class="setting-group"><label>Failure Cooldown (ms)</label><input type="number" id="failure-cooldown-ms" min="0" step="100"></div>
+          </div>
+          <div class="setting-grid">
+            <div class="setting-group"><label>Cache Limit (chunks)</label><input type="number" id="session-chunk-cache-limit" min="10"></div>
+            <div class="setting-group"><label>Cache Limit (bytes)</label><input type="number" id="session-audio-byte-limit" min="1000000" step="1000000"></div>
+          </div>
+          <div class="setting-group setting-toggle-row">
+            <label for="show-chunk-diagnostics">Show Chunk Diagnostics</label>
+            <input id="show-chunk-diagnostics" type="checkbox">
+          </div>
         </section>
 
         <section class="setting-section" data-section="system">
@@ -168,6 +169,16 @@ export const APP_TEMPLATE = `
         <div class="card text-card">
           <textarea id="raw-text" placeholder="Text will appear here..."></textarea>
           <div class="divider"></div>
+          <div id="chunk-diagnostics" class="chunk-diagnostics">
+            <span id="diag-queued">Q:0</span>
+            <span id="diag-inflight">In:0</span>
+            <span id="diag-cached">Cache:0</span>
+            <span id="diag-ready">Ready:0</span>
+            <span id="diag-failed">Fail:0</span>
+            <span id="diag-skipped">Skip:0</span>
+            <span id="diag-cooldown">Cool:0</span>
+            <span id="diag-evicted">Evict:0</span>
+          </div>
           <div class="reading-preview" id="reading-preview"></div>
         </div>
       </div>

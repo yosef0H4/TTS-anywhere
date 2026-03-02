@@ -23,15 +23,18 @@ export interface ReadingConfig {
   chunkRequestConcurrency: number;
   chunkRetryCount: number;
   chunkTimeoutMs: number;
+  largeEditResetRatio: number;
+  failureCooldownMs: number;
+  sessionChunkCacheLimit: number;
+  sessionAudioByteLimit: number;
 }
 
 export interface UiConfig {
   volume: number;
   playbackRate: number;
   theme: "zen" | "pink";
-  settingsDensity: "comfortable" | "compact";
-  showAdvancedHints: boolean;
   settingsDrawerOpen: boolean;
+  showChunkDiagnostics: boolean;
 }
 
 export interface SystemConfig {
