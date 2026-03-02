@@ -22,6 +22,7 @@ export interface ReadingConfig {
 export interface UiConfig {
   volume: number;
   playbackRate: number;
+  theme: "zen" | "pink";
 }
 
 export interface AppConfig {

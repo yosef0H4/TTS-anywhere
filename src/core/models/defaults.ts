@@ -21,6 +21,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   },
   ui: {
     volume: 80,
-    playbackRate: 1
+    playbackRate: 1,
+    theme: "zen"
   }
 };

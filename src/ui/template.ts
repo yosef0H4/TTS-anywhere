@@ -14,6 +14,13 @@ export const APP_TEMPLATE = `
     <div class="sidebar">
       <div class="sidebar-icon-area"><i data-lucide="settings-2" class="ui-icon"></i></div>
       <div class="settings-content">
+        <div class="setting-group">
+          <label>Theme</label>
+          <select id="ui-theme">
+            <option value="zen">Zen</option>
+            <option value="pink">Pink</option>
+          </select>
+        </div>
         <div class="setting-group"><label>OCR Base URL</label><input type="text" id="llm-url"></div>
         <div class="setting-group"><label>OCR API Key</label><input type="password" id="llm-key"></div>
         <div class="setting-group">

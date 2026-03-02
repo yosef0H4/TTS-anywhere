@@ -33,6 +33,7 @@ export class WebApp {
 
   mount(root: HTMLElement): void {
     root.innerHTML = APP_TEMPLATE;
+    this.applyTheme(this.config.ui.theme);
     this.renderIcons();
     this.bindWindowControls();
     this.bindModelSelectors();
@@ -318,7 +319,7 @@ export class WebApp {
   }
 
   private bindSettings(): void {
-    const basicIds = ["llm-url", "llm-key", "llm-prompt", "tts-url", "tts-key", "chunk-size", "wpm"];
+    const basicIds = ["llm-url", "llm-key", "llm-prompt", "tts-url", "tts-key", "chunk-size", "wpm", "ui-theme"];
     basicIds.forEach((id) => {
       this.must<HTMLInputElement>(id).addEventListener("change", () => {
         this.syncConfigFromInputs();
@@ -336,6 +337,9 @@ export class WebApp {
     this.config.tts.apiKey = this.must<HTMLInputElement>("tts-key").value;
     this.config.reading.chunkSize = Number(this.must<HTMLInputElement>("chunk-size").value);
     this.config.reading.wpmBase = Number(this.must<HTMLInputElement>("wpm").value);
+    const theme = this.must<HTMLSelectElement>("ui-theme").value;
+    this.config.ui.theme = theme === "pink" ? "pink" : "zen";
+    this.applyTheme(this.config.ui.theme);
     this.store.save(this.config);
     this.updateTimelineFromRawText();
   }
@@ -348,10 +352,12 @@ export class WebApp {
     this.must<HTMLInputElement>("tts-key").value = this.config.tts.apiKey;
     this.must<HTMLInputElement>("chunk-size").value = String(this.config.reading.chunkSize);
     this.must<HTMLInputElement>("wpm").value = String(this.config.reading.wpmBase);
+    this.must<HTMLSelectElement>("ui-theme").value = this.config.ui.theme;
     this.must<HTMLInputElement>("vol-slider").value = String(this.config.ui.volume);
     this.must<HTMLInputElement>("speed-slider").value = String(this.config.ui.playbackRate);
     this.audio.volume = Math.max(0, Math.min(1, this.config.ui.volume / 100));
     this.audio.playbackRate = this.config.ui.playbackRate;
+    this.applyTheme(this.config.ui.theme);
 
     this.applyOptions(this.llmModelSelect, [{ value: this.config.llm.model, label: this.config.llm.model }], this.config.llm.model);
     this.applyOptions(this.ttsModelSelect, [{ value: this.config.tts.model, label: this.config.tts.model }], this.config.tts.model);
@@ -534,6 +540,11 @@ export class WebApp {
 
   private renderIcons(): void {
     createIcons({ icons });
+  }
+
+  private applyTheme(theme: "zen" | "pink"): void {
+    const shell = this.must<HTMLElement>("app-shell");
+    shell.dataset.theme = theme;
   }
 
   private async pickImageFromClipboard(): Promise<string | null> {
