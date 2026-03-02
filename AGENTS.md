@@ -67,3 +67,12 @@
 - `services/tts-adapter/.ruff_cache/`
 - `services/tts-adapter/**/__pycache__/`
 - `services/tts-adapter/**/*.pyc`
+
+## Windows Bridge
+- Root scripts provide a lightweight remote command bridge for Windows-host execution:
+- `windows_bridge_server.py`: run this on the Windows machine.
+- `windows_bridge_client.py`: send command strings to the server.
+- Suggested start command on Windows host:
+- `python windows_bridge_server.py --host 0.0.0.0 --port 8765 --token <token>`
+- Suggested client command:
+- `python windows_bridge_client.py "uv run python .\\src\\tts_adapter\\cli.py synth --text \"hi\" --out test.wav" --server http://<host>:8765 --token <token>`

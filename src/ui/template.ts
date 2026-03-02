@@ -15,12 +15,24 @@ export const APP_TEMPLATE = `
       <div class="settings-content">
         <div class="setting-group"><label>OCR Base URL</label><input type="text" id="llm-url"></div>
         <div class="setting-group"><label>OCR API Key</label><input type="password" id="llm-key"></div>
-        <div class="setting-group"><label>OCR Model</label><input type="text" id="llm-model"></div>
+        <div class="setting-group">
+          <label>OCR Model</label>
+          <div class="setting-inline">
+            <select id="llm-model"></select>
+            <button id="llm-refetch" class="refetch-btn" type="button" title="Refetch OCR models">↻</button>
+          </div>
+        </div>
         <div class="setting-group"><label>OCR Prompt</label><input type="text" id="llm-prompt"></div>
         <div class="setting-group"><label>TTS Base URL</label><input type="text" id="tts-url"></div>
         <div class="setting-group"><label>TTS API Key</label><input type="password" id="tts-key"></div>
-        <div class="setting-group"><label>TTS Model</label><input type="text" id="tts-model"></div>
-        <div class="setting-group"><label>TTS Voice</label><input type="text" id="tts-voice"></div>
+        <div class="setting-group">
+          <label>TTS Model</label>
+          <div class="setting-inline">
+            <select id="tts-model"></select>
+            <button id="tts-refetch" class="refetch-btn" type="button" title="Refetch TTS model/voice list">↻</button>
+          </div>
+        </div>
+        <div class="setting-group"><label>TTS Voice</label><select id="tts-voice"></select></div>
         <div class="setting-group"><label>Chunk Size</label><input type="number" id="chunk-size" min="1"></div>
         <div class="setting-group"><label>WPM</label><input type="number" id="wpm" min="1"></div>
       </div>

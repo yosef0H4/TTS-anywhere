@@ -1,3 +1,5 @@
+import TomSelect from "tom-select";
+import "tom-select/dist/css/tom-select.css";
 import { DEFAULT_CONFIG } from "../core/models/defaults";
 import type { AppConfig, ReadingTimeline } from "../core/models/types";
 import { AppPipeline } from "../core/pipeline/app-pipeline";
@@ -6,6 +8,15 @@ import { buildReadingTimeline, findChunkIndexByTime } from "../core/utils/chunki
 import { APP_TEMPLATE } from "../ui/template";
 import "../ui/styles.css";
 
+interface NamedOption {
+  value: string;
+  label: string;
+}
+
+interface ModelListResponse {
+  data?: Array<{ id?: string }>;
+}
+
 export class WebApp {
   private readonly store = new SettingsStore();
   private readonly pipeline = new AppPipeline();
@@ -13,15 +24,234 @@ export class WebApp {
   private readonly audio = new Audio();
   private timeline: ReadingTimeline = { chunks: [], durationMs: 0 };
   private activeChunkIndex = 0;
-  private imageDataUrl = "";
+  private readonly optionCache = new Map<string, NamedOption[]>();
+  private llmModelSelect: TomSelect | null = null;
+  private ttsModelSelect: TomSelect | null = null;
+  private ttsVoiceSelect: TomSelect | null = null;
 
   mount(root: HTMLElement): void {
     root.innerHTML = APP_TEMPLATE;
     this.bindWindowControls();
+    this.bindModelSelectors();
     this.bindSettings();
     this.bindCapture();
     this.bindPlayback();
     this.renderConfig();
+  }
+
+  private bindModelSelectors(): void {
+    this.llmModelSelect = new TomSelect(this.must<HTMLSelectElement>("llm-model"), {
+      create: true,
+      persist: false,
+      maxOptions: 500,
+      placeholder: "Select OCR model"
+    });
+
+    this.ttsModelSelect = new TomSelect(this.must<HTMLSelectElement>("tts-model"), {
+      create: true,
+      persist: false,
+      maxOptions: 500,
+      placeholder: "Select TTS model"
+    });
+
+    this.ttsVoiceSelect = new TomSelect(this.must<HTMLSelectElement>("tts-voice"), {
+      create: true,
+      persist: false,
+      maxOptions: 500,
+      placeholder: "Select voice"
+    });
+
+    this.bindSelectorFetchBehavior(this.llmModelSelect, "llm-model", () => this.fetchLlmModels(false));
+    this.bindSelectorFetchBehavior(this.ttsModelSelect, "tts-model", () => this.fetchTtsModels(false));
+    this.bindSelectorFetchBehavior(this.ttsVoiceSelect, "tts-voice", () => this.fetchTtsVoices(false));
+
+    this.must<HTMLButtonElement>("llm-refetch").addEventListener("click", () => {
+      void this.fetchLlmModels(true);
+    });
+
+    this.must<HTMLButtonElement>("tts-refetch").addEventListener("click", async () => {
+      await this.fetchTtsModels(true);
+      await this.fetchTtsVoices(true);
+    });
+
+    this.llmModelSelect.on("change", (value: string) => {
+      this.config.llm.model = value;
+      this.store.save(this.config);
+    });
+
+    this.ttsModelSelect.on("change", (value: string) => {
+      this.config.tts.model = value;
+      this.store.save(this.config);
+    });
+
+    this.ttsVoiceSelect.on("change", (value: string) => {
+      this.config.tts.voice = value;
+      this.store.save(this.config);
+    });
+  }
+
+  private bindSelectorFetchBehavior(select: TomSelect, id: string, fetcher: () => Promise<void>): void {
+    const el = this.must<HTMLElement>(id);
+    const trigger = () => {
+      void fetcher();
+    };
+    select.control_input.addEventListener("focus", trigger);
+    el.addEventListener("focus", trigger);
+  }
+
+  private async fetchLlmModels(force: boolean): Promise<void> {
+    const options = await this.fetchOptionsFromModelsEndpoint(this.config.llm.baseUrl, this.config.llm.apiKey, force, "llm-models");
+    this.applyOptions(this.llmModelSelect, options, this.config.llm.model);
+  }
+
+  private async fetchTtsModels(force: boolean): Promise<void> {
+    const options = await this.fetchOptionsFromModelsEndpoint(this.config.tts.baseUrl, this.config.tts.apiKey, force, "tts-models");
+    this.applyOptions(this.ttsModelSelect, options, this.config.tts.model);
+  }
+
+  private async fetchTtsVoices(force: boolean): Promise<void> {
+    const base = this.config.tts.baseUrl;
+    const key = this.config.tts.apiKey;
+    const cacheKey = this.makeCacheKey("tts-voices", base, key);
+
+    if (!force && this.optionCache.has(cacheKey)) {
+      this.applyOptions(this.ttsVoiceSelect, this.optionCache.get(cacheKey) ?? [], this.config.tts.voice);
+      return;
+    }
+
+    const voices = await this.tryFetchVoiceOptions(base, key);
+    this.optionCache.set(cacheKey, voices);
+    this.applyOptions(this.ttsVoiceSelect, voices, this.config.tts.voice);
+  }
+
+  private async tryFetchVoiceOptions(baseUrl: string, apiKey: string): Promise<NamedOption[]> {
+    const candidates = ["/voices", "/audio/voices", "/models"];
+    for (const path of candidates) {
+      try {
+        const response = await fetch(this.joinApiPath(baseUrl, path), {
+          headers: this.authHeaders(apiKey)
+        });
+        if (!response.ok) continue;
+        const body = (await response.json()) as unknown;
+        const options = this.parseOptions(body);
+        if (options.length > 0) {
+          return options;
+        }
+      } catch {
+        // try next endpoint
+      }
+    }
+    this.setStatus("Voice list unavailable from API; you can still type manually.");
+    return this.config.tts.voice ? [{ value: this.config.tts.voice, label: this.config.tts.voice }] : [];
+  }
+
+  private async fetchOptionsFromModelsEndpoint(
+    baseUrl: string,
+    apiKey: string,
+    force: boolean,
+    namespace: string
+  ): Promise<NamedOption[]> {
+    const cacheKey = this.makeCacheKey(namespace, baseUrl, apiKey);
+    if (!force && this.optionCache.has(cacheKey)) {
+      return this.optionCache.get(cacheKey) ?? [];
+    }
+
+    try {
+      const response = await fetch(this.joinApiPath(baseUrl, "/models"), {
+        headers: this.authHeaders(apiKey)
+      });
+      if (!response.ok) {
+        this.setStatus(`Failed to fetch ${namespace}: ${response.status}`);
+        return [];
+      }
+
+      const payload = (await response.json()) as ModelListResponse;
+      const options = (payload.data ?? [])
+        .map((item) => item.id?.trim() ?? "")
+        .filter((id) => id.length > 0)
+        .map((id) => ({ value: id, label: id }));
+
+      this.optionCache.set(cacheKey, options);
+      if (force) {
+        this.setStatus(`Refetched ${namespace}`);
+      }
+      return options;
+    } catch (error) {
+      this.setStatus(`Failed to fetch ${namespace}: ${String(error)}`);
+      return [];
+    }
+  }
+
+  private parseOptions(payload: unknown): NamedOption[] {
+    if (!payload || typeof payload !== "object") return [];
+    const obj = payload as Record<string, unknown>;
+
+    if (Array.isArray(obj.data)) {
+      return obj.data
+        .map((item) => {
+          if (typeof item !== "object" || !item) return null;
+          const record = item as Record<string, unknown>;
+          const id = typeof record.id === "string" ? record.id : "";
+          if (!id) return null;
+          return { value: id, label: id };
+        })
+        .filter((item): item is NamedOption => item !== null);
+    }
+
+    if (Array.isArray(obj.voices)) {
+      return obj.voices
+        .map((entry) => {
+          if (typeof entry === "string") return { value: entry, label: entry };
+          if (typeof entry === "object" && entry) {
+            const record = entry as Record<string, unknown>;
+            const id = typeof record.id === "string" ? record.id : "";
+            const name = typeof record.name === "string" ? record.name : id;
+            if (!id) return null;
+            return { value: id, label: name };
+          }
+          return null;
+        })
+        .filter((item): item is NamedOption => item !== null);
+    }
+
+    return [];
+  }
+
+  private applyOptions(select: TomSelect | null, options: NamedOption[], current: string): void {
+    if (!select) return;
+    select.clearOptions();
+    options.forEach((option) => {
+      select.addOption({ value: option.value, text: option.label });
+    });
+
+    if (current) {
+      if (!options.some((option) => option.value === current)) {
+        select.addOption({ value: current, text: current });
+      }
+      select.setValue(current, true);
+    }
+
+    select.refreshOptions(false);
+  }
+
+  private authHeaders(apiKey: string): HeadersInit {
+    if (!apiKey) {
+      return {};
+    }
+    return { Authorization: `Bearer ${apiKey}` };
+  }
+
+  private makeCacheKey(namespace: string, baseUrl: string, apiKey: string): string {
+    return `${namespace}|${baseUrl.trim()}|${apiKey.trim()}`;
+  }
+
+  private joinApiPath(baseUrl: string, path: string): string {
+    const normalized = baseUrl.replace(/\/+$/, "");
+    const safePath = path.startsWith("/") ? path : `/${path}`;
+    if (normalized.endsWith("/v1") || normalized.endsWith("/v1/")) {
+      return `${normalized}${safePath}`;
+    }
+    return `${normalized}/v1${safePath}`;
   }
 
   private bindWindowControls(): void {
@@ -81,38 +311,40 @@ export class WebApp {
   }
 
   private bindSettings(): void {
-    const ids = ["llm-url", "llm-key", "llm-model", "llm-prompt", "tts-url", "tts-key", "tts-model", "tts-voice", "chunk-size", "wpm"];
-    ids.forEach((id) => {
+    const basicIds = ["llm-url", "llm-key", "llm-prompt", "tts-url", "tts-key", "chunk-size", "wpm"];
+    basicIds.forEach((id) => {
       this.must<HTMLInputElement>(id).addEventListener("change", () => {
-        this.config.llm.baseUrl = this.must<HTMLInputElement>("llm-url").value;
-        this.config.llm.apiKey = this.must<HTMLInputElement>("llm-key").value;
-        this.config.llm.model = this.must<HTMLInputElement>("llm-model").value;
-        this.config.llm.promptTemplate = this.must<HTMLInputElement>("llm-prompt").value;
-        this.config.tts.baseUrl = this.must<HTMLInputElement>("tts-url").value;
-        this.config.tts.apiKey = this.must<HTMLInputElement>("tts-key").value;
-        this.config.tts.model = this.must<HTMLInputElement>("tts-model").value;
-        this.config.tts.voice = this.must<HTMLInputElement>("tts-voice").value;
-        this.config.reading.chunkSize = Number(this.must<HTMLInputElement>("chunk-size").value);
-        this.config.reading.wpmBase = Number(this.must<HTMLInputElement>("wpm").value);
-        this.store.save(this.config);
-        this.updateTimelineFromRawText();
+        this.syncConfigFromInputs();
       });
     });
 
     this.must<HTMLTextAreaElement>("raw-text").addEventListener("input", () => this.updateTimelineFromRawText());
   }
 
+  private syncConfigFromInputs(): void {
+    this.config.llm.baseUrl = this.must<HTMLInputElement>("llm-url").value;
+    this.config.llm.apiKey = this.must<HTMLInputElement>("llm-key").value;
+    this.config.llm.promptTemplate = this.must<HTMLInputElement>("llm-prompt").value;
+    this.config.tts.baseUrl = this.must<HTMLInputElement>("tts-url").value;
+    this.config.tts.apiKey = this.must<HTMLInputElement>("tts-key").value;
+    this.config.reading.chunkSize = Number(this.must<HTMLInputElement>("chunk-size").value);
+    this.config.reading.wpmBase = Number(this.must<HTMLInputElement>("wpm").value);
+    this.store.save(this.config);
+    this.updateTimelineFromRawText();
+  }
+
   private renderConfig(): void {
     this.must<HTMLInputElement>("llm-url").value = this.config.llm.baseUrl;
     this.must<HTMLInputElement>("llm-key").value = this.config.llm.apiKey;
-    this.must<HTMLInputElement>("llm-model").value = this.config.llm.model;
     this.must<HTMLInputElement>("llm-prompt").value = this.config.llm.promptTemplate;
     this.must<HTMLInputElement>("tts-url").value = this.config.tts.baseUrl;
     this.must<HTMLInputElement>("tts-key").value = this.config.tts.apiKey;
-    this.must<HTMLInputElement>("tts-model").value = this.config.tts.model;
-    this.must<HTMLInputElement>("tts-voice").value = this.config.tts.voice;
     this.must<HTMLInputElement>("chunk-size").value = String(this.config.reading.chunkSize);
     this.must<HTMLInputElement>("wpm").value = String(this.config.reading.wpmBase);
+
+    this.applyOptions(this.llmModelSelect, [{ value: this.config.llm.model, label: this.config.llm.model }], this.config.llm.model);
+    this.applyOptions(this.ttsModelSelect, [{ value: this.config.tts.model, label: this.config.tts.model }], this.config.tts.model);
+    this.applyOptions(this.ttsVoiceSelect, [{ value: this.config.tts.voice, label: this.config.tts.voice }], this.config.tts.voice);
   }
 
   private bindCapture(): void {
@@ -196,7 +428,6 @@ export class WebApp {
   }
 
   private async runPipeline(dataUrl: string): Promise<void> {
-    this.imageDataUrl = dataUrl;
     this.must<HTMLImageElement>("preview-img").src = dataUrl;
     this.setStatus("Running OCR + TTS...");
 
