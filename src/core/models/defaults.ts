@@ -18,12 +18,19 @@ export const DEFAULT_CONFIG: AppConfig = {
   reading: {
     minWordsPerChunk: 3,
     maxWordsPerChunk: 8,
-    chunkSize: 6,
-    wpmBase: 180
+    wpmBase: 180,
+    punctuationPauseMode: "low"
   },
   ui: {
     volume: 80,
     playbackRate: 1,
-    theme: "zen"
+    theme: "zen",
+    settingsDensity: "comfortable",
+    showAdvancedHints: true,
+    settingsDrawerOpen: false
+  },
+  system: {
+    diagnosticsEnabled: true,
+    lastImportAt: ""
   }
 };

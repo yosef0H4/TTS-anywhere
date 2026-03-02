@@ -17,14 +17,22 @@ export interface TtsConfig {
 export interface ReadingConfig {
   minWordsPerChunk: number;
   maxWordsPerChunk: number;
-  chunkSize: number;
   wpmBase: number;
+  punctuationPauseMode: "off" | "low" | "medium" | "high";
 }
 
 export interface UiConfig {
   volume: number;
   playbackRate: number;
   theme: "zen" | "pink";
+  settingsDensity: "comfortable" | "compact";
+  showAdvancedHints: boolean;
+  settingsDrawerOpen: boolean;
+}
+
+export interface SystemConfig {
+  diagnosticsEnabled: boolean;
+  lastImportAt: string;
 }
 
 export interface AppConfig {
@@ -32,6 +40,7 @@ export interface AppConfig {
   tts: TtsConfig;
   reading: ReadingConfig;
   ui: UiConfig;
+  system: SystemConfig;
 }
 
 export interface Chunk {

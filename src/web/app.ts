@@ -30,10 +30,11 @@ export class WebApp {
   private llmModelSelect: TomSelect | null = null;
   private ttsModelSelect: TomSelect | null = null;
   private ttsVoiceSelect: TomSelect | null = null;
+  private settingsPeekOpen = false;
 
   mount(root: HTMLElement): void {
     root.innerHTML = APP_TEMPLATE;
-    this.applyTheme(this.config.ui.theme);
+    this.applyUiState();
     this.renderIcons();
     this.bindWindowControls();
     this.bindModelSelectors();
@@ -142,12 +143,14 @@ export class WebApp {
         const body = (await response.json()) as unknown;
         const options = this.parseOptions(body);
         if (options.length > 0) {
+          this.updateStatusChip("tts-status-chip", "Voices loaded", "ok");
           return options;
         }
       } catch {
         // try next endpoint
       }
     }
+    this.updateStatusChip("tts-status-chip", "Voice list unavailable", "error");
     this.setStatus("Voice list unavailable from API; you can still type manually.");
     return this.config.tts.voice ? [{ value: this.config.tts.voice, label: this.config.tts.voice }] : [];
   }
@@ -169,6 +172,8 @@ export class WebApp {
       });
       if (!response.ok) {
         this.setStatus(`Failed to fetch ${namespace}: ${response.status}`);
+        if (namespace.startsWith("llm")) this.updateStatusChip("llm-status-chip", `HTTP ${response.status}`, "error");
+        if (namespace.startsWith("tts")) this.updateStatusChip("tts-status-chip", `HTTP ${response.status}`, "error");
         return [];
       }
 
@@ -182,9 +187,13 @@ export class WebApp {
       if (force) {
         this.setStatus(`Refetched ${namespace}`);
       }
+      if (namespace.startsWith("llm")) this.updateStatusChip("llm-status-chip", `Loaded ${options.length}`, "ok");
+      if (namespace.startsWith("tts")) this.updateStatusChip("tts-status-chip", `Loaded ${options.length}`, "ok");
       return options;
     } catch (error) {
       this.setStatus(`Failed to fetch ${namespace}: ${String(error)}`);
+      if (namespace.startsWith("llm")) this.updateStatusChip("llm-status-chip", "Network error", "error");
+      if (namespace.startsWith("tts")) this.updateStatusChip("tts-status-chip", "Network error", "error");
       return [];
     }
   }
@@ -319,11 +328,79 @@ export class WebApp {
   }
 
   private bindSettings(): void {
-    const basicIds = ["llm-url", "llm-key", "llm-prompt", "tts-url", "tts-key", "chunk-min", "chunk-max", "wpm", "ui-theme"];
+    const sidebar = this.must<HTMLElement>("sidebar");
+    const drawer = this.must<HTMLElement>("settings-drawer");
+
+    sidebar.addEventListener("mouseenter", () => {
+      if (this.config.ui.settingsDrawerOpen) return;
+      this.settingsPeekOpen = true;
+      this.applyUiState();
+    });
+
+    drawer.addEventListener("mouseenter", () => {
+      if (this.config.ui.settingsDrawerOpen) return;
+      this.settingsPeekOpen = true;
+      this.applyUiState();
+    });
+
+    drawer.addEventListener("mouseleave", () => {
+      if (this.config.ui.settingsDrawerOpen) return;
+      this.settingsPeekOpen = false;
+      this.applyUiState();
+    });
+
+    this.must<HTMLButtonElement>("btn-settings-toggle").addEventListener("click", () => {
+      this.config.ui.settingsDrawerOpen = !this.config.ui.settingsDrawerOpen;
+      if (this.config.ui.settingsDrawerOpen) {
+        this.settingsPeekOpen = false;
+      }
+      this.applyUiState();
+      this.store.save(this.config);
+    });
+    this.must<HTMLButtonElement>("btn-settings-close").addEventListener("click", () => {
+      this.config.ui.settingsDrawerOpen = false;
+      this.settingsPeekOpen = false;
+      this.applyUiState();
+      this.store.save(this.config);
+    });
+
+    this.must<HTMLButtonElement>("theme-zen").addEventListener("click", () => this.setTheme("zen"));
+    this.must<HTMLButtonElement>("theme-pink").addEventListener("click", () => this.setTheme("pink"));
+
+    const basicIds = [
+      "llm-url",
+      "llm-key",
+      "llm-prompt",
+      "tts-url",
+      "tts-key",
+      "chunk-min",
+      "chunk-max",
+      "wpm",
+      "ui-density",
+      "punctuation-pause"
+    ];
     basicIds.forEach((id) => {
       this.must<HTMLInputElement>(id).addEventListener("change", () => {
         this.syncConfigFromInputs();
       });
+    });
+
+    this.must<HTMLInputElement>("ui-advanced-hints").addEventListener("change", () => this.syncConfigFromInputs());
+    this.must<HTMLInputElement>("diagnostics-enabled").addEventListener("change", () => this.syncConfigFromInputs());
+
+    this.must<HTMLButtonElement>("btn-export-settings").addEventListener("click", () => this.exportSettings());
+    this.must<HTMLButtonElement>("btn-import-settings").addEventListener("click", () => {
+      this.must<HTMLInputElement>("import-settings-file").click();
+    });
+    this.must<HTMLInputElement>("import-settings-file").addEventListener("change", (event) => {
+      void this.importSettings(event);
+    });
+    this.must<HTMLButtonElement>("btn-reset-settings").addEventListener("click", () => {
+      Object.assign(this.config, JSON.parse(JSON.stringify(DEFAULT_CONFIG)) as AppConfig);
+      this.renderConfig();
+      this.store.save(this.config);
+      this.updateTimelineFromRawText();
+      this.setStatus("Settings reset to defaults.");
     });
 
     this.must<HTMLTextAreaElement>("raw-text").addEventListener("input", () => this.updateTimelineFromRawText());
@@ -342,9 +419,14 @@ export class WebApp {
       ? Math.max(this.config.reading.minWordsPerChunk, Math.floor(maxWords))
       : this.config.reading.minWordsPerChunk;
     this.config.reading.wpmBase = Number(this.must<HTMLInputElement>("wpm").value);
-    const theme = this.must<HTMLSelectElement>("ui-theme").value;
-    this.config.ui.theme = theme === "pink" ? "pink" : "zen";
-    this.applyTheme(this.config.ui.theme);
+    const punctuationMode = this.must<HTMLSelectElement>("punctuation-pause").value;
+    this.config.reading.punctuationPauseMode = ["off", "low", "medium", "high"].includes(punctuationMode)
+      ? (punctuationMode as AppConfig["reading"]["punctuationPauseMode"])
+      : "low";
+    this.config.ui.settingsDensity = this.must<HTMLSelectElement>("ui-density").value === "compact" ? "compact" : "comfortable";
+    this.config.ui.showAdvancedHints = this.must<HTMLInputElement>("ui-advanced-hints").checked;
+    this.config.system.diagnosticsEnabled = this.must<HTMLInputElement>("diagnostics-enabled").checked;
+    this.applyUiState();
     this.store.save(this.config);
     this.updateTimelineFromRawText();
   }
@@ -358,18 +440,94 @@ export class WebApp {
     this.must<HTMLInputElement>("chunk-min").value = String(this.config.reading.minWordsPerChunk);
     this.must<HTMLInputElement>("chunk-max").value = String(this.config.reading.maxWordsPerChunk);
     this.must<HTMLInputElement>("wpm").value = String(this.config.reading.wpmBase);
-    this.must<HTMLSelectElement>("ui-theme").value = this.config.ui.theme;
+    this.must<HTMLSelectElement>("punctuation-pause").value = this.config.reading.punctuationPauseMode;
+    this.must<HTMLSelectElement>("ui-density").value = this.config.ui.settingsDensity;
+    this.must<HTMLInputElement>("ui-advanced-hints").checked = this.config.ui.showAdvancedHints;
+    this.must<HTMLInputElement>("diagnostics-enabled").checked = this.config.system.diagnosticsEnabled;
     this.must<HTMLInputElement>("vol-slider").value = String(this.config.ui.volume);
     this.must<HTMLInputElement>("vol-input").value = String(this.config.ui.volume);
     this.must<HTMLInputElement>("speed-slider").value = String(this.config.ui.playbackRate);
     this.must<HTMLInputElement>("speed-input").value = String(this.config.ui.playbackRate);
+    this.must<HTMLDivElement>("settings-last-import").textContent = this.config.system.lastImportAt
+      ? `Last import: ${this.config.system.lastImportAt}`
+      : "No import yet.";
+
     this.audio.volume = Math.max(0, Math.min(1, this.config.ui.volume / 100));
     this.audio.playbackRate = this.config.ui.playbackRate;
-    this.applyTheme(this.config.ui.theme);
+
+    this.applyUiState();
 
     this.applyOptions(this.llmModelSelect, [{ value: this.config.llm.model, label: this.config.llm.model }], this.config.llm.model);
     this.applyOptions(this.ttsModelSelect, [{ value: this.config.tts.model, label: this.config.tts.model }], this.config.tts.model);
     this.applyOptions(this.ttsVoiceSelect, [{ value: this.config.tts.voice, label: this.config.tts.voice }], this.config.tts.voice);
+  }
+
+  private applyUiState(): void {
+    const shell = this.must<HTMLElement>("app-shell");
+    shell.dataset.theme = this.config.ui.theme;
+    shell.dataset.settingsOpen = this.config.ui.settingsDrawerOpen ? "true" : "false";
+    shell.dataset.settingsPeek = this.settingsPeekOpen ? "true" : "false";
+    shell.dataset.density = this.config.ui.settingsDensity;
+    shell.dataset.showAdvanced = this.config.ui.showAdvancedHints ? "true" : "false";
+
+    this.must<HTMLElement>("settings-drawer").setAttribute("aria-hidden", this.config.ui.settingsDrawerOpen ? "false" : "true");
+
+    this.must<HTMLButtonElement>("theme-zen").classList.toggle("active", this.config.ui.theme === "zen");
+    this.must<HTMLButtonElement>("theme-pink").classList.toggle("active", this.config.ui.theme === "pink");
+  }
+
+  private setTheme(theme: "zen" | "pink"): void {
+    this.config.ui.theme = theme;
+    this.applyUiState();
+    this.store.save(this.config);
+  }
+
+  private exportSettings(): void {
+    const payload = JSON.stringify(this.config, null, 2);
+    const blob = new Blob([payload], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "tts-snipper-settings.json";
+    a.click();
+    URL.revokeObjectURL(url);
+    this.setStatus("Settings exported.");
+  }
+
+  private async importSettings(event: Event): Promise<void> {
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as Partial<AppConfig>;
+      const merged: AppConfig = {
+        llm: { ...DEFAULT_CONFIG.llm, ...parsed.llm },
+        tts: { ...DEFAULT_CONFIG.tts, ...parsed.tts },
+        reading: { ...DEFAULT_CONFIG.reading, ...parsed.reading },
+        ui: { ...DEFAULT_CONFIG.ui, ...parsed.ui },
+        system: { ...DEFAULT_CONFIG.system, ...parsed.system }
+      };
+      Object.assign(this.config, merged);
+      this.config.system.lastImportAt = new Date().toISOString();
+      this.renderConfig();
+      this.updateTimelineFromRawText();
+      this.store.save(this.config);
+      this.setStatus("Settings imported.");
+    } catch (error) {
+      this.setStatus(`Import failed: ${String(error)}`);
+    } finally {
+      input.value = "";
+    }
+  }
+
+  private updateStatusChip(id: string, text: string, state: "ok" | "error" | "idle"): void {
+    const chip = this.must<HTMLSpanElement>(id);
+    chip.textContent = text;
+    chip.classList.remove("ok", "error");
+    if (state !== "idle") {
+      chip.classList.add(state);
+    }
   }
 
   private bindCapture(): void {
@@ -565,11 +723,6 @@ export class WebApp {
 
   private renderIcons(): void {
     createIcons({ icons });
-  }
-
-  private applyTheme(theme: "zen" | "pink"): void {
-    const shell = this.must<HTMLElement>("app-shell");
-    shell.dataset.theme = theme;
   }
 
   private async pickImageFromClipboard(): Promise<string | null> {
