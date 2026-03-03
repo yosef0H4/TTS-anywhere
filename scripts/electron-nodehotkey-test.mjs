@@ -23,6 +23,7 @@ let selectionActive = false;
 let selectionStart = null;
 let lastCursor = null;
 let lastRect = null;
+let sendInFlight = false;
 
 function log(event, data) {
   const ts = new Date().toISOString();
@@ -141,6 +142,11 @@ async function waitForTriggerModifiersReleased(timeoutMs = 250) {
 }
 
 async function sendMappedHotkeyOnRelease() {
+  if (sendInFlight) {
+    log("send.hotkey.skipped", { reason: "in-flight" });
+    return;
+  }
+  sendInFlight = true;
   try {
     await waitForTriggerModifiersReleased();
     if (String(sendOnHotkey).toLowerCase() === "ctrl+c") {
@@ -164,6 +170,8 @@ async function sendMappedHotkeyOnRelease() {
     log("send.hotkey.ok", { trigger: session.getHotkey(), sent: sendOnHotkey });
   } catch (error) {
     log("send.hotkey.error", { trigger: session.getHotkey(), sent: sendOnHotkey, error: String(error) });
+  } finally {
+    sendInFlight = false;
   }
 }
 

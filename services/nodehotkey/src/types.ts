@@ -26,6 +26,7 @@ export type SendSpec = {
 
 export type SendHotkeyOptions = {
   pressDurationMs?: number;
+  blind?: boolean;
 };
 
 export type ClipboardWaitMode = "text_or_files" | "any";

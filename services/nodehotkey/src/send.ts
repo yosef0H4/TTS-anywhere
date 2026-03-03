@@ -2,12 +2,14 @@ import { MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, TOKEN_TO_MOD, keyTokenToVk } 
 import type { SendHotkeyOptions, SendSpec } from "./types.js";
 import {
   GetLastError,
+  GetAsyncKeyState,
   INPUT_KEYBOARD,
   INPUT_SIZE,
   KEYEVENTF_EXTENDEDKEY,
   KEYEVENTF_KEYUP,
   SendInput,
   VK_CONTROL,
+  VK_RWIN,
   VK_LWIN,
   VK_MENU,
   VK_SHIFT
@@ -67,6 +69,19 @@ function modifierVks(modifiers: number): number[] {
   return vks;
 }
 
+function isVkDown(vk: number): boolean {
+  return (GetAsyncKeyState(vk) & 0x8000) !== 0;
+}
+
+function activeModifierMask(): number {
+  let mask = 0;
+  if (isVkDown(VK_CONTROL)) mask |= MOD_CONTROL;
+  if (isVkDown(VK_SHIFT)) mask |= MOD_SHIFT;
+  if (isVkDown(VK_MENU)) mask |= MOD_ALT;
+  if (isVkDown(VK_LWIN) || isVkDown(VK_RWIN)) mask |= MOD_WIN;
+  return mask;
+}
+
 export function parseSendSpec(input: string): SendSpec {
   const normalized = String(input).trim().toLowerCase();
   if (!normalized) throw new Error("Send hotkey string is empty");
@@ -110,6 +125,18 @@ export async function sendHotkey(input: string, options: SendHotkeyOptions = {})
   const spec = parseSendSpec(input);
   const downModifiers = modifierVks(spec.modifiers);
   const events: KeyboardInput[] = [];
+  const blind = options.blind ?? false;
+
+  const currentlyDownMods = activeModifierMask();
+  const modsToTemporarilyRelease = blind ? 0 : (currentlyDownMods & ~spec.modifiers);
+
+  if ((modsToTemporarilyRelease & MOD_WIN) !== 0) {
+    if (isVkDown(VK_LWIN)) events.push(keyEvent(VK_LWIN, true));
+    if (isVkDown(VK_RWIN)) events.push(keyEvent(VK_RWIN, true));
+  }
+  if ((modsToTemporarilyRelease & MOD_ALT) !== 0) events.push(keyEvent(VK_MENU, true));
+  if ((modsToTemporarilyRelease & MOD_SHIFT) !== 0) events.push(keyEvent(VK_SHIFT, true));
+  if ((modsToTemporarilyRelease & MOD_CONTROL) !== 0) events.push(keyEvent(VK_CONTROL, true));
 
   for (const vk of downModifiers) events.push(keyEvent(vk, false));
   events.push(keyEvent(spec.vk, false));
@@ -127,6 +154,12 @@ export async function sendHotkey(input: string, options: SendHotkeyOptions = {})
   events.push(keyEvent(spec.vk, true));
   for (let i = downModifiers.length - 1; i >= 0; i -= 1) {
     events.push(keyEvent(downModifiers[i] as number, true));
+  }
+  if ((modsToTemporarilyRelease & MOD_CONTROL) !== 0) events.push(keyEvent(VK_CONTROL, false));
+  if ((modsToTemporarilyRelease & MOD_SHIFT) !== 0) events.push(keyEvent(VK_SHIFT, false));
+  if ((modsToTemporarilyRelease & MOD_ALT) !== 0) events.push(keyEvent(VK_MENU, false));
+  if ((modsToTemporarilyRelease & MOD_WIN) !== 0) {
+    events.push(keyEvent(VK_LWIN, false));
   }
 
   const inserted = SendInput(events.length, events, INPUT_SIZE);

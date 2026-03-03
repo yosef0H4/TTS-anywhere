@@ -26,6 +26,7 @@ export const VK_CONTROL = 0x11;
 export const VK_SHIFT = 0x10;
 export const VK_MENU = 0x12;
 export const VK_LWIN = 0x5b;
+export const VK_RWIN = 0x5c;
 
 export type WinMsg = { message?: number; wParam?: number | bigint };
 export type Point = { x: number; y: number };
