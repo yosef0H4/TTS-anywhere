@@ -19,46 +19,70 @@ function countWords(text: string): number {
 function rebalanceUnits(units: string[], minWordsPerChunk: number, maxWordsPerChunk: number): string[] {
   const safeMin = Math.max(1, Math.floor(minWordsPerChunk));
   const safeMax = Math.max(safeMin, Math.floor(maxWordsPerChunk));
-  const queue = [...units];
-  const result: string[] = [];
+  const expanded: string[] = [];
 
+  for (const unit of units) {
+    const current = normalizeText(unit);
+    if (!current) continue;
+    const words = countWords(current);
+    if (words <= safeMax) {
+      expanded.push(current);
+      continue;
+    }
+    const tokens = current.split(" ");
+    for (let start = 0; start < tokens.length; start += safeMax) {
+      expanded.push(tokens.slice(start, start + safeMax).join(" "));
+    }
+  }
+
+  const chunks = [...expanded];
   let i = 0;
-  while (i < queue.length) {
-    let current = normalizeText(queue[i] ?? "");
+  while (i < chunks.length) {
+    const current = normalizeText(chunks[i] ?? "");
     if (!current) {
+      chunks.splice(i, 1);
+      continue;
+    }
+
+    const currentWords = countWords(current);
+    if (currentWords >= safeMin) {
+      chunks[i] = current;
       i += 1;
       continue;
     }
 
-    let words = countWords(current);
-    if (words > safeMax) {
-      const tokens = current.split(" ");
-      for (let start = 0; start < tokens.length; start += safeMax) {
-        result.push(tokens.slice(start, start + safeMax).join(" "));
+    // Prefer forward merge for reading flow continuity.
+    if (i + 1 < chunks.length) {
+      const next = normalizeText(chunks[i + 1] ?? "");
+      if (next) {
+        const forwardMerged = `${current} ${next}`.trim();
+        if (countWords(forwardMerged) <= safeMax) {
+          chunks[i] = forwardMerged;
+          chunks.splice(i + 1, 1);
+          continue;
+        }
       }
-      i += 1;
-      continue;
     }
 
-    while (words < safeMin && i + 1 < queue.length) {
-      const next = normalizeText(queue[i + 1] ?? "");
-      if (!next) {
-        i += 1;
-        continue;
+    // Fallback to backward merge to avoid tiny isolated chunks.
+    if (i > 0) {
+      const prev = normalizeText(chunks[i - 1] ?? "");
+      if (prev) {
+        const backwardMerged = `${prev} ${current}`.trim();
+        if (countWords(backwardMerged) <= safeMax) {
+          chunks[i - 1] = backwardMerged;
+          chunks.splice(i, 1);
+          i = Math.max(0, i - 1);
+          continue;
+        }
       }
-      const merged = `${current} ${next}`.trim();
-      const mergedWords = countWords(merged);
-      if (mergedWords > safeMax) break;
-      current = merged;
-      words = mergedWords;
-      i += 1;
     }
 
-    result.push(current);
+    chunks[i] = current;
     i += 1;
   }
 
-  return result;
+  return chunks;
 }
 
 export function splitIntoChunks(text: string, minWordsPerChunk: number, maxWordsPerChunk: number): string[] {

@@ -18,6 +18,14 @@ describe("chunking", () => {
     ]);
   });
 
+  it("falls back to backward merge for short abbreviations", () => {
+    expect(splitIntoChunks("This is six words here now. John H. Watson writes.", 3, 6)).toEqual([
+      "This is six words here now.",
+      "John H. Watson",
+      "writes."
+    ]);
+  });
+
   it("builds a timeline", () => {
     const timeline = buildReadingTimeline("one two three four", 1, 2, 120);
     expect(timeline.chunks).toHaveLength(2);
