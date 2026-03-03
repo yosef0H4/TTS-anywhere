@@ -17,6 +17,10 @@ export const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4;
 export const INPUT_KEYBOARD = 1;
 export const KEYEVENTF_EXTENDEDKEY = 0x0001;
 export const KEYEVENTF_KEYUP = 0x0002;
+export const GMEM_MOVEABLE = 0x0002;
+export const GMEM_ZEROINIT = 0x0040;
+export const CF_UNICODETEXT = 13;
+export const CF_HDROP = 15;
 
 export const VK_CONTROL = 0x11;
 export const VK_SHIFT = 0x10;
@@ -113,6 +117,29 @@ export const SendInput = user32.func(
   "uint32 __stdcall SendInput(uint32 cInputs, const INPUT *pInputs, int cbSize)"
 ) as (count: number, inputs: Array<{ type: number; _pad: number; ki: { wVk: number; wScan: number; dwFlags: number; time: number; dwExtraInfo: number } }>, cbSize: number) => number;
 export const GetLastError = kernel32.func("uint32 __stdcall GetLastError()") as () => number;
+export const OpenClipboard = user32.func("bool __stdcall OpenClipboard(void *hWndNewOwner)") as (hWnd: null) => boolean;
+export const CloseClipboard = user32.func("bool __stdcall CloseClipboard()") as () => boolean;
+export const EmptyClipboard = user32.func("bool __stdcall EmptyClipboard()") as () => boolean;
+export const CountClipboardFormats = user32.func("int __stdcall CountClipboardFormats()") as () => number;
+export const IsClipboardFormatAvailable = user32.func("bool __stdcall IsClipboardFormatAvailable(uint32 format)") as (format: number) => boolean;
+export const EnumClipboardFormats = user32.func("uint32 __stdcall EnumClipboardFormats(uint32 format)") as (format: number) => number;
+export const GetClipboardData = user32.func("void * __stdcall GetClipboardData(uint32 format)") as (format: number) => unknown;
+export const SetClipboardData = user32.func("void * __stdcall SetClipboardData(uint32 format, void *hMem)") as (format: number, hMem: unknown) => unknown;
+export const GetClipboardSequenceNumber = user32.func("uint32 __stdcall GetClipboardSequenceNumber()") as () => number;
+
+export const GlobalSize = kernel32.func("size_t __stdcall GlobalSize(void *hMem)") as (hMem: unknown) => number;
+export const GlobalLock = kernel32.func("void * __stdcall GlobalLock(void *hMem)") as (hMem: unknown) => unknown;
+export const GlobalUnlock = kernel32.func("bool __stdcall GlobalUnlock(void *hMem)") as (hMem: unknown) => boolean;
+export const GlobalAlloc = kernel32.func("void * __stdcall GlobalAlloc(uint32 uFlags, size_t dwBytes)") as (
+  flags: number,
+  bytes: number
+) => unknown;
+export const GlobalFree = kernel32.func("void * __stdcall GlobalFree(void *hMem)") as (hMem: unknown) => unknown;
+export const RtlMoveMemory = kernel32.func("void __stdcall RtlMoveMemory(void *Destination, const void *Source, size_t Length)") as (
+  destination: unknown,
+  source: unknown,
+  length: number
+) => void;
 
 export const INPUT_SIZE = koffi.sizeof(INPUT);
 

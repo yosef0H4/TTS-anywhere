@@ -27,3 +27,52 @@ export type SendSpec = {
 export type SendHotkeyOptions = {
   pressDurationMs?: number;
 };
+
+export type ClipboardWaitMode = "text_or_files" | "any";
+
+export type ClipboardFormatEntry = {
+  format: number;
+  size: number;
+  data: Buffer;
+};
+
+export type ClipboardSnapshot = {
+  advertisedFormats: number[];
+  skippedFormats: Array<{ format: number; reason: string }>;
+  formats: ClipboardFormatEntry[];
+  plainText: string;
+  signature: string;
+  capturedAt: number;
+};
+
+export type ClipboardWaitOptions = {
+  timeoutMs?: number;
+  pollMs?: number;
+  mode?: ClipboardWaitMode;
+};
+
+export type ClipboardRestoreResult = {
+  restoredCount: number;
+  failedFormats: number[];
+};
+
+export type CopyCaptureOptions = {
+  copyHotkey?: string;
+  timeoutMs?: number;
+  pollMs?: number;
+  restoreClipboard?: boolean;
+  waitMode?: ClipboardWaitMode;
+};
+
+export type CopyCaptureResult = {
+  changed: boolean;
+  text: string;
+  snapshot: ClipboardSnapshot;
+  clearedSignature: string;
+  changedBySequence: boolean;
+  sequenceBeforeClear: number;
+  sequenceAfterClear: number;
+  sequenceAfterCopy: number;
+  postRestoreText?: string;
+  restore?: ClipboardRestoreResult;
+};

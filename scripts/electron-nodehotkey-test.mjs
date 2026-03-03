@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import screenshot from "screenshot-desktop";
 import sharp from "sharp";
-import { BorderOverlay, HotkeySession, sendHotkey } from "nodehotkey";
+import { BorderOverlay, HotkeySession, captureCopyToText, sendHotkey } from "nodehotkey";
 
 const args = process.argv.slice(2);
 const hotkeyArgIndex = args.findIndex((a) => a === "--hotkey");
@@ -143,6 +143,23 @@ async function waitForTriggerModifiersReleased(timeoutMs = 250) {
 async function sendMappedHotkeyOnRelease() {
   try {
     await waitForTriggerModifiersReleased();
+    if (String(sendOnHotkey).toLowerCase() === "ctrl+c") {
+      const captureResult = await captureCopyToText({
+        copyHotkey: "ctrl+c",
+        timeoutMs: 5000,
+        pollMs: 25,
+        waitMode: "any",
+        restoreClipboard: true
+      });
+      log("send.hotkey.ok", {
+        trigger: session.getHotkey(),
+        sent: sendOnHotkey,
+        changed: captureResult.changed,
+        copiedText: captureResult.text,
+        restore: captureResult.restore
+      });
+      return;
+    }
     await sendHotkey(sendOnHotkey);
     log("send.hotkey.ok", { trigger: session.getHotkey(), sent: sendOnHotkey });
   } catch (error) {
