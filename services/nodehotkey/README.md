@@ -2,21 +2,28 @@
 
 Windows-only Node/Electron helper for:
 - global hotkey registration
-- AHK-style rectangle preview while key is held
-- screenshot capture of selected rectangle
+- on-screen rectangle drawing primitives
 
 ## Usage
 
 ```ts
-import { NodeHotkey } from "nodehotkey";
+import { BorderOverlay, HotkeySession } from "nodehotkey";
 
-const hk = new NodeHotkey({ initialHotkey: "ctrl+shift+alt+s" });
-hk.start();
-const result = await hk.captureOnce();
-console.log(result.rect, result.pngBuffer.length);
-hk.stop();
+const overlay = new BorderOverlay(2);
+const session = new HotkeySession({
+  initialHotkey: "ctrl+shift+alt+s",
+  events: {
+    onTriggerDown: (start) => console.log("start", start),
+    onTriggerUp: (end) => console.log("end", end)
+  }
+});
+session.start();
 ```
 
 ## Supported hotkey syntax
 - Modifiers: `ctrl`, `shift`, `alt`, `win`
 - Keys: `a-z`, `0-9`, `f1-f24`, `tab`, `space`, `enter`, `esc`, arrows
+
+## Legacy API
+- `NodeHotkey.captureOnce()` remains available for app compatibility.
+- New integrations should use `HotkeySession + BorderOverlay` and own screenshot logic externally.
