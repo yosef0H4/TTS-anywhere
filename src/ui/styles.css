@@ -630,12 +630,22 @@ body {
   box-decoration-break: clone;
 }
 
+.reading-preview span:hover {
+  background: transparent !important;
+  color: inherit !important;
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent-strong) 45%, transparent) inset;
+}
+
 .reading-preview span.active-chunk {
   background: var(--accent);
   color: #fff;
 }
 
-.reading-preview span.chunk-not-started { opacity: .7; }
+.reading-preview span.chunk-not-started {
+  opacity: 1;
+  background: color-mix(in srgb, var(--line) 28%, #fff 72%);
+  color: color-mix(in srgb, var(--fg) 82%, #fff 18%);
+}
 .reading-preview span.chunk-synthesizing {
   background: color-mix(in srgb, #f59e0b 26%, #fff 74%);
   color: #92400e;
