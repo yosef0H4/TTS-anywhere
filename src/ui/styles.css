@@ -621,46 +621,42 @@ body {
 }
 
 .reading-preview span {
-  padding: 2px 6px;
-  border-radius: 4px;
+  padding: 2px 8px;
+  border-radius: 2px;
   cursor: pointer;
-  border: 1px solid transparent;
-  transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+  border: 0;
+  transition: background-color .15s ease, color .15s ease, box-shadow .15s ease;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
 .reading-preview span.active-chunk {
   background: var(--accent);
   color: #fff;
-  border-color: color-mix(in srgb, var(--accent-strong) 40%, transparent);
 }
 
 .reading-preview span.chunk-not-started { opacity: .7; }
 .reading-preview span.chunk-synthesizing {
-  border-color: #f59e0b;
-  background: #fef3c7;
+  background: color-mix(in srgb, #f59e0b 26%, #fff 74%);
   color: #92400e;
   animation: chunk-synth-pulse 1s ease-in-out infinite;
 }
 .reading-preview span.chunk-ready {
-  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
-  background: color-mix(in srgb, var(--accent) 14%, #fff 86%);
+  background: color-mix(in srgb, var(--accent) 18%, #fff 82%);
   color: var(--fg);
 }
 .reading-preview span.chunk-playing {
-  border-color: color-mix(in srgb, var(--accent-strong) 45%, transparent);
   background: var(--accent);
   color: #fff;
 }
 
 .reading-preview span.active-chunk.chunk-playing {
-  border-color: color-mix(in srgb, var(--accent-strong) 45%, transparent);
   background: var(--accent);
   color: #fff;
 }
 .reading-preview span.chunk-failed {
-  border-color: #dc2626;
   color: #991b1b;
-  background: #fee2e2;
+  background: color-mix(in srgb, #dc2626 18%, #fff 82%);
 }
 
 @keyframes chunk-synth-pulse {
