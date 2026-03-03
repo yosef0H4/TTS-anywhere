@@ -63,9 +63,12 @@ export class WebApp {
   private workspaceResizer: WorkspaceResizer | null = null;
   private ipcTransport: IpcTransport | null = null;
   private consoleTransport: ConsoleTransport | null = null;
-  private hotkeyRecording = false;
+  private captureHotkeyRecording = false;
   private pendingCaptureHotkey: string | null = null;
-  private hotkeyKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
+  private captureHotkeyKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
+  private copyHotkeyRecording = false;
+  private pendingCopyPlayHotkey: string | null = null;
+  private copyHotkeyKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
 
   mount(root: HTMLElement): void {
     this.initializeLogging();
@@ -82,6 +85,7 @@ export class WebApp {
     this.bindLoggingSettings();
     this.renderConfig();
     void this.syncElectronCaptureHotkeyFromSettings();
+    void this.syncElectronCopyHotkeyFromSettings();
     void this.syncElectronCaptureRectangleSetting();
     loggers.app.info("App mounted");
   }
@@ -469,6 +473,7 @@ export class WebApp {
       this.store.save(this.config);
       this.updateTimelineFromRawText();
       void this.syncElectronCaptureHotkeyFromSettings();
+      void this.syncElectronCopyHotkeyFromSettings();
       void this.syncElectronCaptureRectangleSetting();
       this.setStatus("Settings reset to defaults.");
     });
@@ -481,6 +486,15 @@ export class WebApp {
     });
     this.must<HTMLButtonElement>("btn-hotkey-cancel").addEventListener("click", () => {
       void this.cancelHotkeyRecording();
+    });
+    this.must<HTMLButtonElement>("btn-copy-hotkey-record").addEventListener("click", () => {
+      void this.beginCopyHotkeyRecording();
+    });
+    this.must<HTMLButtonElement>("btn-copy-hotkey-apply").addEventListener("click", () => {
+      void this.applyRecordedCopyHotkey();
+    });
+    this.must<HTMLButtonElement>("btn-copy-hotkey-cancel").addEventListener("click", () => {
+      void this.cancelCopyHotkeyRecording();
     });
 
     this.must<HTMLTextAreaElement>("raw-text").addEventListener("input", () => {
@@ -558,7 +572,9 @@ export class WebApp {
     this.must<HTMLInputElement>("diagnostics-enabled").checked = this.config.system.diagnosticsEnabled;
     this.must<HTMLInputElement>("capture-draw-rectangle").checked = this.config.system.captureDrawRectangle;
     this.must<HTMLInputElement>("capture-hotkey").value = this.pendingCaptureHotkey ?? this.config.system.captureHotkey;
-    this.setHotkeyRecordingStatus(window.electronAPI ? "Current hotkey is active." : "Hotkey editing is available in Electron only.");
+    this.must<HTMLInputElement>("copy-play-hotkey").value = this.pendingCopyPlayHotkey ?? this.config.system.copyPlayHotkey;
+    this.setCaptureHotkeyRecordingStatus(window.electronAPI ? "Current hotkey is active." : "Hotkey editing is available in Electron only.");
+    this.setCopyHotkeyRecordingStatus(window.electronAPI ? "Current hotkey is active." : "Hotkey editing is available in Electron only.");
     this.renderHotkeyButtonState();
     this.must<HTMLInputElement>("show-chunk-diagnostics").checked = this.config.ui.showChunkDiagnostics;
     this.must<HTMLSelectElement>("log-level").value = this.config.logging.level;
@@ -650,6 +666,7 @@ export class WebApp {
       this.updateTimelineFromRawText();
       this.store.save(this.config);
       void this.syncElectronCaptureHotkeyFromSettings();
+      void this.syncElectronCopyHotkeyFromSettings();
       void this.syncElectronCaptureRectangleSetting();
       this.setStatus("Settings imported.");
       loggers.settings.info("Settings imported");
@@ -749,17 +766,45 @@ export class WebApp {
       loggers.capture.info("Hotkey capture image received");
       await this.runPipeline(dataUrl);
     });
+
+    window.electronAPI?.onCopiedTextForPlayback(async (text: string) => {
+      await this.playCopiedText(text);
+    });
   }
 
-  private setHotkeyRecordingStatus(message: string): void {
+  private async playCopiedText(text: string): Promise<void> {
+    const nextText = text.trim();
+    if (!nextText) {
+      this.setStatus("Copy hotkey triggered but no text was copied.");
+      return;
+    }
+    this.must<HTMLTextAreaElement>("raw-text").value = nextText;
+    this.updateTimelineFromRawText();
+    this.resetPlaybackForTextChange();
+    this.setStatus("Copied text received. Playing...");
+    try {
+      await this.startOrResumePlayback();
+    } catch (error) {
+      this.setStatus(`Playback failed: ${String(error)}`);
+    }
+  }
+
+  private setCaptureHotkeyRecordingStatus(message: string): void {
     this.must<HTMLDivElement>("hotkey-recording-status").textContent = message;
+  }
+
+  private setCopyHotkeyRecordingStatus(message: string): void {
+    this.must<HTMLDivElement>("copy-hotkey-recording-status").textContent = message;
   }
 
   private renderHotkeyButtonState(): void {
     const available = Boolean(window.electronAPI?.beginCaptureHotkeyEdit);
-    this.must<HTMLButtonElement>("btn-hotkey-record").disabled = !available || this.hotkeyRecording;
+    this.must<HTMLButtonElement>("btn-hotkey-record").disabled = !available || this.captureHotkeyRecording;
     this.must<HTMLButtonElement>("btn-hotkey-apply").disabled = !available || !this.pendingCaptureHotkey;
-    this.must<HTMLButtonElement>("btn-hotkey-cancel").disabled = !available || (!this.hotkeyRecording && !this.pendingCaptureHotkey);
+    this.must<HTMLButtonElement>("btn-hotkey-cancel").disabled = !available || (!this.captureHotkeyRecording && !this.pendingCaptureHotkey);
+    this.must<HTMLButtonElement>("btn-copy-hotkey-record").disabled = !available || this.copyHotkeyRecording;
+    this.must<HTMLButtonElement>("btn-copy-hotkey-apply").disabled = !available || !this.pendingCopyPlayHotkey;
+    this.must<HTMLButtonElement>("btn-copy-hotkey-cancel").disabled = !available || (!this.copyHotkeyRecording && !this.pendingCopyPlayHotkey);
   }
 
   private async syncElectronCaptureHotkeyFromSettings(): Promise<void> {
@@ -769,11 +814,26 @@ export class WebApp {
       this.config.system.captureHotkey = applied;
       this.pendingCaptureHotkey = null;
       this.must<HTMLInputElement>("capture-hotkey").value = applied;
-      this.setHotkeyRecordingStatus("Current hotkey is active.");
+      this.setCaptureHotkeyRecordingStatus("Current hotkey is active.");
       this.renderHotkeyButtonState();
       this.store.save(this.config);
     } catch (error) {
       this.setStatus(`Failed to apply saved hotkey: ${String(error)}`);
+    }
+  }
+
+  private async syncElectronCopyHotkeyFromSettings(): Promise<void> {
+    if (!window.electronAPI?.applyCopyHotkey) return;
+    try {
+      const applied = await window.electronAPI.applyCopyHotkey(this.config.system.copyPlayHotkey);
+      this.config.system.copyPlayHotkey = applied;
+      this.pendingCopyPlayHotkey = null;
+      this.must<HTMLInputElement>("copy-play-hotkey").value = applied;
+      this.setCopyHotkeyRecordingStatus("Current hotkey is active.");
+      this.renderHotkeyButtonState();
+      this.store.save(this.config);
+    } catch (error) {
+      this.setStatus(`Failed to apply saved copy hotkey: ${String(error)}`);
     }
   }
 
@@ -802,42 +862,42 @@ export class WebApp {
   }
 
   private async beginHotkeyRecording(): Promise<void> {
-    if (this.hotkeyRecording) return;
-    this.hotkeyRecording = true;
+    if (this.captureHotkeyRecording) return;
+    this.captureHotkeyRecording = true;
     this.pendingCaptureHotkey = null;
     this.must<HTMLInputElement>("capture-hotkey").value = "";
-    this.setHotkeyRecordingStatus("Recording... press your desired hotkey.");
+    this.setCaptureHotkeyRecordingStatus("Recording... press your desired hotkey.");
     this.renderHotkeyButtonState();
     try {
       await window.electronAPI?.beginCaptureHotkeyEdit?.();
     } catch (error) {
-      this.hotkeyRecording = false;
-      this.setHotkeyRecordingStatus(`Failed to start recording: ${String(error)}`);
+      this.captureHotkeyRecording = false;
+      this.setCaptureHotkeyRecordingStatus(`Failed to start recording: ${String(error)}`);
       this.renderHotkeyButtonState();
       return;
     }
 
-    this.hotkeyKeydownHandler = (event: KeyboardEvent) => {
-      if (!this.hotkeyRecording) return;
+    this.captureHotkeyKeydownHandler = (event: KeyboardEvent) => {
+      if (!this.captureHotkeyRecording) return;
       const normalized = this.normalizeKeyboardHotkey(event);
       if (!normalized) return;
       event.preventDefault();
       event.stopPropagation();
       this.pendingCaptureHotkey = normalized;
       this.must<HTMLInputElement>("capture-hotkey").value = normalized;
-      this.setHotkeyRecordingStatus(`Captured: ${normalized}. Click Apply to activate.`);
-      this.stopHotkeyRecordingListener();
-      this.hotkeyRecording = false;
+      this.setCaptureHotkeyRecordingStatus(`Captured: ${normalized}. Click Apply to activate.`);
+      this.stopCaptureHotkeyRecordingListener();
+      this.captureHotkeyRecording = false;
       this.renderHotkeyButtonState();
     };
 
-    window.addEventListener("keydown", this.hotkeyKeydownHandler, true);
+    window.addEventListener("keydown", this.captureHotkeyKeydownHandler, true);
   }
 
-  private stopHotkeyRecordingListener(): void {
-    if (this.hotkeyKeydownHandler) {
-      window.removeEventListener("keydown", this.hotkeyKeydownHandler, true);
-      this.hotkeyKeydownHandler = null;
+  private stopCaptureHotkeyRecordingListener(): void {
+    if (this.captureHotkeyKeydownHandler) {
+      window.removeEventListener("keydown", this.captureHotkeyKeydownHandler, true);
+      this.captureHotkeyKeydownHandler = null;
     }
   }
 
@@ -848,22 +908,22 @@ export class WebApp {
       const next = applied ?? this.pendingCaptureHotkey;
       this.config.system.captureHotkey = next;
       this.pendingCaptureHotkey = null;
-      this.hotkeyRecording = false;
-      this.stopHotkeyRecordingListener();
+      this.captureHotkeyRecording = false;
+      this.stopCaptureHotkeyRecordingListener();
       this.must<HTMLInputElement>("capture-hotkey").value = next;
-      this.setHotkeyRecordingStatus(`Active hotkey: ${next}`);
+      this.setCaptureHotkeyRecordingStatus(`Active hotkey: ${next}`);
       this.store.save(this.config);
     } catch (error) {
-      this.setHotkeyRecordingStatus(`Apply failed: ${String(error)}`);
+      this.setCaptureHotkeyRecordingStatus(`Apply failed: ${String(error)}`);
       return;
     }
     this.renderHotkeyButtonState();
   }
 
   private async cancelHotkeyRecording(): Promise<void> {
-    this.hotkeyRecording = false;
+    this.captureHotkeyRecording = false;
     this.pendingCaptureHotkey = null;
-    this.stopHotkeyRecordingListener();
+    this.stopCaptureHotkeyRecordingListener();
     try {
       const restored = await window.electronAPI?.cancelCaptureHotkeyEdit?.();
       if (restored) {
@@ -873,7 +933,84 @@ export class WebApp {
       this.setStatus(`Failed to cancel hotkey edit: ${String(error)}`);
     }
     this.must<HTMLInputElement>("capture-hotkey").value = this.config.system.captureHotkey;
-    this.setHotkeyRecordingStatus("Current hotkey is active.");
+    this.setCaptureHotkeyRecordingStatus("Current hotkey is active.");
+    this.renderHotkeyButtonState();
+    this.store.save(this.config);
+  }
+
+  private async beginCopyHotkeyRecording(): Promise<void> {
+    if (this.copyHotkeyRecording) return;
+    this.copyHotkeyRecording = true;
+    this.pendingCopyPlayHotkey = null;
+    this.must<HTMLInputElement>("copy-play-hotkey").value = "";
+    this.setCopyHotkeyRecordingStatus("Recording... press your desired hotkey.");
+    this.renderHotkeyButtonState();
+    try {
+      await window.electronAPI?.beginCopyHotkeyEdit?.();
+    } catch (error) {
+      this.copyHotkeyRecording = false;
+      this.setCopyHotkeyRecordingStatus(`Failed to start recording: ${String(error)}`);
+      this.renderHotkeyButtonState();
+      return;
+    }
+
+    this.copyHotkeyKeydownHandler = (event: KeyboardEvent) => {
+      if (!this.copyHotkeyRecording) return;
+      const normalized = this.normalizeKeyboardHotkey(event);
+      if (!normalized) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.pendingCopyPlayHotkey = normalized;
+      this.must<HTMLInputElement>("copy-play-hotkey").value = normalized;
+      this.setCopyHotkeyRecordingStatus(`Captured: ${normalized}. Click Apply to activate.`);
+      this.stopCopyHotkeyRecordingListener();
+      this.copyHotkeyRecording = false;
+      this.renderHotkeyButtonState();
+    };
+
+    window.addEventListener("keydown", this.copyHotkeyKeydownHandler, true);
+  }
+
+  private stopCopyHotkeyRecordingListener(): void {
+    if (this.copyHotkeyKeydownHandler) {
+      window.removeEventListener("keydown", this.copyHotkeyKeydownHandler, true);
+      this.copyHotkeyKeydownHandler = null;
+    }
+  }
+
+  private async applyRecordedCopyHotkey(): Promise<void> {
+    if (!this.pendingCopyPlayHotkey) return;
+    try {
+      const applied = await window.electronAPI?.applyCopyHotkey?.(this.pendingCopyPlayHotkey);
+      const next = applied ?? this.pendingCopyPlayHotkey;
+      this.config.system.copyPlayHotkey = next;
+      this.pendingCopyPlayHotkey = null;
+      this.copyHotkeyRecording = false;
+      this.stopCopyHotkeyRecordingListener();
+      this.must<HTMLInputElement>("copy-play-hotkey").value = next;
+      this.setCopyHotkeyRecordingStatus(`Active hotkey: ${next}`);
+      this.store.save(this.config);
+    } catch (error) {
+      this.setCopyHotkeyRecordingStatus(`Apply failed: ${String(error)}`);
+      return;
+    }
+    this.renderHotkeyButtonState();
+  }
+
+  private async cancelCopyHotkeyRecording(): Promise<void> {
+    this.copyHotkeyRecording = false;
+    this.pendingCopyPlayHotkey = null;
+    this.stopCopyHotkeyRecordingListener();
+    try {
+      const restored = await window.electronAPI?.cancelCopyHotkeyEdit?.();
+      if (restored) {
+        this.config.system.copyPlayHotkey = restored;
+      }
+    } catch (error) {
+      this.setStatus(`Failed to cancel copy hotkey edit: ${String(error)}`);
+    }
+    this.must<HTMLInputElement>("copy-play-hotkey").value = this.config.system.copyPlayHotkey;
+    this.setCopyHotkeyRecordingStatus("Current hotkey is active.");
     this.renderHotkeyButtonState();
     this.store.save(this.config);
   }

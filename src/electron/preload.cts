@@ -6,6 +6,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
       if (payload?.dataUrl) handler(payload.dataUrl);
     });
   },
+  onCopiedTextForPlayback: (handler: (text: string) => void) => {
+    ipcRenderer.on("copy-play-text", (_event, payload: { text?: string }) => {
+      if (payload?.text) handler(payload.text);
+    });
+  },
   beginCaptureHotkeyEdit: () => {
     return ipcRenderer.invoke("capture:begin-hotkey-edit") as Promise<string>;
   },
@@ -17,6 +22,18 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   getCaptureHotkey: () => {
     return ipcRenderer.invoke("capture:get-hotkey") as Promise<string>;
+  },
+  beginCopyHotkeyEdit: () => {
+    return ipcRenderer.invoke("copy:begin-hotkey-edit") as Promise<string>;
+  },
+  applyCopyHotkey: (hotkey: string) => {
+    return ipcRenderer.invoke("copy:apply-hotkey", hotkey) as Promise<string>;
+  },
+  cancelCopyHotkeyEdit: () => {
+    return ipcRenderer.invoke("copy:cancel-hotkey-edit") as Promise<string>;
+  },
+  getCopyHotkey: () => {
+    return ipcRenderer.invoke("copy:get-hotkey") as Promise<string>;
   },
   setCaptureDrawRectangle: (enabled: boolean) => {
     return ipcRenderer.invoke("capture:set-draw-rectangle", enabled) as Promise<boolean>;

@@ -57,6 +57,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     diagnosticsEnabled: true,
     lastImportAt: "",
     captureHotkey: "ctrl+shift+alt+s",
+    copyPlayHotkey: "ctrl+shift+alt+x",
     captureDrawRectangle: true
   },
   logging: {

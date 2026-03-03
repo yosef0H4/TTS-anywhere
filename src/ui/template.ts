@@ -151,6 +151,16 @@ export const APP_TEMPLATE = `
             <button type="button" id="btn-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i>Cancel</button>
           </div>
           <div class="setting-footnote" id="hotkey-recording-status">Current hotkey is active.</div>
+          <div class="setting-group">
+            <label>Copy & Play Hotkey</label>
+            <input type="text" id="copy-play-hotkey" readonly>
+          </div>
+          <div class="settings-actions-grid">
+            <button type="button" id="btn-copy-hotkey-record"><i data-lucide="keyboard" class="ui-icon"></i>Record</button>
+            <button type="button" id="btn-copy-hotkey-apply"><i data-lucide="check" class="ui-icon"></i>Apply</button>
+            <button type="button" id="btn-copy-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i>Cancel</button>
+          </div>
+          <div class="setting-footnote" id="copy-hotkey-recording-status">Current hotkey is active.</div>
           <div class="setting-group setting-toggle-row">
             <label for="capture-draw-rectangle">Draw Selection Rectangle</label>
             <input id="capture-draw-rectangle" type="checkbox">

@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain } from "electron";
-import { BorderOverlay, HotkeySession } from "nodehotkey";
+import { BorderOverlay, HotkeySession, captureCopyToText } from "nodehotkey";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,9 +30,12 @@ const __dirname = path.dirname(__filename);
 let mainWindow: BrowserWindow | null = null;
 let isPinned = true;
 let currentLogLevel: LogLevel = "info";
-let hotkeySession: HotkeySession | null = null;
-let activeHotkey = "ctrl+shift+alt+s";
-let hotkeyBeforeEdit: string | null = null;
+let captureHotkeySession: HotkeySession | null = null;
+let copyHotkeySession: HotkeySession | null = null;
+let activeCaptureHotkey = "ctrl+shift+alt+s";
+let activeCopyHotkey = "ctrl+shift+alt+x";
+let captureHotkeyBeforeEdit: string | null = null;
+let copyHotkeyBeforeEdit: string | null = null;
 let drawSelectionRectangle = true;
 let overlay: BorderOverlay | null = null;
 let selectionTicker: NodeJS.Timeout | null = null;
@@ -40,6 +43,7 @@ let selectionActive = false;
 let selectionStart: { x: number; y: number } | null = null;
 let lastCursor: { x: number; y: number } | null = null;
 let lastRect: { left: number; top: number; right: number; bottom: number } | null = null;
+let copyPlayInFlight = false;
 
 function prefsPath(): string {
   return path.join(app.getPath("userData"), "window-prefs.json");
@@ -192,7 +196,7 @@ function startSelection(point: { x: number; y: number }): void {
   lastRect = null;
   selectionActive = true;
   if (drawSelectionRectangle) overlay?.hide();
-  diag("capture.start", { x: point.x, y: point.y, hotkey: hotkeySession?.getHotkey() });
+  diag("capture.start", { x: point.x, y: point.y, hotkey: captureHotkeySession?.getHotkey() });
 }
 
 async function finalizeSelection(point: { x: number; y: number }): Promise<void> {
@@ -248,8 +252,8 @@ async function finalizeSelection(point: { x: number; y: number }): Promise<void>
 function startSelectionTicker(): void {
   if (selectionTicker) return;
   selectionTicker = setInterval(() => {
-    if (!selectionActive || !hotkeySession || !selectionStart) return;
-    const point = hotkeySession.getCursorPos();
+    if (!selectionActive || !captureHotkeySession || !selectionStart) return;
+    const point = captureHotkeySession.getCursorPos();
     if (!point) return;
 
     lastCursor = { x: point.x, y: point.y };
@@ -264,13 +268,45 @@ function startSelectionTicker(): void {
   }, 16);
 }
 
+function normalizeHotkeyLabel(hotkey: string): string {
+  return String(hotkey ?? "").trim().toLowerCase();
+}
+
+function assertHotkeyDistinct(candidate: string, other: string, what: "capture" | "copy"): string {
+  const normalized = normalizeHotkeyLabel(candidate);
+  if (!normalized) throw new Error("Hotkey is required");
+  if (normalized === normalizeHotkeyLabel(other)) {
+    throw new Error(`${what} hotkey cannot match the other hotkey`);
+  }
+  return normalized;
+}
+
+async function runCopyPlayCapture(): Promise<void> {
+  if (copyPlayInFlight) return;
+  copyPlayInFlight = true;
+  try {
+    const result = await captureCopyToText({ copyHotkey: "ctrl+c", timeoutMs: 5000, pollMs: 25, restoreClipboard: true });
+    const text = result.text.trim();
+    if (!result.changed || !text) {
+      diag("copy.play.empty", { changed: result.changed });
+      return;
+    }
+    mainWindow?.webContents.send("copy-play-text", { text });
+    diag("copy.play.sent", { length: text.length });
+  } catch (error) {
+    diag("copy.play.error", { error: String(error) });
+  } finally {
+    copyPlayInFlight = false;
+  }
+}
+
 app.whenReady().then(() => {
   diag("app.ready");
   isPinned = loadPinnedPref();
   mainWindow = createMainWindow();
   overlay = new BorderOverlay(2);
-  hotkeySession = new HotkeySession({
-    initialHotkey: activeHotkey,
+  captureHotkeySession = new HotkeySession({
+    initialHotkey: activeCaptureHotkey,
     events: {
       onHotkeyRegistered: (label) => diag("capture.hotkey.registered", { label }),
       onHotkeySwitched: (label) => diag("capture.hotkey.switched", { label }),
@@ -280,7 +316,18 @@ app.whenReady().then(() => {
       }
     }
   });
-  hotkeySession.start();
+  copyHotkeySession = new HotkeySession({
+    initialHotkey: activeCopyHotkey,
+    events: {
+      onHotkeyRegistered: (label) => diag("copy.hotkey.registered", { label }),
+      onHotkeySwitched: (label) => diag("copy.hotkey.switched", { label }),
+      onTriggerUp: () => {
+        void runCopyPlayCapture();
+      }
+    }
+  });
+  captureHotkeySession.start();
+  copyHotkeySession.start();
   startSelectionTicker();
 
   app.on("activate", () => {
@@ -291,42 +338,79 @@ app.whenReady().then(() => {
 });
 
 ipcMain.handle("capture:begin-hotkey-edit", () => {
-  if (!hotkeySession) return activeHotkey;
-  hotkeyBeforeEdit = activeHotkey;
-  hotkeySession.stop();
-  diag("capture.hotkey.edit.begin", { activeHotkey });
-  return activeHotkey;
+  if (!captureHotkeySession) return activeCaptureHotkey;
+  captureHotkeyBeforeEdit = activeCaptureHotkey;
+  captureHotkeySession.stop();
+  diag("capture.hotkey.edit.begin", { activeHotkey: activeCaptureHotkey });
+  return activeCaptureHotkey;
 });
 
 ipcMain.handle("capture:apply-hotkey", (_event, hotkey: string) => {
-  if (!hotkeySession) return activeHotkey;
-  const normalized = String(hotkey ?? "").trim().toLowerCase();
-  if (!normalized) throw new Error("Hotkey is required");
-  hotkeySession.setHotkey(normalized);
-  activeHotkey = hotkeySession.getHotkey();
-  hotkeyBeforeEdit = null;
-  hotkeySession.start();
-  diag("capture.hotkey.edit.applied", { activeHotkey });
-  return activeHotkey;
+  if (!captureHotkeySession) return activeCaptureHotkey;
+  const normalized = assertHotkeyDistinct(hotkey, activeCopyHotkey, "capture");
+  captureHotkeySession.setHotkey(normalized);
+  activeCaptureHotkey = captureHotkeySession.getHotkey();
+  captureHotkeyBeforeEdit = null;
+  captureHotkeySession.start();
+  diag("capture.hotkey.edit.applied", { activeHotkey: activeCaptureHotkey });
+  return activeCaptureHotkey;
 });
 
 ipcMain.handle("capture:cancel-hotkey-edit", () => {
-  if (!hotkeySession) return activeHotkey;
-  if (hotkeyBeforeEdit) {
-    hotkeySession.setHotkey(hotkeyBeforeEdit);
-    activeHotkey = hotkeySession.getHotkey();
+  if (!captureHotkeySession) return activeCaptureHotkey;
+  if (captureHotkeyBeforeEdit) {
+    captureHotkeySession.setHotkey(captureHotkeyBeforeEdit);
+    activeCaptureHotkey = captureHotkeySession.getHotkey();
   }
-  hotkeyBeforeEdit = null;
-  hotkeySession.start();
-  diag("capture.hotkey.edit.cancelled", { activeHotkey });
-  return activeHotkey;
+  captureHotkeyBeforeEdit = null;
+  captureHotkeySession.start();
+  diag("capture.hotkey.edit.cancelled", { activeHotkey: activeCaptureHotkey });
+  return activeCaptureHotkey;
 });
 
 ipcMain.handle("capture:get-hotkey", () => {
-  if (hotkeySession) {
-    activeHotkey = hotkeySession.getHotkey();
+  if (captureHotkeySession) {
+    activeCaptureHotkey = captureHotkeySession.getHotkey();
   }
-  return activeHotkey;
+  return activeCaptureHotkey;
+});
+
+ipcMain.handle("copy:begin-hotkey-edit", () => {
+  if (!copyHotkeySession) return activeCopyHotkey;
+  copyHotkeyBeforeEdit = activeCopyHotkey;
+  copyHotkeySession.stop();
+  diag("copy.hotkey.edit.begin", { activeHotkey: activeCopyHotkey });
+  return activeCopyHotkey;
+});
+
+ipcMain.handle("copy:apply-hotkey", (_event, hotkey: string) => {
+  if (!copyHotkeySession) return activeCopyHotkey;
+  const normalized = assertHotkeyDistinct(hotkey, activeCaptureHotkey, "copy");
+  copyHotkeySession.setHotkey(normalized);
+  activeCopyHotkey = copyHotkeySession.getHotkey();
+  copyHotkeyBeforeEdit = null;
+  copyHotkeySession.start();
+  diag("copy.hotkey.edit.applied", { activeHotkey: activeCopyHotkey });
+  return activeCopyHotkey;
+});
+
+ipcMain.handle("copy:cancel-hotkey-edit", () => {
+  if (!copyHotkeySession) return activeCopyHotkey;
+  if (copyHotkeyBeforeEdit) {
+    copyHotkeySession.setHotkey(copyHotkeyBeforeEdit);
+    activeCopyHotkey = copyHotkeySession.getHotkey();
+  }
+  copyHotkeyBeforeEdit = null;
+  copyHotkeySession.start();
+  diag("copy.hotkey.edit.cancelled", { activeHotkey: activeCopyHotkey });
+  return activeCopyHotkey;
+});
+
+ipcMain.handle("copy:get-hotkey", () => {
+  if (copyHotkeySession) {
+    activeCopyHotkey = copyHotkeySession.getHotkey();
+  }
+  return activeCopyHotkey;
 });
 
 ipcMain.handle("capture:set-draw-rectangle", (_event, enabled: boolean) => {
@@ -419,8 +503,10 @@ app.on("will-quit", () => {
     clearInterval(selectionTicker);
     selectionTicker = null;
   }
-  hotkeySession?.stop();
-  hotkeySession = null;
+  captureHotkeySession?.stop();
+  captureHotkeySession = null;
+  copyHotkeySession?.stop();
+  copyHotkeySession = null;
   overlay?.destroy();
   overlay = null;
 });

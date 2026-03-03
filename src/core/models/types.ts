@@ -70,6 +70,7 @@ export interface SystemConfig {
   diagnosticsEnabled: boolean;
   lastImportAt: string;
   captureHotkey: string;
+  copyPlayHotkey: string;
   captureDrawRectangle: boolean;
 }
 
