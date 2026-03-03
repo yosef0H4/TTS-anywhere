@@ -8,6 +8,8 @@ export interface ElectronApi {
   applyCaptureHotkey: (hotkey: string) => Promise<string>;
   cancelCaptureHotkeyEdit: () => Promise<string>;
   getCaptureHotkey: () => Promise<string>;
+  setCaptureDrawRectangle: (enabled: boolean) => Promise<boolean>;
+  getCaptureDrawRectangle: () => Promise<boolean>;
   minimizeWindow: () => void;
   toggleMaximizeWindow: () => Promise<boolean>;
   closeWindow: () => void;

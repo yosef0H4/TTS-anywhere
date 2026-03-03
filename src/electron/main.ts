@@ -33,6 +33,7 @@ let currentLogLevel: LogLevel = "info";
 let hotkeySession: HotkeySession | null = null;
 let activeHotkey = "ctrl+shift+alt+s";
 let hotkeyBeforeEdit: string | null = null;
+let drawSelectionRectangle = true;
 let overlay: BorderOverlay | null = null;
 let selectionTicker: NodeJS.Timeout | null = null;
 let selectionActive = false;
@@ -190,7 +191,7 @@ function startSelection(point: { x: number; y: number }): void {
   lastCursor = { x: point.x, y: point.y };
   lastRect = null;
   selectionActive = true;
-  overlay?.hide();
+  if (drawSelectionRectangle) overlay?.hide();
   diag("capture.start", { x: point.x, y: point.y, hotkey: hotkeySession?.getHotkey() });
 }
 
@@ -200,7 +201,7 @@ async function finalizeSelection(point: { x: number; y: number }): Promise<void>
     selectionStart = null;
     lastCursor = null;
     lastRect = null;
-    overlay?.hide();
+    if (drawSelectionRectangle) overlay?.hide();
     return;
   }
 
@@ -218,7 +219,7 @@ async function finalizeSelection(point: { x: number; y: number }): Promise<void>
   selectionStart = null;
   lastCursor = null;
   lastRect = null;
-  overlay?.hide();
+  if (drawSelectionRectangle) overlay?.hide();
 
   if (payload.width < 1 || payload.height < 1) {
     diag("capture.error", { error: "Selection rectangle has zero area" });
@@ -255,6 +256,7 @@ function startSelectionTicker(): void {
     const nextRect = buildRect(selectionStart, lastCursor);
     if (nextRect.right <= nextRect.left || nextRect.bottom <= nextRect.top) return;
 
+    if (!drawSelectionRectangle) return;
     if (!sameRect(lastRect, nextRect)) {
       overlay?.draw(nextRect);
       lastRect = nextRect;
@@ -326,6 +328,17 @@ ipcMain.handle("capture:get-hotkey", () => {
   }
   return activeHotkey;
 });
+
+ipcMain.handle("capture:set-draw-rectangle", (_event, enabled: boolean) => {
+  drawSelectionRectangle = Boolean(enabled);
+  if (!drawSelectionRectangle) {
+    overlay?.hide();
+  }
+  diag("capture.draw-rectangle.changed", { enabled: drawSelectionRectangle });
+  return drawSelectionRectangle;
+});
+
+ipcMain.handle("capture:get-draw-rectangle", () => drawSelectionRectangle);
 
 ipcMain.on("window:minimize", () => {
   mainWindow?.minimize();

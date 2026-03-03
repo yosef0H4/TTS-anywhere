@@ -82,6 +82,7 @@ export class WebApp {
     this.bindLoggingSettings();
     this.renderConfig();
     void this.syncElectronCaptureHotkeyFromSettings();
+    void this.syncElectronCaptureRectangleSetting();
     loggers.app.info("App mounted");
   }
 
@@ -450,6 +451,10 @@ export class WebApp {
     });
 
     this.must<HTMLInputElement>("diagnostics-enabled").addEventListener("change", () => this.syncConfigFromInputs());
+    this.must<HTMLInputElement>("capture-draw-rectangle").addEventListener("change", () => {
+      this.syncConfigFromInputs();
+      void this.syncElectronCaptureRectangleSetting();
+    });
 
     this.must<HTMLButtonElement>("btn-export-settings").addEventListener("click", () => this.exportSettings());
     this.must<HTMLButtonElement>("btn-import-settings").addEventListener("click", () => {
@@ -464,6 +469,7 @@ export class WebApp {
       this.store.save(this.config);
       this.updateTimelineFromRawText();
       void this.syncElectronCaptureHotkeyFromSettings();
+      void this.syncElectronCaptureRectangleSetting();
       this.setStatus("Settings reset to defaults.");
     });
 
@@ -523,6 +529,7 @@ export class WebApp {
       ? (punctuationMode as AppConfig["reading"]["punctuationPauseMode"])
       : "low";
     this.config.system.diagnosticsEnabled = this.must<HTMLInputElement>("diagnostics-enabled").checked;
+    this.config.system.captureDrawRectangle = this.must<HTMLInputElement>("capture-draw-rectangle").checked;
     this.config.ui.showChunkDiagnostics = this.must<HTMLInputElement>("show-chunk-diagnostics").checked;
     this.applyUiState();
     this.store.save(this.config);
@@ -549,6 +556,7 @@ export class WebApp {
     this.must<HTMLInputElement>("session-audio-byte-limit").value = String(this.config.reading.sessionAudioByteLimit);
     this.must<HTMLSelectElement>("punctuation-pause").value = this.config.reading.punctuationPauseMode;
     this.must<HTMLInputElement>("diagnostics-enabled").checked = this.config.system.diagnosticsEnabled;
+    this.must<HTMLInputElement>("capture-draw-rectangle").checked = this.config.system.captureDrawRectangle;
     this.must<HTMLInputElement>("capture-hotkey").value = this.pendingCaptureHotkey ?? this.config.system.captureHotkey;
     this.setHotkeyRecordingStatus(window.electronAPI ? "Current hotkey is active." : "Hotkey editing is available in Electron only.");
     this.renderHotkeyButtonState();
@@ -642,6 +650,7 @@ export class WebApp {
       this.updateTimelineFromRawText();
       this.store.save(this.config);
       void this.syncElectronCaptureHotkeyFromSettings();
+      void this.syncElectronCaptureRectangleSetting();
       this.setStatus("Settings imported.");
       loggers.settings.info("Settings imported");
     } catch (error) {
@@ -765,6 +774,18 @@ export class WebApp {
       this.store.save(this.config);
     } catch (error) {
       this.setStatus(`Failed to apply saved hotkey: ${String(error)}`);
+    }
+  }
+
+  private async syncElectronCaptureRectangleSetting(): Promise<void> {
+    if (!window.electronAPI?.setCaptureDrawRectangle) return;
+    try {
+      const applied = await window.electronAPI.setCaptureDrawRectangle(this.config.system.captureDrawRectangle);
+      this.config.system.captureDrawRectangle = applied;
+      this.must<HTMLInputElement>("capture-draw-rectangle").checked = applied;
+      this.store.save(this.config);
+    } catch (error) {
+      this.setStatus(`Failed to apply rectangle setting: ${String(error)}`);
     }
   }
 
@@ -934,7 +955,7 @@ export class WebApp {
       this.must<HTMLTextAreaElement>("raw-text").value = result.text;
       this.updateTimelineFromRawText();
       this.resetPlaybackForTextChange();
-      this.setStatus("Ready");
+      await this.startOrResumePlayback();
     } catch (error) {
       loggers.pipeline.error("Pipeline failed", { error: String(error) });
       this.setStatus(`Pipeline error: ${String(error)}`);

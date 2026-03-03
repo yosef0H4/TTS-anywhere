@@ -152,6 +152,10 @@ export const APP_TEMPLATE = `
           </div>
           <div class="setting-footnote" id="hotkey-recording-status">Current hotkey is active.</div>
           <div class="setting-group setting-toggle-row">
+            <label for="capture-draw-rectangle">Draw Selection Rectangle</label>
+            <input id="capture-draw-rectangle" type="checkbox">
+          </div>
+          <div class="setting-group setting-toggle-row">
             <label for="diagnostics-enabled">Diagnostics Enabled</label>
             <input id="diagnostics-enabled" type="checkbox">
           </div>

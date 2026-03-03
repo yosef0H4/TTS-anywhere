@@ -18,6 +18,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getCaptureHotkey: () => {
     return ipcRenderer.invoke("capture:get-hotkey") as Promise<string>;
   },
+  setCaptureDrawRectangle: (enabled: boolean) => {
+    return ipcRenderer.invoke("capture:set-draw-rectangle", enabled) as Promise<boolean>;
+  },
+  getCaptureDrawRectangle: () => {
+    return ipcRenderer.invoke("capture:get-draw-rectangle") as Promise<boolean>;
+  },
   minimizeWindow: () => {
     ipcRenderer.send("window:minimize");
   },
