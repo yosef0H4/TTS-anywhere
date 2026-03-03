@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import platform
 import subprocess
 import tempfile
+import threading
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -52,6 +54,8 @@ class PiperRuntime:
         self.bin_dir = Path(self.settings.piper_bin_dir)
         self.bin_dir.mkdir(parents=True, exist_ok=True)
         self._voices_cache: dict[str, Any] | None = None
+        self._model_download_lock = threading.Lock()
+        self._binary_download_lock = threading.Lock()
 
     def _resolve_piper_binary(self) -> str:
         configured = self.settings.piper_bin
@@ -92,59 +96,85 @@ class PiperRuntime:
                 },
             )
 
-        release_api = "https://api.github.com/repos/rhasspy/piper/releases/latest"
-        with urllib.request.urlopen(release_api, timeout=30) as response:
-            release = json.loads(response.read().decode("utf-8"))
+        with self._binary_download_lock:
+            existing_binary = list(self.bin_dir.rglob(binary_name))
+            if existing_binary:
+                binary = existing_binary[0]
+                if sys_name != "windows":
+                    binary.chmod(0o755)
+                return str(binary)
 
-        asset_url = None
-        for asset in release.get("assets", []):
-            if asset.get("name") == asset_name:
-                asset_url = asset.get("browser_download_url")
-                break
+            release_api = "https://api.github.com/repos/rhasspy/piper/releases/latest"
+            with urllib.request.urlopen(release_api, timeout=30) as response:
+                release = json.loads(response.read().decode("utf-8"))
 
-        if not asset_url:
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "error": {
-                        "message": f"Could not find Piper asset {asset_name} in latest release",
-                        "type": "server_error",
-                        "code": "piper_asset_missing",
-                    }
-                },
-            )
+            asset_url = None
+            for asset in release.get("assets", []):
+                if asset.get("name") == asset_name:
+                    asset_url = asset.get("browser_download_url")
+                    break
 
-        archive_path = self.bin_dir / asset_name
-        urllib.request.urlretrieve(asset_url, archive_path)
+            if not asset_url:
+                raise HTTPException(
+                    status_code=500,
+                    detail={
+                        "error": {
+                            "message": f"Could not find Piper asset {asset_name} in latest release",
+                            "type": "server_error",
+                            "code": "piper_asset_missing",
+                        }
+                    },
+                )
 
-        if asset_name.endswith(".zip"):
-            with zipfile.ZipFile(archive_path, "r") as zip_handle:
-                zip_handle.extractall(self.bin_dir)
-        else:
-            import tarfile
+            archive_path = self.bin_dir / asset_name
+            urllib.request.urlretrieve(asset_url, archive_path)
 
-            with tarfile.open(archive_path, "r:gz") as tar_handle:
-                tar_handle.extractall(self.bin_dir)
+            try:
+                if asset_name.endswith(".zip"):
+                    try:
+                        with zipfile.ZipFile(archive_path, "r") as zip_handle:
+                            zip_handle.extractall(self.bin_dir)
+                    except zipfile.BadZipFile:
+                        archive_path.unlink(missing_ok=True)
+                        urllib.request.urlretrieve(asset_url, archive_path)
+                        with zipfile.ZipFile(archive_path, "r") as zip_handle:
+                            zip_handle.extractall(self.bin_dir)
+                else:
+                    import tarfile
 
-        archive_path.unlink(missing_ok=True)
+                    with tarfile.open(archive_path, "r:gz") as tar_handle:
+                        tar_handle.extractall(self.bin_dir)
+            finally:
+                archive_path.unlink(missing_ok=True)
 
-        candidates = list(self.bin_dir.rglob(binary_name))
-        if not candidates:
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "error": {
-                        "message": "Piper binary extraction failed",
-                        "type": "server_error",
-                        "code": "piper_extract_failed",
-                    }
-                },
-            )
+            candidates = list(self.bin_dir.rglob(binary_name))
+            if not candidates:
+                raise HTTPException(
+                    status_code=500,
+                    detail={
+                        "error": {
+                            "message": "Piper binary extraction failed",
+                            "type": "server_error",
+                            "code": "piper_extract_failed",
+                        }
+                    },
+                )
 
-        binary = candidates[0]
-        if sys_name != "windows":
-            binary.chmod(0o755)
-        return str(binary)
+            binary = candidates[0]
+            if sys_name != "windows":
+                binary.chmod(0o755)
+            return str(binary)
+
+    def _copy_into_place(self, source_path: str | Path, target_path: Path) -> None:
+        source = Path(source_path)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=target_path.parent, delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+        try:
+            shutil.copy2(source, tmp_path)
+            os.replace(tmp_path, target_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
 
     def _load_voices_catalog(self) -> dict[str, Any]:
         if self._voices_cache is not None:
@@ -186,45 +216,46 @@ class PiperRuntime:
         model_file = self.model_dir / f"{model_key}.onnx"
         config_file = self.model_dir / f"{model_key}.onnx.json"
 
-        if model_file.exists() and config_file.exists():
-            logger.info("Using cached Piper model '%s' at %s", model_key, model_file)
-            return str(model_file)
+        with self._model_download_lock:
+            if model_file.exists() and config_file.exists():
+                logger.info("Using cached Piper model '%s' at %s", model_key, model_file)
+                return str(model_file)
 
-        voices = self._load_voices_catalog()
-        entry = voices[model_key]
-        files = entry.get("files", {})
+            voices = self._load_voices_catalog()
+            entry = voices[model_key]
+            files = entry.get("files", {})
 
-        onnx_remote = next((name for name in files if name.endswith(".onnx") and not name.endswith(".onnx.json")), None)
-        json_remote = next((name for name in files if name.endswith(".onnx.json")), None)
-        if not onnx_remote or not json_remote:
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "error": {
-                        "message": f"Model files missing in catalog for {model_key}",
-                        "type": "server_error",
-                        "code": "model_files_missing",
-                    }
-                },
+            onnx_remote = next((name for name in files if name.endswith(".onnx") and not name.endswith(".onnx.json")), None)
+            json_remote = next((name for name in files if name.endswith(".onnx.json")), None)
+            if not onnx_remote or not json_remote:
+                raise HTTPException(
+                    status_code=500,
+                    detail={
+                        "error": {
+                            "message": f"Model files missing in catalog for {model_key}",
+                            "type": "server_error",
+                            "code": "model_files_missing",
+                        }
+                    },
+                )
+
+            downloaded_onnx = hf_hub_download(
+                repo_id=self.settings.piper_voices_repo,
+                filename=onnx_remote,
+                repo_type="model",
+                local_dir=self.model_dir,
+            )
+            downloaded_json = hf_hub_download(
+                repo_id=self.settings.piper_voices_repo,
+                filename=json_remote,
+                repo_type="model",
+                local_dir=self.model_dir,
             )
 
-        downloaded_onnx = hf_hub_download(
-            repo_id=self.settings.piper_voices_repo,
-            filename=onnx_remote,
-            repo_type="model",
-            local_dir=self.model_dir,
-        )
-        downloaded_json = hf_hub_download(
-            repo_id=self.settings.piper_voices_repo,
-            filename=json_remote,
-            repo_type="model",
-            local_dir=self.model_dir,
-        )
-
-        Path(downloaded_onnx).replace(model_file)
-        Path(downloaded_json).replace(config_file)
-        logger.info("Downloaded Piper model '%s' to %s", model_key, model_file)
-        return str(model_file)
+            self._copy_into_place(downloaded_onnx, model_file)
+            self._copy_into_place(downloaded_json, config_file)
+            logger.info("Downloaded Piper model '%s' to %s", model_key, model_file)
+            return str(model_file)
 
     def local_models(self) -> dict[str, str]:
         if self.settings.piper_models:

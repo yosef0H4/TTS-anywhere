@@ -810,15 +810,10 @@ export class WebApp {
       this.prefetchFromIndex(chunk.index, session);
     } catch (error) {
       if (session !== this.chunkPlaybackSession) return;
-      const nextIndex = this.activeChunkIndex + 1;
-      if (nextIndex < this.timeline.chunks.length) {
-        this.setChunkState(chunk.index, "failed", String(error));
-        this.setStatus(`Skipping chunk ${this.activeChunkIndex + 1}: ${String(error)}`);
-        await this.playChunkAtIndex(nextIndex, session);
-        return;
-      }
+      this.setChunkState(chunk.index, "failed", String(error));
       this.chunkPlaybackMode = false;
-      this.setStatus("Ready");
+      this.renderPlayState();
+      this.setStatus(`Stopped: failed to synthesize chunk ${chunk.index + 1}/${this.timeline.chunks.length}. ${String(error)}`);
     }
   }
 
@@ -937,13 +932,30 @@ export class WebApp {
   }
 
   private async synthesizeChunk(index: number, text: string, session: number, signal: AbortSignal): Promise<Blob> {
-    if (session !== this.chunkPlaybackSession || signal.aborted) {
-      throw new Error("Cancelled");
+    const retries = Math.max(0, this.config.reading.chunkRetryCount);
+    const maxAttempts = retries + 1;
+    let lastError: unknown = new Error("Unknown synthesis failure");
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      if (session !== this.chunkPlaybackSession || signal.aborted) {
+        throw new Error("Cancelled");
+      }
+      try {
+        return await this.pipeline.synthesizeText(text, this.config, {
+          signal,
+          timeoutMs: this.config.reading.chunkTimeoutMs
+        });
+      } catch (error) {
+        lastError = error;
+        if (attempt < maxAttempts) {
+          this.setStatus(
+            `Retrying chunk ${index + 1}/${this.timeline.chunks.length} (${attempt}/${retries})...`
+          );
+          continue;
+        }
+      }
     }
-    return this.pipeline.synthesizeText(text, this.config, {
-      signal,
-      timeoutMs: this.config.reading.chunkTimeoutMs
-    });
+    throw lastError;
   }
 
   private chunkHash(text: string): string {
