@@ -15,6 +15,7 @@ export interface TtsConfig {
 }
 
 export interface ReadingConfig {
+  cleanTextBeforeTts: boolean;
   minWordsPerChunk: number;
   maxWordsPerChunk: number;
   wpmBase: number;

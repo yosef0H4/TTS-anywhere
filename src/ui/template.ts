@@ -98,6 +98,10 @@ export const APP_TEMPLATE = `
             <div class="setting-group"><label>Min Words / Chunk</label><input type="number" id="chunk-min" min="1"></div>
             <div class="setting-group"><label>Max Words / Chunk</label><input type="number" id="chunk-max" min="1"></div>
           </div>
+          <div class="setting-group setting-toggle-row">
+            <label for="clean-text-before-tts">Clean Text Before Chunking/TTS</label>
+            <input id="clean-text-before-tts" type="checkbox">
+          </div>
           <div class="setting-grid">
             <div class="setting-group"><label>WPM</label><input type="number" id="wpm" min="1"></div>
             <div class="setting-group">

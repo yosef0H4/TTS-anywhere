@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { buildReadingTimeline, findChunkIndexByTime, normalizeText, splitIntoChunks } from "../core/utils/chunking";
+import { buildReadingTimeline, cleanTextForTts, findChunkIndexByTime, normalizeText, splitIntoChunks } from "../core/utils/chunking";
 
 describe("chunking", () => {
   it("normalizes whitespace", () => {
     expect(normalizeText("  hello\n\nworld  ")).toBe("hello world");
+  });
+
+  it("cleans text for tts", () => {
+    expect(cleanTextForTts("Hi 😊   there!!!!\n\n#ok")).toBe("Hi there!!! #ok");
   });
 
   it("splits by sentence boundaries and punctuation", () => {

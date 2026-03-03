@@ -4,6 +4,15 @@ export function normalizeText(input: string): string {
   return input.replace(/\s+/g, " ").trim();
 }
 
+export function cleanTextForTts(input: string): string {
+  // Match PiperAnywhere behavior: strip decorative symbols/emojis, normalize whitespace,
+  // and cap excessive terminal punctuation.
+  let cleaned = input.replace(/[^\p{L}\p{N}\p{P}\p{Z}]/gu, "");
+  cleaned = cleaned.replace(/\s+/g, " ").trim();
+  cleaned = cleaned.replace(/([.!?]){4,}/g, "$1$1$1");
+  return cleaned;
+}
+
 function splitSentenceLikeUnits(text: string): string[] {
   const prepared = text.replace(/\r\n/g, "\n");
   return prepared

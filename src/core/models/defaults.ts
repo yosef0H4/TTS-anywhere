@@ -16,6 +16,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     speed: 1
   },
   reading: {
+    cleanTextBeforeTts: false,
     minWordsPerChunk: 6,
     maxWordsPerChunk: 25,
     wpmBase: 180,

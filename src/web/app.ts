@@ -5,7 +5,7 @@ import { DEFAULT_CONFIG } from "../core/models/defaults";
 import type { AppConfig, ReadingTimeline } from "../core/models/types";
 import { AppPipeline } from "../core/pipeline/app-pipeline";
 import { SettingsStore } from "../core/services/settings-store";
-import { buildReadingTimeline, findChunkIndexByTime, normalizeText } from "../core/utils/chunking";
+import { buildReadingTimeline, cleanTextForTts, findChunkIndexByTime, normalizeText } from "../core/utils/chunking";
 import { APP_TEMPLATE } from "../ui/template";
 import "../ui/styles.css";
 
@@ -394,6 +394,7 @@ export class WebApp {
       "tts-key",
       "chunk-min",
       "chunk-max",
+      "clean-text-before-tts",
       "wpm",
       "stream-window-size",
       "chunk-concurrency",
@@ -448,6 +449,7 @@ export class WebApp {
     this.config.reading.maxWordsPerChunk = Number.isFinite(maxWords)
       ? Math.max(this.config.reading.minWordsPerChunk, Math.floor(maxWords))
       : this.config.reading.minWordsPerChunk;
+    this.config.reading.cleanTextBeforeTts = this.must<HTMLInputElement>("clean-text-before-tts").checked;
     this.config.reading.wpmBase = Number(this.must<HTMLInputElement>("wpm").value);
     this.config.reading.streamWindowSize = Math.max(1, Math.floor(Number(this.must<HTMLInputElement>("stream-window-size").value) || 1));
     this.config.reading.chunkRequestConcurrency = Math.max(
@@ -488,6 +490,7 @@ export class WebApp {
     this.must<HTMLInputElement>("tts-key").value = this.config.tts.apiKey;
     this.must<HTMLInputElement>("chunk-min").value = String(this.config.reading.minWordsPerChunk);
     this.must<HTMLInputElement>("chunk-max").value = String(this.config.reading.maxWordsPerChunk);
+    this.must<HTMLInputElement>("clean-text-before-tts").checked = this.config.reading.cleanTextBeforeTts;
     this.must<HTMLInputElement>("wpm").value = String(this.config.reading.wpmBase);
     this.must<HTMLInputElement>("stream-window-size").value = String(this.config.reading.streamWindowSize);
     this.must<HTMLInputElement>("chunk-concurrency").value = String(this.config.reading.chunkRequestConcurrency);
@@ -734,12 +737,8 @@ export class WebApp {
     try {
       const result = await this.pipeline.run(dataUrl, this.config);
       this.must<HTMLTextAreaElement>("raw-text").value = result.text;
-      this.timeline = result.timeline;
-      this.activeChunkIndex = 0;
+      this.updateTimelineFromRawText();
       this.resetPlaybackForTextChange();
-      this.initializeChunkStates();
-      this.renderReadingPreview();
-      this.lastSynthText = result.text;
       this.setStatus("Ready");
     } catch (error) {
       this.setStatus(`Pipeline error: ${String(error)}`);
@@ -747,7 +746,7 @@ export class WebApp {
   }
 
   private updateTimelineFromRawText(): void {
-    const text = this.must<HTMLTextAreaElement>("raw-text").value;
+    const text = this.getPlaybackText();
     this.timeline = buildReadingTimeline(
       text,
       this.config.reading.minWordsPerChunk,
@@ -760,8 +759,13 @@ export class WebApp {
     this.renderReadingPreview();
   }
 
+  private getPlaybackText(): string {
+    const raw = this.must<HTMLTextAreaElement>("raw-text").value;
+    return this.config.reading.cleanTextBeforeTts ? cleanTextForTts(raw) : raw;
+  }
+
   private async startOrResumePlayback(): Promise<void> {
-    const text = this.must<HTMLTextAreaElement>("raw-text").value.trim();
+    const text = this.getPlaybackText().trim();
     if (!text) {
       this.setStatus("Enter text first.");
       return;
