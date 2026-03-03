@@ -20,19 +20,13 @@ interface ModelListResponse {
 
 type ChunkSynthesisState =
   | "not_started"
-  | "queued"
   | "synthesizing"
   | "ready"
   | "playing"
-  | "done"
-  | "failed"
-  | "skipped";
+  | "failed";
 
 interface AudioCacheEntry {
   url: string;
-  byteLength: number;
-  lastAccessAt: number;
-  cooldownUntil: number;
 }
 
 export class WebApp {
@@ -56,7 +50,6 @@ export class WebApp {
   private readonly chunkAbortControllersByHash = new Map<string, AbortController>();
   private readonly chunkStateByIndex = new Map<number, ChunkSynthesisState>();
   private readonly chunkErrorByIndex = new Map<number, string>();
-  private evictedCount = 0;
 
   mount(root: HTMLElement): void {
     root.innerHTML = APP_TEMPLATE;
@@ -437,14 +430,9 @@ export class WebApp {
     });
 
     this.must<HTMLTextAreaElement>("raw-text").addEventListener("input", () => {
-      const shouldRestart = this.chunkPlaybackMode;
-      const resumeFrom = this.activeChunkIndex;
       this.updateTimelineFromRawText();
-      if (shouldRestart) {
-        this.restartPlaybackFromIndex(resumeFrom, true);
-      } else {
-        this.resetChunkPlaybackState();
-      }
+      this.resetPlaybackForTextChange();
+      this.setStatus("Text updated. Press play.");
     });
   }
 
@@ -619,38 +607,12 @@ export class WebApp {
     } else if (state !== "failed") {
       this.chunkErrorByIndex.delete(index);
     }
+    this.renderReadingPreview();
     this.refreshChunkDiagnostics();
   }
 
   private refreshChunkDiagnostics(): void {
-    const counts = {
-      queued: 0,
-      inflight: this.chunkInFlightByHash.size,
-      cached: this.audioCacheByHash.size,
-      ready: 0,
-      failed: 0,
-      skipped: 0,
-      cooldown: 0,
-      evicted: this.evictedCount
-    };
-    this.chunkStateByIndex.forEach((state) => {
-      if (state === "queued") counts.queued += 1;
-      if (state === "ready") counts.ready += 1;
-      if (state === "failed") counts.failed += 1;
-      if (state === "skipped") counts.skipped += 1;
-    });
-    this.audioCacheByHash.forEach((entry) => {
-      if (entry.cooldownUntil > Date.now()) counts.cooldown += 1;
-    });
-
-    this.must<HTMLSpanElement>("diag-queued").textContent = `Q:${counts.queued}`;
-    this.must<HTMLSpanElement>("diag-inflight").textContent = `In:${counts.inflight}`;
-    this.must<HTMLSpanElement>("diag-cached").textContent = `Cache:${counts.cached}`;
-    this.must<HTMLSpanElement>("diag-ready").textContent = `Ready:${counts.ready}`;
-    this.must<HTMLSpanElement>("diag-failed").textContent = `Fail:${counts.failed}`;
-    this.must<HTMLSpanElement>("diag-skipped").textContent = `Skip:${counts.skipped}`;
-    this.must<HTMLSpanElement>("diag-cooldown").textContent = `Cool:${counts.cooldown}`;
-    this.must<HTMLSpanElement>("diag-evicted").textContent = `Evict:${counts.evicted}`;
+    // Diagnostics were intentionally simplified out of the playback flow.
   }
 
   private bindCapture(): void {
@@ -750,7 +712,7 @@ export class WebApp {
 
     this.audio.addEventListener("ended", () => {
       if (!this.chunkPlaybackMode) return;
-      this.setChunkState(this.activeChunkIndex, "done");
+      this.setChunkState(this.activeChunkIndex, "ready");
       const nextIndex = this.activeChunkIndex + 1;
       if (nextIndex >= this.timeline.chunks.length) {
         this.chunkPlaybackMode = false;
@@ -774,7 +736,7 @@ export class WebApp {
       this.must<HTMLTextAreaElement>("raw-text").value = result.text;
       this.timeline = result.timeline;
       this.activeChunkIndex = 0;
-      this.resetChunkPlaybackState();
+      this.resetPlaybackForTextChange();
       this.initializeChunkStates();
       this.renderReadingPreview();
       this.lastSynthText = result.text;
@@ -786,24 +748,14 @@ export class WebApp {
 
   private updateTimelineFromRawText(): void {
     const text = this.must<HTMLTextAreaElement>("raw-text").value;
-    const oldText = this.lastSynthText;
-    const oldActiveHash = this.chunkHashByIndex.get(this.activeChunkIndex) ?? "";
     this.timeline = buildReadingTimeline(
       text,
       this.config.reading.minWordsPerChunk,
       this.config.reading.maxWordsPerChunk,
       this.config.reading.wpmBase
     );
+    this.activeChunkIndex = 0;
     this.initializeChunkStates();
-    this.reconcileAudioCacheForTextChange(oldText, text);
-    if (oldActiveHash) {
-      const mapped = this.findFirstIndexByHash(oldActiveHash);
-      if (mapped >= 0) {
-        this.activeChunkIndex = mapped;
-      } else {
-        this.activeChunkIndex = Math.min(this.activeChunkIndex, Math.max(0, this.timeline.chunks.length - 1));
-      }
-    }
     this.lastSynthText = text;
     this.renderReadingPreview();
   }
@@ -822,6 +774,7 @@ export class WebApp {
 
     if (this.lastSynthText !== text) {
       this.updateTimelineFromRawText();
+      this.resetPlaybackForTextChange();
     }
 
     if (this.timeline.chunks.length === 0) {
@@ -843,7 +796,7 @@ export class WebApp {
 
     this.activeChunkIndex = chunk.index;
     this.renderReadingPreview();
-    this.scheduleWindowPrefetch(session);
+    this.prefetchFromIndex(chunk.index, session);
     this.setStatus(`Buffering chunk ${chunk.index + 1}/${this.timeline.chunks.length}...`);
 
     try {
@@ -854,13 +807,12 @@ export class WebApp {
       this.setChunkState(chunk.index, "playing");
       await this.audio.play();
       this.setStatus(`Playing chunk ${chunk.index + 1}/${this.timeline.chunks.length}`);
-      this.scheduleWindowPrefetch(session);
+      this.prefetchFromIndex(chunk.index, session);
     } catch (error) {
       if (session !== this.chunkPlaybackSession) return;
       const nextIndex = this.activeChunkIndex + 1;
       if (nextIndex < this.timeline.chunks.length) {
         this.setChunkState(chunk.index, "failed", String(error));
-        this.setChunkState(chunk.index, "skipped");
         this.setStatus(`Skipping chunk ${this.activeChunkIndex + 1}: ${String(error)}`);
         await this.playChunkAtIndex(nextIndex, session);
         return;
@@ -875,10 +827,6 @@ export class WebApp {
     if (!hash) throw new Error("Invalid chunk hash");
     const cacheEntry = this.audioCacheByHash.get(hash);
     if (cacheEntry?.url) {
-      if (cacheEntry.cooldownUntil > Date.now()) {
-        throw new Error("Chunk on cooldown");
-      }
-      cacheEntry.lastAccessAt = Date.now();
       return cacheEntry.url;
     }
     const inflight = this.chunkInFlightByHash.get(hash);
@@ -888,20 +836,16 @@ export class WebApp {
     this.setChunkState(index, "synthesizing");
     const controller = new AbortController();
     this.chunkAbortControllersByHash.set(hash, controller);
-    const requestPromise = this.synthesizeChunkWithRetry(index, chunk.text, session, controller.signal)
+    const requestPromise = this.synthesizeChunk(index, chunk.text, session, controller.signal)
       .then((audioBlob) => {
         if (session !== this.chunkPlaybackSession) {
           throw new Error("Cancelled");
         }
         const url = URL.createObjectURL(audioBlob);
         this.audioCacheByHash.set(hash, {
-          url,
-          byteLength: audioBlob.size,
-          lastAccessAt: Date.now(),
-          cooldownUntil: 0
+          url
         });
         this.updateStatesForHash(hash, "ready");
-        this.enforceAudioCacheLimits();
         return url;
       })
       .finally(() => {
@@ -914,21 +858,25 @@ export class WebApp {
     return requestPromise;
   }
 
-  private resetChunkPlaybackState(): void {
-    this.chunkPlaybackMode = false;
+  private abortPlaybackAndSynthesis(): void {
     this.chunkPlaybackSession += 1;
+    this.chunkPlaybackMode = false;
     this.audio.pause();
     this.audio.src = "";
     this.chunkAbortControllersByHash.forEach((controller) => controller.abort());
     this.chunkAbortControllersByHash.clear();
     this.chunkInFlightByHash.clear();
+    this.renderPlayState();
+  }
+
+  private resetPlaybackForTextChange(): void {
+    this.abortPlaybackAndSynthesis();
     this.audioCacheByHash.forEach((entry) => {
       if (entry.url && entry.url.startsWith("blob:")) {
         URL.revokeObjectURL(entry.url);
       }
     });
     this.audioCacheByHash.clear();
-    this.evictedCount = 0;
     this.refreshChunkDiagnostics();
   }
 
@@ -941,9 +889,8 @@ export class WebApp {
       span.textContent = chunk.text;
       const state = this.chunkStateByIndex.get(chunk.index) ?? "not_started";
       span.classList.add(`chunk-${state}`);
-      if (state === "ready" || state === "done" || state === "playing") {
-        span.classList.add("chunk-instant");
-        span.title = "Instant start available";
+      if (state === "ready") {
+        span.title = "Synthesized and ready";
       }
       if (state === "failed") {
         span.title = this.chunkErrorByIndex.get(chunk.index) ?? "Synthesis failed";
@@ -965,114 +912,38 @@ export class WebApp {
   private seekChunk(index: number): void {
     const chunk = this.timeline.chunks[index];
     if (!chunk) return;
+    this.abortPlaybackAndSynthesis();
     this.activeChunkIndex = chunk.index;
     this.renderReadingPreview();
-    this.restartPlaybackFromIndex(chunk.index, true);
-  }
-
-  private restartPlaybackFromIndex(index: number, shouldAutoPlay: boolean): void {
-    this.chunkPlaybackSession += 1;
-    this.chunkAbortControllersByHash.forEach((controller) => controller.abort());
-    this.chunkAbortControllersByHash.clear();
-    this.chunkInFlightByHash.clear();
-    this.activeChunkIndex = Math.max(0, Math.min(index, this.timeline.chunks.length - 1));
-    if (!this.timeline.chunks[this.activeChunkIndex]) {
-      this.chunkPlaybackMode = false;
-      this.setStatus("Nothing to read.");
-      return;
-    }
     this.chunkPlaybackMode = true;
-    if (shouldAutoPlay) {
-      void this.playChunkAtIndex(this.activeChunkIndex, this.chunkPlaybackSession);
-    } else {
-      this.setStatus(`Ready at chunk ${this.activeChunkIndex + 1}/${this.timeline.chunks.length}`);
-    }
+    void this.playChunkAtIndex(chunk.index, this.chunkPlaybackSession);
   }
 
-  private scheduleWindowPrefetch(session: number): void {
+  private prefetchFromIndex(start: number, session: number): void {
     if (session !== this.chunkPlaybackSession) return;
-    const windowSize = Math.max(1, this.config.reading.streamWindowSize);
-    const maxInFlight = Math.max(1, this.config.reading.chunkRequestConcurrency);
-    const start = this.activeChunkIndex;
-    const end = Math.min(this.timeline.chunks.length - 1, start + windowSize);
+    const end = Math.min(this.timeline.chunks.length - 1, start + 2);
 
-    for (let idx = start; idx <= end; idx += 1) {
+    for (let idx = Math.max(0, start); idx <= end; idx += 1) {
       const hash = this.chunkHashByIndex.get(idx);
       if (!hash) continue;
       const cacheEntry = this.audioCacheByHash.get(hash);
       if ((cacheEntry?.url ?? false) || this.chunkInFlightByHash.has(hash)) {
         continue;
       }
-      if (this.chunkInFlightByHash.size >= maxInFlight) {
-        break;
-      }
-      this.setChunkState(idx, "queued");
       void this.getChunkAudioUrl(idx, session).catch(() => {
-        // Playback path handles retries/errors; prefetch is best effort.
+        // Best effort prefetch.
       });
     }
   }
 
-  private async synthesizeChunkWithRetry(index: number, text: string, session: number, signal: AbortSignal): Promise<Blob> {
-    const retries = Math.max(0, this.config.reading.chunkRetryCount);
-    const maxAttempts = retries + 1;
-    let lastError: unknown = new Error("Unknown TTS failure");
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      if (session !== this.chunkPlaybackSession || signal.aborted) {
-        throw new Error("Cancelled");
-      }
-      try {
-        return await this.pipeline.synthesizeText(text, this.config, {
-          signal,
-          timeoutMs: this.config.reading.chunkTimeoutMs
-        });
-      } catch (error) {
-        lastError = error;
-        if (attempt < maxAttempts) {
-          this.setStatus(`Retrying chunk ${index + 1}/${this.timeline.chunks.length} (${attempt}/${retries})...`);
-          continue;
-        }
-      }
+  private async synthesizeChunk(index: number, text: string, session: number, signal: AbortSignal): Promise<Blob> {
+    if (session !== this.chunkPlaybackSession || signal.aborted) {
+      throw new Error("Cancelled");
     }
-    const hash = this.chunkHash(text);
-    const existing = this.audioCacheByHash.get(hash);
-    this.audioCacheByHash.set(hash, {
-      url: existing?.url ?? "",
-      byteLength: existing?.byteLength ?? 0,
-      lastAccessAt: Date.now(),
-      cooldownUntil: Date.now() + Math.max(0, this.config.reading.failureCooldownMs)
+    return this.pipeline.synthesizeText(text, this.config, {
+      signal,
+      timeoutMs: this.config.reading.chunkTimeoutMs
     });
-    throw lastError;
-  }
-
-  private reconcileAudioCacheForTextChange(oldText: string, newText: string): void {
-    const ratio = this.computeEditRatio(normalizeText(oldText), normalizeText(newText));
-    if (ratio > this.config.reading.largeEditResetRatio) {
-      this.resetChunkPlaybackState();
-      this.initializeChunkStates();
-      return;
-    }
-
-    const validHashes = new Set<string>();
-    this.chunkHashByIndex.forEach((hash) => validHashes.add(hash));
-
-    this.audioCacheByHash.forEach((entry, hash) => {
-      if (!validHashes.has(hash)) {
-        if (entry.url && entry.url.startsWith("blob:")) {
-          URL.revokeObjectURL(entry.url);
-        }
-        this.audioCacheByHash.delete(hash);
-      }
-    });
-
-    this.chunkHashByIndex.forEach((hash, idx) => {
-      const entry = this.audioCacheByHash.get(hash);
-      if (entry?.url) {
-        this.setChunkState(idx, "ready");
-      }
-    });
-    this.refreshChunkDiagnostics();
   }
 
   private chunkHash(text: string): string {
@@ -1085,67 +956,12 @@ export class WebApp {
     return `h${(hash >>> 0).toString(16)}`;
   }
 
-  private findFirstIndexByHash(hash: string): number {
-    for (let i = 0; i < this.timeline.chunks.length; i += 1) {
-      if (this.chunkHashByIndex.get(i) === hash) {
-        return i;
-      }
-    }
-    return -1;
-  }
-
-  private computeEditRatio(oldText: string, newText: string): number {
-    if (!oldText && !newText) return 0;
-    const maxLen = Math.max(oldText.length, newText.length);
-    if (maxLen === 0) return 0;
-    let prefix = 0;
-    while (prefix < oldText.length && prefix < newText.length && oldText[prefix] === newText[prefix]) {
-      prefix += 1;
-    }
-    let suffix = 0;
-    while (
-      suffix < oldText.length - prefix &&
-      suffix < newText.length - prefix &&
-      oldText[oldText.length - 1 - suffix] === newText[newText.length - 1 - suffix]
-    ) {
-      suffix += 1;
-    }
-    const common = prefix + suffix;
-    return Math.max(0, maxLen - common) / maxLen;
-  }
-
   private updateStatesForHash(hash: string, state: ChunkSynthesisState): void {
     this.chunkHashByIndex.forEach((value, index) => {
       if (value === hash) {
         this.setChunkState(index, state);
       }
     });
-  }
-
-  private enforceAudioCacheLimits(): void {
-    const maxChunks = Math.max(10, this.config.reading.sessionChunkCacheLimit);
-    const maxBytes = Math.max(1000000, this.config.reading.sessionAudioByteLimit);
-    let totalBytes = 0;
-    this.audioCacheByHash.forEach((entry) => {
-      totalBytes += entry.byteLength;
-    });
-    if (this.audioCacheByHash.size <= maxChunks && totalBytes <= maxBytes) return;
-
-    const sorted = Array.from(this.audioCacheByHash.entries())
-      .filter(([, entry]) => entry.url)
-      .sort((a, b) => a[1].lastAccessAt - b[1].lastAccessAt);
-
-    for (const [hash, entry] of sorted) {
-      if (this.audioCacheByHash.size <= maxChunks && totalBytes <= maxBytes) break;
-      if (entry.url.startsWith("blob:")) {
-        URL.revokeObjectURL(entry.url);
-      }
-      totalBytes -= entry.byteLength;
-      this.audioCacheByHash.delete(hash);
-      this.evictedCount += 1;
-      this.updateStatesForHash(hash, "not_started");
-    }
-    this.refreshChunkDiagnostics();
   }
 
   private renderPlayState(): void {

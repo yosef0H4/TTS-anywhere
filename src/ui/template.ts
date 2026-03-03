@@ -169,16 +169,6 @@ export const APP_TEMPLATE = `
         <div class="card text-card">
           <textarea id="raw-text" placeholder="Text will appear here..."></textarea>
           <div class="divider"></div>
-          <div id="chunk-diagnostics" class="chunk-diagnostics">
-            <span id="diag-queued">Q:0</span>
-            <span id="diag-inflight">In:0</span>
-            <span id="diag-cached">Cache:0</span>
-            <span id="diag-ready">Ready:0</span>
-            <span id="diag-failed">Fail:0</span>
-            <span id="diag-skipped">Skip:0</span>
-            <span id="diag-cooldown">Cool:0</span>
-            <span id="diag-evicted">Evict:0</span>
-          </div>
           <div class="reading-preview" id="reading-preview"></div>
         </div>
       </div>

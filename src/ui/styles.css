@@ -628,11 +628,6 @@ body {
   transition: background-color .15s ease, border-color .15s ease, color .15s ease;
 }
 
-.reading-preview span.chunk-instant {
-  font-weight: 700;
-  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--accent) 35%, transparent);
-}
-
 .reading-preview span.active-chunk {
   background: var(--accent);
   color: #fff;
@@ -640,32 +635,30 @@ body {
 }
 
 .reading-preview span.chunk-not-started { opacity: .7; }
-.reading-preview span.chunk-queued { border-color: var(--line-soft); background: color-mix(in srgb, var(--panel) 75%, transparent); }
 .reading-preview span.chunk-synthesizing {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 .reading-preview span.chunk-ready {
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, #fff 86%);
+  color: var(--fg);
 }
 .reading-preview span.chunk-playing {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  border-color: color-mix(in srgb, var(--accent-strong) 45%, transparent);
+  background: var(--accent);
+  color: #fff;
 }
-.reading-preview span.chunk-done {
-  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+
+.reading-preview span.active-chunk.chunk-playing {
+  border-color: color-mix(in srgb, var(--accent-strong) 45%, transparent);
+  background: var(--accent);
+  color: #fff;
 }
 .reading-preview span.chunk-failed {
   border-color: #dc2626;
   color: #991b1b;
   background: #fee2e2;
-}
-.reading-preview span.chunk-skipped {
-  border-color: #f59e0b;
-  color: #92400e;
-  background: #fef3c7;
 }
 
 .chunk-diagnostics {

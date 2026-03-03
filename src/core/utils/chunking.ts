@@ -4,21 +4,23 @@ export function normalizeText(input: string): string {
   return input.replace(/\s+/g, " ").trim();
 }
 
-function countWords(text: string): number {
-  return normalizeText(text).split(" ").filter(Boolean).length;
-}
-
 function splitSentenceLikeUnits(text: string): string[] {
   const prepared = text.replace(/\r\n/g, "\n");
   return prepared
-    .split(/(?<=[.!?,،؛:؟])\s+|\n+/u)
+    .split(/(?<=[.!?؟])\s+|\n+/u)
     .map((part) => part.trim())
     .filter(Boolean);
 }
 
-function rebalanceUnits(units: string[], maxWordsPerChunk: number, minWordsPerChunk: number): string[] {
+function countWords(text: string): number {
+  return normalizeText(text).split(" ").filter(Boolean).length;
+}
+
+function rebalanceUnits(units: string[], minWordsPerChunk: number, maxWordsPerChunk: number): string[] {
+  const safeMin = Math.max(1, Math.floor(minWordsPerChunk));
+  const safeMax = Math.max(safeMin, Math.floor(maxWordsPerChunk));
   const queue = [...units];
-  const rebalanced: string[] = [];
+  const result: string[] = [];
 
   let i = 0;
   while (i < queue.length) {
@@ -28,46 +30,40 @@ function rebalanceUnits(units: string[], maxWordsPerChunk: number, minWordsPerCh
       continue;
     }
 
-    let wordCount = countWords(current);
-
-    if (wordCount > maxWordsPerChunk) {
-      const words = current.split(" ");
-      for (let start = 0; start < words.length; start += maxWordsPerChunk) {
-        rebalanced.push(words.slice(start, start + maxWordsPerChunk).join(" "));
+    let words = countWords(current);
+    if (words > safeMax) {
+      const tokens = current.split(" ");
+      for (let start = 0; start < tokens.length; start += safeMax) {
+        result.push(tokens.slice(start, start + safeMax).join(" "));
       }
       i += 1;
       continue;
     }
 
-    while (wordCount < minWordsPerChunk && i + 1 < queue.length) {
+    while (words < safeMin && i + 1 < queue.length) {
       const next = normalizeText(queue[i + 1] ?? "");
       if (!next) {
         i += 1;
         continue;
       }
       const merged = `${current} ${next}`.trim();
-      const mergedCount = countWords(merged);
-      if (mergedCount > maxWordsPerChunk) {
-        break;
-      }
+      const mergedWords = countWords(merged);
+      if (mergedWords > safeMax) break;
       current = merged;
-      wordCount = mergedCount;
+      words = mergedWords;
       i += 1;
     }
 
-    rebalanced.push(current);
+    result.push(current);
     i += 1;
   }
 
-  return rebalanced;
+  return result;
 }
 
 export function splitIntoChunks(text: string, minWordsPerChunk: number, maxWordsPerChunk: number): string[] {
   if (!normalizeText(text)) return [];
-  const safeMinWords = Math.max(1, Math.floor(minWordsPerChunk));
-  const safeMaxWords = Math.max(safeMinWords, Math.floor(maxWordsPerChunk));
-  const sentenceUnits = splitSentenceLikeUnits(text);
-  return rebalanceUnits(sentenceUnits, safeMaxWords, safeMinWords);
+  return rebalanceUnits(splitSentenceLikeUnits(text), minWordsPerChunk, maxWordsPerChunk);
 }
 
 export function buildReadingTimeline(
