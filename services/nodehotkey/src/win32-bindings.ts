@@ -14,6 +14,14 @@ export const SS_BLACKRECT = 0x0004;
 export const WM_HOTKEY = 0x0312;
 export const PM_REMOVE = 0x0001;
 export const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4;
+export const INPUT_KEYBOARD = 1;
+export const KEYEVENTF_EXTENDEDKEY = 0x0001;
+export const KEYEVENTF_KEYUP = 0x0002;
+
+export const VK_CONTROL = 0x11;
+export const VK_SHIFT = 0x10;
+export const VK_MENU = 0x12;
+export const VK_LWIN = 0x5b;
 
 export type WinMsg = { message?: number; wParam?: number | bigint };
 export type Point = { x: number; y: number };
@@ -28,8 +36,22 @@ const MSG = koffi.struct("MSG", {
   pt_x: "long",
   pt_y: "long"
 });
+const KEYBDINPUT = koffi.struct("KEYBDINPUT", {
+  wVk: "uint16",
+  wScan: "uint16",
+  dwFlags: "uint32",
+  time: "uint32",
+  dwExtraInfo: "uintptr"
+});
+const INPUT = koffi.struct("INPUT", {
+  type: "uint32",
+  _pad: "uint32",
+  ki: KEYBDINPUT,
+  _unionPad: "uint64"
+});
 
 const user32 = koffi.load("user32.dll");
+const kernel32 = koffi.load("kernel32.dll");
 
 const SetProcessDpiAwarenessContext = user32.func("bool __stdcall SetProcessDpiAwarenessContext(intptr value)") as (
   value: number
@@ -87,6 +109,12 @@ export const InvalidateRect = user32.func("bool __stdcall InvalidateRect(void *h
   erase: boolean
 ) => boolean;
 export const UpdateWindow = user32.func("bool __stdcall UpdateWindow(void *hWnd)") as (hWnd: unknown) => boolean;
+export const SendInput = user32.func(
+  "uint32 __stdcall SendInput(uint32 cInputs, const INPUT *pInputs, int cbSize)"
+) as (count: number, inputs: Array<{ type: number; _pad: number; ki: { wVk: number; wScan: number; dwFlags: number; time: number; dwExtraInfo: number } }>, cbSize: number) => number;
+export const GetLastError = kernel32.func("uint32 __stdcall GetLastError()") as () => number;
+
+export const INPUT_SIZE = koffi.sizeof(INPUT);
 
 let dpiInitialized = false;
 

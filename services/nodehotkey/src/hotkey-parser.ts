@@ -6,7 +6,7 @@ export const MOD_SHIFT = 0x0004;
 export const MOD_WIN = 0x0008;
 export const MOD_NOREPEAT = 0x4000;
 
-const TOKEN_TO_MOD = new Map<string, number>([
+export const TOKEN_TO_MOD = new Map<string, number>([
   ["ctrl", MOD_CONTROL],
   ["control", MOD_CONTROL],
   ["shift", MOD_SHIFT],
@@ -28,7 +28,7 @@ const KEY_ALIASES = new Map<string, number>([
   ["right", 0x27]
 ]);
 
-function keyTokenToVk(token: string): number | null {
+export function keyTokenToVk(token: string): number | null {
   if (KEY_ALIASES.has(token)) return KEY_ALIASES.get(token) ?? null;
   if (/^[a-z]$/.test(token)) return token.toUpperCase().charCodeAt(0);
   if (/^[0-9]$/.test(token)) return token.charCodeAt(0);

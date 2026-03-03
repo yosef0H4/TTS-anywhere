@@ -17,3 +17,13 @@ export type HotkeySessionOptions = {
   pollMs?: number;
   events?: HotkeySessionEvents;
 };
+
+export type SendSpec = {
+  label: string;
+  modifiers: number;
+  vk: number;
+};
+
+export type SendHotkeyOptions = {
+  pressDurationMs?: number;
+};

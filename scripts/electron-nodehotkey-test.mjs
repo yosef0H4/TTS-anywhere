@@ -3,11 +3,13 @@ import fs from "node:fs";
 import path from "node:path";
 import screenshot from "screenshot-desktop";
 import sharp from "sharp";
-import { BorderOverlay, HotkeySession } from "nodehotkey";
+import { BorderOverlay, HotkeySession, sendHotkey } from "nodehotkey";
 
 const args = process.argv.slice(2);
 const hotkeyArgIndex = args.findIndex((a) => a === "--hotkey");
 const hotkey = hotkeyArgIndex >= 0 ? args[hotkeyArgIndex + 1] : "ctrl+shift+alt+s";
+const sendOnHotkeyArgIndex = args.findIndex((a) => a === "--send-on-hotkey");
+const sendOnHotkey = sendOnHotkeyArgIndex >= 0 ? args[sendOnHotkeyArgIndex + 1] : "";
 
 const outDir = path.join(process.cwd(), "services", "nodehotkey", "captures");
 fs.mkdirSync(outDir, { recursive: true });
@@ -71,6 +73,7 @@ async function saveCaptureFromRect(rect) {
 }
 
 function startSelection(point) {
+  if (sendOnHotkey) return;
   selectionStart = { x: point.x, y: point.y };
   lastCursor = { x: point.x, y: point.y };
   lastRect = null;
@@ -80,6 +83,10 @@ function startSelection(point) {
 }
 
 function stopSelection(point) {
+  if (sendOnHotkey) {
+    void sendMappedHotkeyOnRelease();
+    return;
+  }
   if (!selectionActive || !selectionStart) {
     selectionActive = false;
     selectionStart = null;
@@ -105,8 +112,47 @@ function stopSelection(point) {
   });
 }
 
+const VK_SHIFT = 0x10;
+const VK_CONTROL = 0x11;
+const VK_MENU = 0x12;
+const VK_LWIN = 0x5b;
+const VK_RWIN = 0x5c;
+const MOD_ALT = 0x0001;
+const MOD_CONTROL = 0x0002;
+const MOD_SHIFT = 0x0004;
+const MOD_WIN = 0x0008;
+
+function delayMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForTriggerModifiersReleased(timeoutMs = 250) {
+  if (!session) return;
+  const startedAt = Date.now();
+  const mods = session.getHotkeySpec().modifiers;
+  while (Date.now() - startedAt < timeoutMs) {
+    const ctrlDown = (mods & MOD_CONTROL) !== 0 && session.isKeyDown(VK_CONTROL);
+    const shiftDown = (mods & MOD_SHIFT) !== 0 && session.isKeyDown(VK_SHIFT);
+    const altDown = (mods & MOD_ALT) !== 0 && session.isKeyDown(VK_MENU);
+    const winDown = (mods & MOD_WIN) !== 0 && (session.isKeyDown(VK_LWIN) || session.isKeyDown(VK_RWIN));
+    if (!ctrlDown && !shiftDown && !altDown && !winDown) return;
+    await delayMs(8);
+  }
+}
+
+async function sendMappedHotkeyOnRelease() {
+  try {
+    await waitForTriggerModifiersReleased();
+    await sendHotkey(sendOnHotkey);
+    log("send.hotkey.ok", { trigger: session.getHotkey(), sent: sendOnHotkey });
+  } catch (error) {
+    log("send.hotkey.error", { trigger: session.getHotkey(), sent: sendOnHotkey, error: String(error) });
+  }
+}
+
 function startSelectionTicker() {
   setInterval(() => {
+    if (sendOnHotkey) return;
     if (!selectionActive || !session || !selectionStart) return;
 
     const point = session.getCursorPos();
@@ -156,7 +202,7 @@ app.whenReady().then(() => {
     log("test.pong");
   });
 
-  overlay = new BorderOverlay(2);
+  overlay = sendOnHotkey ? null : new BorderOverlay(2);
   session = new HotkeySession({
     initialHotkey: hotkey,
     events: {
@@ -168,13 +214,23 @@ app.whenReady().then(() => {
   });
 
   session.start();
-  startSelectionTicker();
+  if (!sendOnHotkey) {
+    startSelectionTicker();
+  }
 
   log("test.ready", { hotkey: session.getHotkey() });
-  log("test.instructions", {
-    message: "Hold hotkey, drag mouse, release base key. Ctrl+C to exit.",
-    outputDir: outDir
-  });
+  if (sendOnHotkey) {
+    log("test.instructions", {
+      message: "Press trigger hotkey to simulate configured hotkey. Ctrl+C to exit.",
+      triggerHotkey: session.getHotkey(),
+      sendOnHotkey
+    });
+  } else {
+    log("test.instructions", {
+      message: "Hold hotkey, drag mouse, release base key. Ctrl+C to exit.",
+      outputDir: outDir
+    });
+  }
 });
 
 app.on("window-all-closed", () => {
