@@ -1,9 +1,9 @@
 export interface PlatformBridge {
-  onCaptureRequested(handler: () => void): void;
+  onCapturedImage(handler: (dataUrl: string) => void): void;
 }
 
 export interface ElectronApi {
-  onCaptureRequested: (handler: () => void) => void;
+  onCapturedImage: (handler: (dataUrl: string) => void) => void;
   minimizeWindow: () => void;
   toggleMaximizeWindow: () => Promise<boolean>;
   closeWindow: () => void;

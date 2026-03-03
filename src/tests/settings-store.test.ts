@@ -49,4 +49,23 @@ describe("settings store", () => {
     expect(store.load().llm.model).toBe("vision-model");
     expect(store.load().tts.voice).toBe("nova");
   });
+
+  it("migrates legacy panel width config", () => {
+    const legacy = {
+      ...DEFAULT_CONFIG,
+      ui: {
+        ...DEFAULT_CONFIG.ui,
+        panels: {
+          imagePanelWidthPercent: 46,
+          textPanelWidthPercent: 30
+        }
+      }
+    };
+
+    localStorage.setItem("tts-snipper:settings", JSON.stringify(legacy));
+    const restored = new SettingsStore().load();
+
+    expect(restored.ui.panels.desktop.leftPanePercent).toBe(46);
+    expect(restored.ui.panels.desktop.rightTopPercent).toBe(DEFAULT_CONFIG.ui.panels.desktop.rightTopPercent);
+  });
 });

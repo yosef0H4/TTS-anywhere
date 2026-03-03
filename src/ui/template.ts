@@ -191,19 +191,45 @@ export const APP_TEMPLATE = `
         <label class="upload-btn icon-pill" title="Upload image"><i data-lucide="upload" class="ui-icon"></i><input id="image-upload" type="file" accept="image/*"></label>
         <span id="status-text"></span>
       </div>
-      <div class="cards-container">
-        <div class="card image-card">
-          <div id="image-empty" class="image-empty">
-            <i data-lucide="image-plus" class="ui-icon"></i>
-            <span>No capture yet</span>
+      <div class="workspace" id="workspace">
+        <section class="pane image-pane" id="pane-image">
+          <div class="pane-header">
+            <span>Image Preview</span>
+            <button class="pane-toggle" id="pane-toggle-image" title="Collapse image pane"><i data-lucide="chevron-up" class="ui-icon"></i></button>
           </div>
-          <img id="preview-img" class="snippet hidden" alt="Capture">
-        </div>
-        <div class="panel-resize-handle" id="panel-resize-handle" aria-label="Resize panels" title="Drag to resize panels"></div>
-        <div class="card text-card">
-          <textarea id="raw-text" placeholder="Text will appear here..."></textarea>
-          <div class="divider"></div>
-          <div class="reading-preview" id="reading-preview"></div>
+          <div class="pane-body">
+            <div id="image-empty" class="image-empty">
+              <i data-lucide="image-plus" class="ui-icon"></i>
+              <span>No capture yet</span>
+            </div>
+            <img id="preview-img" class="snippet hidden" alt="Capture">
+          </div>
+        </section>
+
+        <div class="workspace-resize-handle vertical" id="workspace-resize-vertical" aria-label="Resize left and right panes" title="Drag to resize left and right panes"></div>
+
+        <div class="workspace-right">
+          <section class="pane editor-pane" id="pane-editor">
+            <div class="pane-header">
+              <span>Text Editor</span>
+              <button class="pane-toggle" id="pane-toggle-editor" title="Collapse editor pane"><i data-lucide="chevron-up" class="ui-icon"></i></button>
+            </div>
+            <div class="pane-body">
+              <textarea id="raw-text" placeholder="Text will appear here..."></textarea>
+            </div>
+          </section>
+
+          <div class="workspace-resize-handle horizontal" id="workspace-resize-horizontal" aria-label="Resize editor and reading panes" title="Drag to resize editor and reading panes"></div>
+
+          <section class="pane reading-pane" id="pane-reading">
+            <div class="pane-header">
+              <span>Reading Preview</span>
+              <button class="pane-toggle" id="pane-toggle-reading" title="Collapse reading pane"><i data-lucide="chevron-up" class="ui-icon"></i></button>
+            </div>
+            <div class="pane-body">
+              <div class="reading-preview" id="reading-preview"></div>
+            </div>
+          </section>
         </div>
       </div>
       <div class="controls-bar">

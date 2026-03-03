@@ -32,8 +32,20 @@ export const DEFAULT_CONFIG: AppConfig = {
   },
   ui: {
     panels: {
-      imagePanelWidthPercent: 32,
-      textPanelWidthPercent: 34
+      desktop: {
+        leftPanePercent: 38,
+        rightTopPercent: 55
+      },
+      mobile: {
+        imageHeightPercent: 34,
+        editorHeightPercent: 33,
+        previewHeightPercent: 33,
+        collapsed: {
+          image: false,
+          editor: false,
+          preview: false
+        }
+      }
     },
     volume: 80,
     playbackRate: 1,

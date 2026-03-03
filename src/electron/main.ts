@@ -1,4 +1,5 @@
-import { app, BrowserWindow, globalShortcut, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain } from "electron";
+import { NodeHotkey } from "nodehotkey";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,6 +28,8 @@ const __dirname = path.dirname(__filename);
 let mainWindow: BrowserWindow | null = null;
 let isPinned = true;
 let currentLogLevel: LogLevel = "info";
+let nodeHotkey: NodeHotkey | null = null;
+let captureLoopRunning = false;
 
 function prefsPath(): string {
   return path.join(app.getPath("userData"), "window-prefs.json");
@@ -156,15 +159,39 @@ function createMainWindow(): BrowserWindow {
   return win;
 }
 
+function startCaptureLoop(): void {
+  if (captureLoopRunning || !nodeHotkey) return;
+  captureLoopRunning = true;
+  void (async () => {
+    while (captureLoopRunning && nodeHotkey) {
+      try {
+        const result = await nodeHotkey.captureOnce();
+        const dataUrl = `data:image/png;base64,${result.pngBuffer.toString("base64")}`;
+        mainWindow?.webContents.send("capture-image", { dataUrl });
+      } catch (error) {
+        if (!captureLoopRunning) return;
+        diag("capture.loop.error", { error: String(error) });
+      }
+    }
+  })();
+}
+
 app.whenReady().then(() => {
   diag("app.ready");
   isPinned = loadPinnedPref();
   mainWindow = createMainWindow();
-
-  globalShortcut.register("Control+Shift+Alt+S", () => {
-    diag("capture.hotkey.triggered");
-    mainWindow?.webContents.send("capture-requested");
+  nodeHotkey = new NodeHotkey({
+    initialHotkey: "ctrl+shift+alt+s",
+    events: {
+      onHotkeyRegistered: (label) => diag("capture.hotkey.registered", { label }),
+      onHotkeySwitched: (label) => diag("capture.hotkey.switched", { label }),
+      onCaptureStart: (start) => diag("capture.start", start),
+      onCaptureFinalize: (rect) => diag("capture.finalize", rect),
+      onError: (error) => diag("capture.error", { error: String(error) })
+    }
   });
+  nodeHotkey.start();
+  startCaptureLoop();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -248,7 +275,9 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
-  globalShortcut.unregisterAll();
+  captureLoopRunning = false;
+  nodeHotkey?.stop();
+  nodeHotkey = null;
 });
 
 ipcMain.handle("ping", () => "pong");

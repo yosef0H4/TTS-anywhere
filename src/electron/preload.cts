@@ -1,8 +1,10 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("electronAPI", {
-  onCaptureRequested: (handler: () => void) => {
-    ipcRenderer.on("capture-requested", () => handler());
+  onCapturedImage: (handler: (dataUrl: string) => void) => {
+    ipcRenderer.on("capture-image", (_event, payload: { dataUrl?: string }) => {
+      if (payload?.dataUrl) handler(payload.dataUrl);
+    });
   },
   minimizeWindow: () => {
     ipcRenderer.send("window:minimize");

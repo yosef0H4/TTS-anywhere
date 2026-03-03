@@ -14,7 +14,7 @@ import { DEFAULT_CONFIG } from "../core/models/defaults";
 import type { AppConfig, ReadingTimeline } from "../core/models/types";
 import { AppPipeline } from "../core/pipeline/app-pipeline";
 import { SettingsStore } from "../core/services/settings-store";
-import { PanelResizer } from "../ui/panel-resizer";
+import { WorkspaceResizer } from "../ui/workspace-resizer";
 import { buildReadingTimeline, cleanTextForTts, findChunkIndexByTime, normalizeText } from "../core/utils/chunking";
 import { APP_TEMPLATE } from "../ui/template";
 import "../ui/styles.css";
@@ -60,7 +60,7 @@ export class WebApp {
   private readonly chunkAbortControllersByHash = new Map<string, AbortController>();
   private readonly chunkStateByIndex = new Map<number, ChunkSynthesisState>();
   private readonly chunkErrorByIndex = new Map<number, string>();
-  private panelResizer: PanelResizer | null = null;
+  private workspaceResizer: WorkspaceResizer | null = null;
   private ipcTransport: IpcTransport | null = null;
   private consoleTransport: ConsoleTransport | null = null;
 
@@ -74,7 +74,8 @@ export class WebApp {
     this.bindSettings();
     this.bindCapture();
     this.bindPlayback();
-    this.bindPanelResizer();
+    this.bindWorkspaceResizer();
+    this.bindMobilePaneToggles();
     this.bindLoggingSettings();
     this.renderConfig();
     loggers.app.info("App mounted");
@@ -568,7 +569,15 @@ export class WebApp {
 
     this.must<HTMLButtonElement>("theme-zen").classList.toggle("active", this.config.ui.theme === "zen");
     this.must<HTMLButtonElement>("theme-pink").classList.toggle("active", this.config.ui.theme === "pink");
-    shell.style.setProperty("--left-panel-width", `${this.config.ui.panels.imagePanelWidthPercent}%`);
+    shell.style.setProperty("--workspace-left", `${this.config.ui.panels.desktop.leftPanePercent}%`);
+    shell.style.setProperty("--workspace-right-top", `${this.config.ui.panels.desktop.rightTopPercent}%`);
+    shell.style.setProperty("--mobile-image-height", `${this.config.ui.panels.mobile.imageHeightPercent}%`);
+    shell.style.setProperty("--mobile-editor-height", `${this.config.ui.panels.mobile.editorHeightPercent}%`);
+    shell.style.setProperty("--mobile-preview-height", `${this.config.ui.panels.mobile.previewHeightPercent}%`);
+
+    this.must<HTMLElement>("pane-image").dataset.collapsed = this.config.ui.panels.mobile.collapsed.image ? "true" : "false";
+    this.must<HTMLElement>("pane-editor").dataset.collapsed = this.config.ui.panels.mobile.collapsed.editor ? "true" : "false";
+    this.must<HTMLElement>("pane-reading").dataset.collapsed = this.config.ui.panels.mobile.collapsed.preview ? "true" : "false";
   }
 
   private setTheme(theme: "zen" | "pink"): void {
@@ -596,6 +605,7 @@ export class WebApp {
     try {
       const text = await file.text();
       const parsed = JSON.parse(text) as Partial<AppConfig>;
+      const mergedPanels = this.mergePanels(parsed.ui?.panels);
       const merged: AppConfig = {
         llm: { ...DEFAULT_CONFIG.llm, ...parsed.llm },
         tts: { ...DEFAULT_CONFIG.tts, ...parsed.tts },
@@ -603,7 +613,7 @@ export class WebApp {
         ui: {
           ...DEFAULT_CONFIG.ui,
           ...parsed.ui,
-          panels: { ...DEFAULT_CONFIG.ui.panels, ...parsed.ui?.panels }
+          panels: mergedPanels
         },
         system: { ...DEFAULT_CONFIG.system, ...parsed.system },
         logging: { ...DEFAULT_CONFIG.logging, ...parsed.logging }
@@ -707,9 +717,9 @@ export class WebApp {
       await this.runPipeline(await this.fileToDataUrl(file));
     });
 
-    window.electronAPI?.onCaptureRequested(() => {
-      loggers.capture.info("Hotkey capture requested");
-      this.setStatus("Electron hotkey pressed. Paste or upload image to continue.");
+    window.electronAPI?.onCapturedImage(async (dataUrl: string) => {
+      loggers.capture.info("Hotkey capture image received");
+      await this.runPipeline(dataUrl);
     });
   }
 
@@ -1087,19 +1097,79 @@ export class WebApp {
     });
   }
 
-  private bindPanelResizer(): void {
+  private bindWorkspaceResizer(): void {
     const shell = this.must<HTMLElement>("app-shell");
-    const handle = this.must<HTMLElement>("panel-resize-handle");
-    this.panelResizer?.dispose();
-    this.panelResizer = new PanelResizer({
+    const verticalHandle = this.must<HTMLElement>("workspace-resize-vertical");
+    const horizontalHandle = this.must<HTMLElement>("workspace-resize-horizontal");
+    this.workspaceResizer?.dispose();
+    this.workspaceResizer = new WorkspaceResizer({
       shell,
-      handle,
-      initialPercent: this.config.ui.panels.imagePanelWidthPercent,
-      onChange: (percent) => {
-        this.config.ui.panels.imagePanelWidthPercent = Number(percent.toFixed(2));
+      verticalHandle,
+      horizontalHandle,
+      initialLeftPercent: this.config.ui.panels.desktop.leftPanePercent,
+      initialRightTopPercent: this.config.ui.panels.desktop.rightTopPercent,
+      onChange: ({ leftPercent, rightTopPercent }) => {
+        this.config.ui.panels.desktop.leftPanePercent = Number(leftPercent.toFixed(2));
+        this.config.ui.panels.desktop.rightTopPercent = Number(rightTopPercent.toFixed(2));
         this.store.save(this.config);
       }
     });
+  }
+
+  private bindMobilePaneToggles(): void {
+    const bind = (
+      buttonId: string,
+      paneId: string,
+      key: "image" | "editor" | "preview"
+    ): void => {
+      this.must<HTMLButtonElement>(buttonId).addEventListener("click", () => {
+        const current = this.config.ui.panels.mobile.collapsed[key];
+        this.config.ui.panels.mobile.collapsed[key] = !current;
+        this.must<HTMLElement>(paneId).dataset.collapsed = !current ? "true" : "false";
+        this.store.save(this.config);
+      });
+    };
+
+    bind("pane-toggle-image", "pane-image", "image");
+    bind("pane-toggle-editor", "pane-editor", "editor");
+    bind("pane-toggle-reading", "pane-reading", "preview");
+  }
+
+  private mergePanels(panels: unknown): AppConfig["ui"]["panels"] {
+    const defaults = DEFAULT_CONFIG.ui.panels;
+    if (!panels || typeof panels !== "object") {
+      return defaults;
+    }
+    const value = panels as Record<string, unknown>;
+    const desktop = (value.desktop as Record<string, unknown> | undefined) ?? {};
+    const mobile = (value.mobile as Record<string, unknown> | undefined) ?? {};
+    const collapsed = (mobile.collapsed as Record<string, unknown> | undefined) ?? {};
+    const legacyImageWidth = this.readNumber(value.imagePanelWidthPercent, defaults.desktop.leftPanePercent);
+
+    return {
+      desktop: {
+        leftPanePercent: this.readNumber(desktop.leftPanePercent, legacyImageWidth),
+        rightTopPercent: this.readNumber(desktop.rightTopPercent, defaults.desktop.rightTopPercent)
+      },
+      mobile: {
+        imageHeightPercent: this.readNumber(mobile.imageHeightPercent, defaults.mobile.imageHeightPercent),
+        editorHeightPercent: this.readNumber(mobile.editorHeightPercent, defaults.mobile.editorHeightPercent),
+        previewHeightPercent: this.readNumber(mobile.previewHeightPercent, defaults.mobile.previewHeightPercent),
+        collapsed: {
+          image: this.readBoolean(collapsed.image, defaults.mobile.collapsed.image),
+          editor: this.readBoolean(collapsed.editor, defaults.mobile.collapsed.editor),
+          preview: this.readBoolean(collapsed.preview, defaults.mobile.collapsed.preview)
+        }
+      }
+    };
+  }
+
+  private readNumber(value: unknown, fallback: number): number {
+    return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  }
+
+  private readBoolean(value: unknown, fallback: boolean): boolean {
+    return typeof value === "boolean" ? value : fallback;
   }
 
   private bindLoggingSettings(): void {

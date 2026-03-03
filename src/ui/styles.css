@@ -30,7 +30,11 @@ body {
     --accent: #ef6b57;
     --accent-strong: #2f2f32;
     --dot: #cfc8b5;
-    --left-panel-width: 35%;
+    --workspace-left: 38%;
+    --workspace-right-top: 55%;
+    --mobile-image-height: 34%;
+    --mobile-editor-height: 33%;
+    --mobile-preview-height: 33%;
     width: 100vw;
     height: 100vh;
     position: relative;
@@ -553,64 +557,120 @@ body {
     color: var(--muted-fg);
 }
 
-.cards-container {
-    display: flex;
-    gap: 12px;
+.workspace {
+    display: grid;
+    grid-template-columns: minmax(220px, var(--workspace-left)) 6px minmax(280px, 1fr);
+    gap: 8px;
     flex: 1;
     min-height: 0;
 }
 
-.card {
-    background: #fff;
+.workspace-right {
+    min-height: 0;
+    display: grid;
+    grid-template-rows: minmax(130px, var(--workspace-right-top)) 6px minmax(130px, 1fr);
+    gap: 8px;
+}
+
+.pane {
+    background: var(--panel-2);
     border: 1px solid var(--line);
     border-radius: 10px;
     box-shadow: 0 4px 0 var(--line);
-    padding: 16px;
-}
-
-.image-card {
-    width: var(--left-panel-width);
-    min-width: 220px;
-    max-width: 78%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.text-card {
-    flex: 1;
-    min-width: 280px;
+    min-height: 0;
     display: flex;
     flex-direction: column;
-    gap: 10px;
 }
 
-.panel-resize-handle {
-    width: 12px;
+.pane-header {
+    height: 34px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    font-size: 11px;
+    color: var(--muted-fg);
+}
+
+.pane-toggle {
+    width: 24px;
+    height: 24px;
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    color: var(--muted-fg);
+    border-radius: 6px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.pane-toggle:hover {
+    color: var(--fg);
+}
+
+.pane-body {
+    flex: 1;
+    min-height: 0;
+    padding: 12px;
+}
+
+.image-pane .pane-body {
+    display: flex;
+}
+
+.editor-pane .pane-body,
+.reading-pane .pane-body {
+    display: flex;
+}
+
+.workspace-resize-handle {
     border-radius: 999px;
-    background: color-mix(in srgb, var(--accent) 28%, var(--line));
-    border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
-    cursor: ew-resize;
-    flex: 0 0 auto;
+    background: color-mix(in srgb, var(--accent) 30%, var(--line));
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+    cursor: pointer;
     position: relative;
 }
 
-.panel-resize-handle:hover {
+.workspace-resize-handle:hover {
     background: color-mix(in srgb, var(--accent) 45%, var(--line));
 }
 
-.panel-resize-handle::before {
+.workspace-resize-handle.vertical {
+    cursor: ew-resize;
+}
+
+.workspace-resize-handle.vertical::before {
     content: "";
     position: absolute;
     top: 50%;
     left: 50%;
-    width: 4px;
-    height: 38px;
     transform: translate(-50%, -50%);
-    border-radius: 99px;
-    background:
-        radial-gradient(circle at center, color-mix(in srgb, var(--accent-strong) 65%, #fff) 1.2px, transparent 1.2px)
-        center / 4px 7px repeat-y;
+    width: 3px;
+    height: 34px;
+    border-radius: 999px;
+    background: radial-gradient(circle at center, color-mix(in srgb, var(--accent-strong) 70%, #fff) 1.2px, transparent 1.2px)
+        center / 4px 8px repeat-y;
+}
+
+.workspace-resize-handle.horizontal {
+    cursor: ns-resize;
+}
+
+.workspace-resize-handle.horizontal::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 34px;
+    height: 3px;
+    border-radius: 999px;
+    background: radial-gradient(circle at center, color-mix(in srgb, var(--accent-strong) 70%, #fff) 1.2px, transparent 1.2px)
+        center / 8px 4px repeat-x;
 }
 
 .snippet {
@@ -647,18 +707,39 @@ body {
 
 #raw-text {
     width: 100%;
-    min-height: 100px;
-    border: none;
+    height: 100%;
+    border: 1px solid var(--line-soft);
     outline: none;
-    resize: vertical;
+    resize: none;
+    border-radius: 8px;
+    padding: 10px;
     font-size: 15px;
     color: var(--fg);
     background: transparent;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
 }
 
-.divider {
-    height: 1px;
-    background: var(--line-soft);
+#raw-text::-webkit-scrollbar,
+.reading-preview::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+#raw-text::-webkit-scrollbar-track,
+.reading-preview::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#raw-text::-webkit-scrollbar-thumb,
+.reading-preview::-webkit-scrollbar-thumb {
+    background: var(--line);
+    border-radius: 10px;
+}
+
+#raw-text::-webkit-scrollbar-thumb:hover,
+.reading-preview::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--line) 75%, var(--accent) 25%);
 }
 
 .reading-preview {
@@ -666,6 +747,8 @@ body {
     overflow: auto;
     font-family: "Lora", serif;
     line-height: 1.8;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
 }
 
 .reading-preview span {
@@ -933,17 +1016,35 @@ body {
 }
 
 @media (max-width: 900px) {
-    .cards-container {
-        flex-direction: column;
+    .workspace {
+        display: grid;
+        grid-template-columns: 1fr;
+        grid-template-rows: minmax(120px, var(--mobile-image-height)) minmax(120px, var(--mobile-editor-height)) minmax(120px, var(--mobile-preview-height));
+        gap: 10px;
     }
 
-    .panel-resize-handle {
+    .workspace-right {
+        display: contents;
+    }
+
+    .workspace-resize-handle {
         display: none;
     }
 
-    .image-card {
-        width: 100%;
-        min-height: 180px;
+    .pane-toggle {
+        display: inline-flex;
+    }
+
+    .pane[data-collapsed="true"] {
+        height: 34px;
+    }
+
+    .pane[data-collapsed="true"] .pane-body {
+        display: none;
+    }
+
+    .pane[data-collapsed="true"] .pane-toggle {
+        transform: rotate(180deg);
     }
 
     .settings-drawer {

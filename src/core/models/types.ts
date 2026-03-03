@@ -40,8 +40,24 @@ export interface UiConfig {
 }
 
 export interface PanelConfig {
-  imagePanelWidthPercent: number;
-  textPanelWidthPercent: number;
+  desktop: DesktopPanelConfig;
+  mobile: MobilePanelConfig;
+}
+
+export interface DesktopPanelConfig {
+  leftPanePercent: number;
+  rightTopPercent: number;
+}
+
+export interface MobilePanelConfig {
+  imageHeightPercent: number;
+  editorHeightPercent: number;
+  previewHeightPercent: number;
+  collapsed: {
+    image: boolean;
+    editor: boolean;
+    preview: boolean;
+  };
 }
 
 export interface LoggingConfig {
