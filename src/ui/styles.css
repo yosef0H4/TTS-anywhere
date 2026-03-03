@@ -30,6 +30,7 @@ body {
     --accent: #ef6b57;
     --accent-strong: #2f2f32;
     --dot: #cfc8b5;
+    --left-panel-width: 35%;
     width: 100vw;
     height: 100vh;
     position: relative;
@@ -554,7 +555,7 @@ body {
 
 .cards-container {
     display: flex;
-    gap: 20px;
+    gap: 12px;
     flex: 1;
     min-height: 0;
 }
@@ -568,7 +569,9 @@ body {
 }
 
 .image-card {
-    width: 35%;
+    width: var(--left-panel-width);
+    min-width: 220px;
+    max-width: 78%;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -576,9 +579,38 @@ body {
 
 .text-card {
     flex: 1;
+    min-width: 280px;
     display: flex;
     flex-direction: column;
     gap: 10px;
+}
+
+.panel-resize-handle {
+    width: 12px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 28%, var(--line));
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+    cursor: ew-resize;
+    flex: 0 0 auto;
+    position: relative;
+}
+
+.panel-resize-handle:hover {
+    background: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+
+.panel-resize-handle::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 4px;
+    height: 38px;
+    transform: translate(-50%, -50%);
+    border-radius: 99px;
+    background:
+        radial-gradient(circle at center, color-mix(in srgb, var(--accent-strong) 65%, #fff) 1.2px, transparent 1.2px)
+        center / 4px 7px repeat-y;
 }
 
 .snippet {
@@ -903,6 +935,10 @@ body {
 @media (max-width: 900px) {
     .cards-container {
         flex-direction: column;
+    }
+
+    .panel-resize-handle {
+        display: none;
     }
 
     .image-card {

@@ -31,6 +31,10 @@ export const DEFAULT_CONFIG: AppConfig = {
     sessionAudioByteLimit: 120000000
   },
   ui: {
+    panels: {
+      imagePanelWidthPercent: 32,
+      textPanelWidthPercent: 34
+    },
     volume: 80,
     playbackRate: 1,
     theme: "zen",
@@ -40,5 +44,10 @@ export const DEFAULT_CONFIG: AppConfig = {
   system: {
     diagnosticsEnabled: true,
     lastImportAt: ""
+  },
+  logging: {
+    level: "info",
+    enableFileLogging: true,
+    enableConsoleLogging: true
   }
 };

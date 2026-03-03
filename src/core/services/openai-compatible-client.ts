@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import { loggers } from "../logging";
 import type { LlmConfig, OcrResult, TtsAudioResult, TtsConfig } from "../models/types";
 
 interface LlmClient {
@@ -72,7 +73,9 @@ export class OpenAiCompatibleLlmService {
     ];
 
     const endpoint = normalizeOpenAiBaseUrl(config.baseUrl);
+    const done = loggers.api.time("ocr.request");
     try {
+      loggers.api.info("OCR request started", { endpoint, model: config.model, imageBytes: dataUrl.length });
       const response = await this.clientFactory(config).chat.completions.create({
         model: config.model,
         messages
@@ -82,9 +85,12 @@ export class OpenAiCompatibleLlmService {
       if (!text) {
         throw new Error("OCR produced empty text");
       }
+      done();
+      loggers.api.info("OCR request completed", { textLength: text.length });
 
       return { text };
     } catch (error) {
+      loggers.api.error("OCR request failed", { error: extractErrorMessage(error), endpoint, model: config.model });
       throw new Error(`OCR request failed (${endpoint}/chat/completions): ${extractErrorMessage(error)}`);
     }
   }
@@ -95,6 +101,7 @@ export class OpenAiCompatibleTtsService {
 
   async synthesize(text: string, config: TtsConfig, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<TtsAudioResult> {
     const endpoint = normalizeOpenAiBaseUrl(config.baseUrl);
+    const done = loggers.api.time("tts.request");
     const timeoutMs = Math.max(1000, options?.timeoutMs ?? 30000);
     const timeoutController = new AbortController();
     const mergedController = new AbortController();
@@ -108,6 +115,7 @@ export class OpenAiCompatibleTtsService {
     options?.signal?.addEventListener("abort", onAbort);
 
     try {
+      loggers.api.info("TTS request started", { endpoint, model: config.model, voice: config.voice, textLength: text.length });
       const response = await this.clientFactory(config).audio.speech.create({
         model: config.model,
         input: text,
@@ -117,8 +125,11 @@ export class OpenAiCompatibleTtsService {
       }, { signal: mergedController.signal });
 
       const audioArrayBuffer = await response.arrayBuffer();
+      done();
+      loggers.api.info("TTS request completed", { bytes: audioArrayBuffer.byteLength });
       return { audioBlob: new Blob([audioArrayBuffer]) };
     } catch (error) {
+      loggers.api.error("TTS request failed", { error: extractErrorMessage(error), endpoint, model: config.model });
       throw new Error(`TTS request failed (${endpoint}/audio/speech): ${extractErrorMessage(error)}`);
     } finally {
       clearTimeout(timeout);

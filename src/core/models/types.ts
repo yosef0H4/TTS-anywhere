@@ -31,11 +31,23 @@ export interface ReadingConfig {
 }
 
 export interface UiConfig {
+  panels: PanelConfig;
   volume: number;
   playbackRate: number;
   theme: "zen" | "pink";
   settingsDrawerOpen: boolean;
   showChunkDiagnostics: boolean;
+}
+
+export interface PanelConfig {
+  imagePanelWidthPercent: number;
+  textPanelWidthPercent: number;
+}
+
+export interface LoggingConfig {
+  level: "debug" | "info" | "warn" | "error";
+  enableFileLogging: boolean;
+  enableConsoleLogging: boolean;
 }
 
 export interface SystemConfig {
@@ -49,6 +61,7 @@ export interface AppConfig {
   reading: ReadingConfig;
   ui: UiConfig;
   system: SystemConfig;
+  logging: LoggingConfig;
 }
 
 export interface Chunk {

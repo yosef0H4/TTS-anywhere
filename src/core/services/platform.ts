@@ -9,6 +9,11 @@ export interface ElectronApi {
   closeWindow: () => void;
   getPinState: () => Promise<boolean>;
   togglePinWindow: () => Promise<boolean>;
+  sendLogEntries: (entries: unknown[]) => void;
+  getLogLevel: () => Promise<string>;
+  setLogLevel: (level: string) => Promise<void>;
+  getLogFilePath: () => Promise<string>;
+  clearLogs: () => Promise<void>;
 }
 
 declare global {

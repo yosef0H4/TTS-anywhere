@@ -153,6 +153,35 @@ export const APP_TEMPLATE = `
           <input id="import-settings-file" type="file" accept="application/json" hidden>
           <div class="setting-footnote" id="settings-last-import">No import yet.</div>
         </section>
+
+        <section class="setting-section" data-section="logging">
+          <div class="setting-section-head">
+            <h3>Logging</h3>
+            <span class="advanced-hint">Debug and crash analysis</span>
+          </div>
+          <div class="setting-group">
+            <label>Log Level</label>
+            <select id="log-level">
+              <option value="debug">Debug (verbose)</option>
+              <option value="info">Info (default)</option>
+              <option value="warn">Warn</option>
+              <option value="error">Error</option>
+            </select>
+          </div>
+          <div class="setting-group setting-toggle-row">
+            <label for="log-console-enabled">Console Logging</label>
+            <input id="log-console-enabled" type="checkbox">
+          </div>
+          <div class="setting-group setting-toggle-row">
+            <label for="log-file-enabled">File Logging</label>
+            <input id="log-file-enabled" type="checkbox">
+          </div>
+          <div class="settings-actions-grid">
+            <button type="button" id="btn-view-logs"><i data-lucide="file-text" class="ui-icon"></i>View Logs</button>
+            <button type="button" id="btn-clear-logs" class="danger"><i data-lucide="trash-2" class="ui-icon"></i>Clear Logs</button>
+          </div>
+          <div class="setting-footnote" id="log-path-display">Log path: not available</div>
+        </section>
       </div>
     </aside>
 
@@ -170,6 +199,7 @@ export const APP_TEMPLATE = `
           </div>
           <img id="preview-img" class="snippet hidden" alt="Capture">
         </div>
+        <div class="panel-resize-handle" id="panel-resize-handle" aria-label="Resize panels" title="Drag to resize panels"></div>
         <div class="card text-card">
           <textarea id="raw-text" placeholder="Text will appear here..."></textarea>
           <div class="divider"></div>

@@ -13,8 +13,13 @@ export class SettingsStore {
         llm: { ...DEFAULT_CONFIG.llm, ...parsed.llm },
         tts: { ...DEFAULT_CONFIG.tts, ...parsed.tts },
         reading: { ...DEFAULT_CONFIG.reading, ...parsed.reading },
-        ui: { ...DEFAULT_CONFIG.ui, ...parsed.ui },
-        system: { ...DEFAULT_CONFIG.system, ...parsed.system }
+        ui: {
+          ...DEFAULT_CONFIG.ui,
+          ...parsed.ui,
+          panels: { ...DEFAULT_CONFIG.ui.panels, ...parsed.ui?.panels }
+        },
+        system: { ...DEFAULT_CONFIG.system, ...parsed.system },
+        logging: { ...DEFAULT_CONFIG.logging, ...parsed.logging }
       };
     } catch {
       return DEFAULT_CONFIG;

@@ -1,10 +1,20 @@
 import TomSelect from "tom-select";
 import "tom-select/dist/css/tom-select.css";
 import { createIcons, icons } from "lucide";
+import {
+  addTransport,
+  ConsoleTransport,
+  initializeLogger,
+  IpcTransport,
+  loggers,
+  removeTransport,
+  setLogLevel
+} from "../core/logging";
 import { DEFAULT_CONFIG } from "../core/models/defaults";
 import type { AppConfig, ReadingTimeline } from "../core/models/types";
 import { AppPipeline } from "../core/pipeline/app-pipeline";
 import { SettingsStore } from "../core/services/settings-store";
+import { PanelResizer } from "../ui/panel-resizer";
 import { buildReadingTimeline, cleanTextForTts, findChunkIndexByTime, normalizeText } from "../core/utils/chunking";
 import { APP_TEMPLATE } from "../ui/template";
 import "../ui/styles.css";
@@ -50,8 +60,12 @@ export class WebApp {
   private readonly chunkAbortControllersByHash = new Map<string, AbortController>();
   private readonly chunkStateByIndex = new Map<number, ChunkSynthesisState>();
   private readonly chunkErrorByIndex = new Map<number, string>();
+  private panelResizer: PanelResizer | null = null;
+  private ipcTransport: IpcTransport | null = null;
+  private consoleTransport: ConsoleTransport | null = null;
 
   mount(root: HTMLElement): void {
+    this.initializeLogging();
     root.innerHTML = APP_TEMPLATE;
     this.applyUiState();
     this.renderIcons();
@@ -60,7 +74,24 @@ export class WebApp {
     this.bindSettings();
     this.bindCapture();
     this.bindPlayback();
+    this.bindPanelResizer();
+    this.bindLoggingSettings();
     this.renderConfig();
+    loggers.app.info("App mounted");
+  }
+
+  private initializeLogging(): void {
+    const cfg = this.config.logging ?? DEFAULT_CONFIG.logging;
+    initializeLogger({ source: "frontend", level: cfg.level });
+    if (cfg.enableConsoleLogging) {
+      this.consoleTransport = new ConsoleTransport();
+      addTransport(this.consoleTransport);
+    }
+    if (cfg.enableFileLogging && window.electronAPI?.sendLogEntries) {
+      this.ipcTransport = new IpcTransport();
+      addTransport(this.ipcTransport);
+    }
+    setLogLevel(cfg.level);
   }
 
   private bindModelSelectors(): void {
@@ -503,6 +534,9 @@ export class WebApp {
     this.must<HTMLSelectElement>("punctuation-pause").value = this.config.reading.punctuationPauseMode;
     this.must<HTMLInputElement>("diagnostics-enabled").checked = this.config.system.diagnosticsEnabled;
     this.must<HTMLInputElement>("show-chunk-diagnostics").checked = this.config.ui.showChunkDiagnostics;
+    this.must<HTMLSelectElement>("log-level").value = this.config.logging.level;
+    this.must<HTMLInputElement>("log-console-enabled").checked = this.config.logging.enableConsoleLogging;
+    this.must<HTMLInputElement>("log-file-enabled").checked = this.config.logging.enableFileLogging;
     this.must<HTMLInputElement>("vol-slider").value = String(this.config.ui.volume);
     this.must<HTMLInputElement>("vol-input").value = String(this.config.ui.volume);
     this.must<HTMLInputElement>("speed-slider").value = String(this.config.ui.playbackRate);
@@ -534,6 +568,7 @@ export class WebApp {
 
     this.must<HTMLButtonElement>("theme-zen").classList.toggle("active", this.config.ui.theme === "zen");
     this.must<HTMLButtonElement>("theme-pink").classList.toggle("active", this.config.ui.theme === "pink");
+    shell.style.setProperty("--left-panel-width", `${this.config.ui.panels.imagePanelWidthPercent}%`);
   }
 
   private setTheme(theme: "zen" | "pink"): void {
@@ -565,8 +600,13 @@ export class WebApp {
         llm: { ...DEFAULT_CONFIG.llm, ...parsed.llm },
         tts: { ...DEFAULT_CONFIG.tts, ...parsed.tts },
         reading: { ...DEFAULT_CONFIG.reading, ...parsed.reading },
-        ui: { ...DEFAULT_CONFIG.ui, ...parsed.ui },
-        system: { ...DEFAULT_CONFIG.system, ...parsed.system }
+        ui: {
+          ...DEFAULT_CONFIG.ui,
+          ...parsed.ui,
+          panels: { ...DEFAULT_CONFIG.ui.panels, ...parsed.ui?.panels }
+        },
+        system: { ...DEFAULT_CONFIG.system, ...parsed.system },
+        logging: { ...DEFAULT_CONFIG.logging, ...parsed.logging }
       };
       Object.assign(this.config, merged);
       this.config.system.lastImportAt = new Date().toISOString();
@@ -574,6 +614,7 @@ export class WebApp {
       this.updateTimelineFromRawText();
       this.store.save(this.config);
       this.setStatus("Settings imported.");
+      loggers.settings.info("Settings imported");
     } catch (error) {
       this.setStatus(`Import failed: ${String(error)}`);
     } finally {
@@ -620,6 +661,7 @@ export class WebApp {
 
   private bindCapture(): void {
     this.must<HTMLButtonElement>("btn-capture").addEventListener("click", async () => {
+      loggers.capture.info("Capture requested");
       try {
         const dataUrl = await this.pickImageFromClipboard();
         if (dataUrl) {
@@ -628,6 +670,7 @@ export class WebApp {
         }
         this.setStatus("No image in clipboard. Use paste or upload.");
       } catch (error) {
+        loggers.capture.error("Capture failed", { error: String(error) });
         this.setStatus(`Capture failed: ${String(error)}`);
       }
     });
@@ -636,6 +679,7 @@ export class WebApp {
       const input = event.currentTarget as HTMLInputElement;
       const file = input.files?.[0];
       if (!file) return;
+      loggers.capture.info("Image uploaded", { fileName: file.name, type: file.type });
       const dataUrl = await this.fileToDataUrl(file);
       await this.runPipeline(dataUrl);
     });
@@ -646,6 +690,7 @@ export class WebApp {
         if (item.type.startsWith("image/")) {
           const file = item.getAsFile();
           if (file) {
+            loggers.capture.info("Image pasted");
             await this.runPipeline(await this.fileToDataUrl(file));
           }
           return;
@@ -658,10 +703,12 @@ export class WebApp {
       event.preventDefault();
       const file = event.dataTransfer?.files?.[0];
       if (!file || !file.type.startsWith("image/")) return;
+      loggers.capture.info("Image dropped", { fileName: file.name });
       await this.runPipeline(await this.fileToDataUrl(file));
     });
 
     window.electronAPI?.onCaptureRequested(() => {
+      loggers.capture.info("Hotkey capture requested");
       this.setStatus("Electron hotkey pressed. Paste or upload image to continue.");
     });
   }
@@ -714,6 +761,7 @@ export class WebApp {
     });
 
     this.audio.addEventListener("ended", () => {
+      loggers.playback.info("Audio ended", { chunkPlaybackMode: this.chunkPlaybackMode, chunkIndex: this.activeChunkIndex });
       if (!this.chunkPlaybackMode) return;
       this.setChunkState(this.activeChunkIndex, "ready");
       const nextIndex = this.activeChunkIndex + 1;
@@ -733,14 +781,18 @@ export class WebApp {
   private async runPipeline(dataUrl: string): Promise<void> {
     this.setPreviewImage(dataUrl);
     this.setStatus("Running OCR + TTS...");
+    const done = loggers.pipeline.time("pipeline.run");
 
     try {
       const result = await this.pipeline.run(dataUrl, this.config);
+      done();
+      loggers.pipeline.info("Pipeline completed", { textLength: result.text.length });
       this.must<HTMLTextAreaElement>("raw-text").value = result.text;
       this.updateTimelineFromRawText();
       this.resetPlaybackForTextChange();
       this.setStatus("Ready");
     } catch (error) {
+      loggers.pipeline.error("Pipeline failed", { error: String(error) });
       this.setStatus(`Pipeline error: ${String(error)}`);
     }
   }
@@ -773,6 +825,7 @@ export class WebApp {
 
     if (this.chunkPlaybackMode && this.audio.src) {
       await this.audio.play();
+      loggers.playback.info("Playback resumed");
       return;
     }
 
@@ -789,6 +842,7 @@ export class WebApp {
     if (!this.chunkPlaybackMode) {
       this.chunkPlaybackMode = true;
       this.chunkPlaybackSession += 1;
+      loggers.playback.info("Playback started", { session: this.chunkPlaybackSession, chunks: this.timeline.chunks.length });
     }
     await this.playChunkAtIndex(this.activeChunkIndex, this.chunkPlaybackSession);
   }
@@ -945,12 +999,16 @@ export class WebApp {
         throw new Error("Cancelled");
       }
       try {
-        return await this.pipeline.synthesizeText(text, this.config, {
+        const done = loggers.tts.time(`chunk.${index + 1}.synthesize`);
+        const blob = await this.pipeline.synthesizeText(text, this.config, {
           signal,
           timeoutMs: this.config.reading.chunkTimeoutMs
         });
+        done();
+        return blob;
       } catch (error) {
         lastError = error;
+        loggers.tts.warn("Chunk synthesis attempt failed", { index: index + 1, attempt, error: String(error) });
         if (attempt < maxAttempts) {
           this.setStatus(
             `Retrying chunk ${index + 1}/${this.timeline.chunks.length} (${attempt}/${retries})...`
@@ -1026,6 +1084,81 @@ export class WebApp {
       };
       reader.onerror = () => reject(reader.error ?? new Error("File read failed"));
       reader.readAsDataURL(file);
+    });
+  }
+
+  private bindPanelResizer(): void {
+    const shell = this.must<HTMLElement>("app-shell");
+    const handle = this.must<HTMLElement>("panel-resize-handle");
+    this.panelResizer?.dispose();
+    this.panelResizer = new PanelResizer({
+      shell,
+      handle,
+      initialPercent: this.config.ui.panels.imagePanelWidthPercent,
+      onChange: (percent) => {
+        this.config.ui.panels.imagePanelWidthPercent = Number(percent.toFixed(2));
+        this.store.save(this.config);
+      }
+    });
+  }
+
+  private bindLoggingSettings(): void {
+    const levelSelect = this.must<HTMLSelectElement>("log-level");
+    const consoleToggle = this.must<HTMLInputElement>("log-console-enabled");
+    const fileToggle = this.must<HTMLInputElement>("log-file-enabled");
+    const viewBtn = this.must<HTMLButtonElement>("btn-view-logs");
+    const clearBtn = this.must<HTMLButtonElement>("btn-clear-logs");
+    const pathLabel = this.must<HTMLDivElement>("log-path-display");
+
+    levelSelect.addEventListener("change", async () => {
+      const level = levelSelect.value as AppConfig["logging"]["level"];
+      this.config.logging.level = level;
+      setLogLevel(level);
+      await window.electronAPI?.setLogLevel?.(level);
+      this.store.save(this.config);
+      loggers.settings.info("Log level changed", { level });
+    });
+
+    consoleToggle.addEventListener("change", () => {
+      const enabled = consoleToggle.checked;
+      this.config.logging.enableConsoleLogging = enabled;
+      if (enabled && !this.consoleTransport) {
+        this.consoleTransport = new ConsoleTransport();
+        addTransport(this.consoleTransport);
+      } else if (!enabled && this.consoleTransport) {
+        removeTransport(this.consoleTransport);
+        this.consoleTransport = null;
+      }
+      this.store.save(this.config);
+    });
+
+    fileToggle.addEventListener("change", () => {
+      const enabled = fileToggle.checked;
+      this.config.logging.enableFileLogging = enabled;
+      if (enabled && !this.ipcTransport && window.electronAPI?.sendLogEntries) {
+        this.ipcTransport = new IpcTransport();
+        addTransport(this.ipcTransport);
+      } else if (!enabled && this.ipcTransport) {
+        this.ipcTransport.stop();
+        removeTransport(this.ipcTransport);
+        this.ipcTransport = null;
+      }
+      this.store.save(this.config);
+    });
+
+    viewBtn.addEventListener("click", async () => {
+      const logPath = await window.electronAPI?.getLogFilePath?.();
+      pathLabel.textContent = logPath ? `Log path: ${logPath}` : "Log path: available in Electron only";
+      this.setStatus(logPath ? `Log file: ${logPath}` : "Not running in Electron");
+    });
+
+    clearBtn.addEventListener("click", async () => {
+      await window.electronAPI?.clearLogs?.();
+      this.setStatus("Logs cleared");
+    });
+
+    void window.electronAPI?.getLogFilePath?.().then((logPath) => {
+      if (logPath) pathLabel.textContent = `Log path: ${logPath}`;
     });
   }
 
