@@ -6,6 +6,18 @@ contextBridge.exposeInMainWorld("electronAPI", {
       if (payload?.dataUrl) handler(payload.dataUrl);
     });
   },
+  beginCaptureHotkeyEdit: () => {
+    return ipcRenderer.invoke("capture:begin-hotkey-edit") as Promise<string>;
+  },
+  applyCaptureHotkey: (hotkey: string) => {
+    return ipcRenderer.invoke("capture:apply-hotkey", hotkey) as Promise<string>;
+  },
+  cancelCaptureHotkeyEdit: () => {
+    return ipcRenderer.invoke("capture:cancel-hotkey-edit") as Promise<string>;
+  },
+  getCaptureHotkey: () => {
+    return ipcRenderer.invoke("capture:get-hotkey") as Promise<string>;
+  },
   minimizeWindow: () => {
     ipcRenderer.send("window:minimize");
   },

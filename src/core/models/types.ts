@@ -69,6 +69,7 @@ export interface LoggingConfig {
 export interface SystemConfig {
   diagnosticsEnabled: boolean;
   lastImportAt: string;
+  captureHotkey: string;
 }
 
 export interface AppConfig {

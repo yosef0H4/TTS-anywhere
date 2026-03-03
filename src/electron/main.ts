@@ -31,6 +31,8 @@ let mainWindow: BrowserWindow | null = null;
 let isPinned = true;
 let currentLogLevel: LogLevel = "info";
 let hotkeySession: HotkeySession | null = null;
+let activeHotkey = "ctrl+shift+alt+s";
+let hotkeyBeforeEdit: string | null = null;
 let overlay: BorderOverlay | null = null;
 let selectionTicker: NodeJS.Timeout | null = null;
 let selectionActive = false;
@@ -266,7 +268,7 @@ app.whenReady().then(() => {
   mainWindow = createMainWindow();
   overlay = new BorderOverlay(2);
   hotkeySession = new HotkeySession({
-    initialHotkey: "ctrl+shift+alt+s",
+    initialHotkey: activeHotkey,
     events: {
       onHotkeyRegistered: (label) => diag("capture.hotkey.registered", { label }),
       onHotkeySwitched: (label) => diag("capture.hotkey.switched", { label }),
@@ -284,6 +286,45 @@ app.whenReady().then(() => {
       mainWindow = createMainWindow();
     }
   });
+});
+
+ipcMain.handle("capture:begin-hotkey-edit", () => {
+  if (!hotkeySession) return activeHotkey;
+  hotkeyBeforeEdit = activeHotkey;
+  hotkeySession.stop();
+  diag("capture.hotkey.edit.begin", { activeHotkey });
+  return activeHotkey;
+});
+
+ipcMain.handle("capture:apply-hotkey", (_event, hotkey: string) => {
+  if (!hotkeySession) return activeHotkey;
+  const normalized = String(hotkey ?? "").trim().toLowerCase();
+  if (!normalized) throw new Error("Hotkey is required");
+  hotkeySession.setHotkey(normalized);
+  activeHotkey = hotkeySession.getHotkey();
+  hotkeyBeforeEdit = null;
+  hotkeySession.start();
+  diag("capture.hotkey.edit.applied", { activeHotkey });
+  return activeHotkey;
+});
+
+ipcMain.handle("capture:cancel-hotkey-edit", () => {
+  if (!hotkeySession) return activeHotkey;
+  if (hotkeyBeforeEdit) {
+    hotkeySession.setHotkey(hotkeyBeforeEdit);
+    activeHotkey = hotkeySession.getHotkey();
+  }
+  hotkeyBeforeEdit = null;
+  hotkeySession.start();
+  diag("capture.hotkey.edit.cancelled", { activeHotkey });
+  return activeHotkey;
+});
+
+ipcMain.handle("capture:get-hotkey", () => {
+  if (hotkeySession) {
+    activeHotkey = hotkeySession.getHotkey();
+  }
+  return activeHotkey;
 });
 
 ipcMain.on("window:minimize", () => {

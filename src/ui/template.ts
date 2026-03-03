@@ -141,6 +141,16 @@ export const APP_TEMPLATE = `
             <h3>System & Data</h3>
             <span class="advanced-hint">Persistence and diagnostics</span>
           </div>
+          <div class="setting-group">
+            <label>Capture Hotkey</label>
+            <input type="text" id="capture-hotkey" readonly>
+          </div>
+          <div class="settings-actions-grid">
+            <button type="button" id="btn-hotkey-record"><i data-lucide="keyboard" class="ui-icon"></i>Record</button>
+            <button type="button" id="btn-hotkey-apply"><i data-lucide="check" class="ui-icon"></i>Apply</button>
+            <button type="button" id="btn-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i>Cancel</button>
+          </div>
+          <div class="setting-footnote" id="hotkey-recording-status">Current hotkey is active.</div>
           <div class="setting-group setting-toggle-row">
             <label for="diagnostics-enabled">Diagnostics Enabled</label>
             <input id="diagnostics-enabled" type="checkbox">

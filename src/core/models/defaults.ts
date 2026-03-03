@@ -55,7 +55,8 @@ export const DEFAULT_CONFIG: AppConfig = {
   },
   system: {
     diagnosticsEnabled: true,
-    lastImportAt: ""
+    lastImportAt: "",
+    captureHotkey: "ctrl+shift+alt+s"
   },
   logging: {
     level: "info",

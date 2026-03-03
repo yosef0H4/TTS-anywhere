@@ -4,6 +4,10 @@ export interface PlatformBridge {
 
 export interface ElectronApi {
   onCapturedImage: (handler: (dataUrl: string) => void) => void;
+  beginCaptureHotkeyEdit: () => Promise<string>;
+  applyCaptureHotkey: (hotkey: string) => Promise<string>;
+  cancelCaptureHotkeyEdit: () => Promise<string>;
+  getCaptureHotkey: () => Promise<string>;
   minimizeWindow: () => void;
   toggleMaximizeWindow: () => Promise<boolean>;
   closeWindow: () => void;

@@ -62,8 +62,13 @@ export class HotkeySession {
 
   setHotkey(hotkey: string): void {
     const next = parseHotkeySpec(hotkey);
-    const previous = this.activeHotkey;
+    if (!this.running) {
+      this.activeHotkey = next;
+      this.events?.onHotkeySwitched?.(next.label);
+      return;
+    }
 
+    const previous = this.activeHotkey;
     UnregisterHotKey(null, HOTKEY_ID);
     try {
       this.tryRegisterHotkey(next);
