@@ -636,8 +636,10 @@ body {
 
 .reading-preview span.chunk-not-started { opacity: .7; }
 .reading-preview span.chunk-synthesizing {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: #f59e0b;
+  background: #fef3c7;
+  color: #92400e;
+  animation: chunk-synth-pulse 1s ease-in-out infinite;
 }
 .reading-preview span.chunk-ready {
   border-color: color-mix(in srgb, var(--accent) 50%, transparent);
@@ -659,6 +661,15 @@ body {
   border-color: #dc2626;
   color: #991b1b;
   background: #fee2e2;
+}
+
+@keyframes chunk-synth-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.12);
+  }
 }
 
 .chunk-diagnostics {
