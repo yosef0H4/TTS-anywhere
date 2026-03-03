@@ -1,0 +1,12 @@
+{
+  "name": "win32-dot-test",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node dot-test.mjs"
+  },
+  "dependencies": {
+    "koffi": "^2.10.1"
+  }
+}
