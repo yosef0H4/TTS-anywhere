@@ -15,9 +15,7 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "koffi": "^2.10.1",
-    "screenshot-desktop": "^1.15.3",
-    "sharp": "^0.34.4"
+    "koffi": "^2.10.1"
   },
   "devDependencies": {
     "@types/node": "^25.3.3",

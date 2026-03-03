@@ -1,8 +1,10 @@
 import { app, BrowserWindow, ipcMain } from "electron";
-import { NodeHotkey } from "nodehotkey";
+import { BorderOverlay, HotkeySession } from "nodehotkey";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import screenshot from "screenshot-desktop";
+import sharp from "sharp";
 
 type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -28,8 +30,13 @@ const __dirname = path.dirname(__filename);
 let mainWindow: BrowserWindow | null = null;
 let isPinned = true;
 let currentLogLevel: LogLevel = "info";
-let nodeHotkey: NodeHotkey | null = null;
-let captureLoopRunning = false;
+let hotkeySession: HotkeySession | null = null;
+let overlay: BorderOverlay | null = null;
+let selectionTicker: NodeJS.Timeout | null = null;
+let selectionActive = false;
+let selectionStart: { x: number; y: number } | null = null;
+let lastCursor: { x: number; y: number } | null = null;
+let lastRect: { left: number; top: number; right: number; bottom: number } | null = null;
 
 function prefsPath(): string {
   return path.join(app.getPath("userData"), "window-prefs.json");
@@ -159,39 +166,118 @@ function createMainWindow(): BrowserWindow {
   return win;
 }
 
-function startCaptureLoop(): void {
-  if (captureLoopRunning || !nodeHotkey) return;
-  captureLoopRunning = true;
-  void (async () => {
-    while (captureLoopRunning && nodeHotkey) {
-      try {
-        const result = await nodeHotkey.captureOnce();
-        const dataUrl = `data:image/png;base64,${result.pngBuffer.toString("base64")}`;
-        mainWindow?.webContents.send("capture-image", { dataUrl });
-      } catch (error) {
-        if (!captureLoopRunning) return;
-        diag("capture.loop.error", { error: String(error) });
-      }
+function buildRect(a: { x: number; y: number }, b: { x: number; y: number }): { left: number; top: number; right: number; bottom: number } {
+  return {
+    left: Math.min(a.x, b.x),
+    top: Math.min(a.y, b.y),
+    right: Math.max(a.x, b.x),
+    bottom: Math.max(a.y, b.y)
+  };
+}
+
+function sameRect(
+  a: { left: number; top: number; right: number; bottom: number } | null,
+  b: { left: number; top: number; right: number; bottom: number } | null
+): boolean {
+  if (!a || !b) return false;
+  return a.left === b.left && a.top === b.top && a.right === b.right && a.bottom === b.bottom;
+}
+
+function startSelection(point: { x: number; y: number }): void {
+  selectionStart = { x: point.x, y: point.y };
+  lastCursor = { x: point.x, y: point.y };
+  lastRect = null;
+  selectionActive = true;
+  overlay?.hide();
+  diag("capture.start", { x: point.x, y: point.y, hotkey: hotkeySession?.getHotkey() });
+}
+
+async function finalizeSelection(point: { x: number; y: number }): Promise<void> {
+  if (!selectionActive || !selectionStart) {
+    selectionActive = false;
+    selectionStart = null;
+    lastCursor = null;
+    lastRect = null;
+    overlay?.hide();
+    return;
+  }
+
+  lastCursor = { x: point.x, y: point.y };
+  const rect = buildRect(selectionStart, lastCursor);
+  const payload = {
+    x: rect.left,
+    y: rect.top,
+    width: rect.right - rect.left,
+    height: rect.bottom - rect.top
+  };
+  diag("capture.finalize", payload);
+
+  selectionActive = false;
+  selectionStart = null;
+  lastCursor = null;
+  lastRect = null;
+  overlay?.hide();
+
+  if (payload.width < 1 || payload.height < 1) {
+    diag("capture.error", { error: "Selection rectangle has zero area" });
+    return;
+  }
+
+  try {
+    const desktopPng = await screenshot({ format: "png" });
+    const pngBuffer = await sharp(desktopPng)
+      .extract({
+        left: payload.x,
+        top: payload.y,
+        width: payload.width,
+        height: payload.height
+      })
+      .png()
+      .toBuffer();
+
+    const dataUrl = `data:image/png;base64,${pngBuffer.toString("base64")}`;
+    mainWindow?.webContents.send("capture-image", { dataUrl });
+  } catch (error) {
+    diag("capture.error", { error: String(error) });
+  }
+}
+
+function startSelectionTicker(): void {
+  if (selectionTicker) return;
+  selectionTicker = setInterval(() => {
+    if (!selectionActive || !hotkeySession || !selectionStart) return;
+    const point = hotkeySession.getCursorPos();
+    if (!point) return;
+
+    lastCursor = { x: point.x, y: point.y };
+    const nextRect = buildRect(selectionStart, lastCursor);
+    if (nextRect.right <= nextRect.left || nextRect.bottom <= nextRect.top) return;
+
+    if (!sameRect(lastRect, nextRect)) {
+      overlay?.draw(nextRect);
+      lastRect = nextRect;
     }
-  })();
+  }, 16);
 }
 
 app.whenReady().then(() => {
   diag("app.ready");
   isPinned = loadPinnedPref();
   mainWindow = createMainWindow();
-  nodeHotkey = new NodeHotkey({
+  overlay = new BorderOverlay(2);
+  hotkeySession = new HotkeySession({
     initialHotkey: "ctrl+shift+alt+s",
     events: {
       onHotkeyRegistered: (label) => diag("capture.hotkey.registered", { label }),
       onHotkeySwitched: (label) => diag("capture.hotkey.switched", { label }),
-      onCaptureStart: (start) => diag("capture.start", start),
-      onCaptureFinalize: (rect) => diag("capture.finalize", rect),
-      onError: (error) => diag("capture.error", { error: String(error) })
+      onTriggerDown: (point) => startSelection(point),
+      onTriggerUp: (point) => {
+        void finalizeSelection(point);
+      }
     }
   });
-  nodeHotkey.start();
-  startCaptureLoop();
+  hotkeySession.start();
+  startSelectionTicker();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -275,9 +361,14 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
-  captureLoopRunning = false;
-  nodeHotkey?.stop();
-  nodeHotkey = null;
+  if (selectionTicker) {
+    clearInterval(selectionTicker);
+    selectionTicker = null;
+  }
+  hotkeySession?.stop();
+  hotkeySession = null;
+  overlay?.destroy();
+  overlay = null;
 });
 
 ipcMain.handle("ping", () => "pong");

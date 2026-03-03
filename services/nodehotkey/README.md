@@ -23,7 +23,3 @@ session.start();
 ## Supported hotkey syntax
 - Modifiers: `ctrl`, `shift`, `alt`, `win`
 - Keys: `a-z`, `0-9`, `f1-f24`, `tab`, `space`, `enter`, `esc`, arrows
-
-## Legacy API
-- `NodeHotkey.captureOnce()` remains available for app compatibility.
-- New integrations should use `HotkeySession + BorderOverlay` and own screenshot logic externally.
