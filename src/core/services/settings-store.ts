@@ -20,7 +20,30 @@ export class SettingsStore {
           panels: migratedPanels
         },
         system: { ...DEFAULT_CONFIG.system, ...parsed.system },
-        logging: { ...DEFAULT_CONFIG.logging, ...parsed.logging }
+        logging: { ...DEFAULT_CONFIG.logging, ...parsed.logging },
+        textProcessing: { ...DEFAULT_CONFIG.textProcessing, ...parsed.textProcessing },
+        preprocessing: {
+          ...DEFAULT_CONFIG.preprocessing,
+          ...parsed.preprocessing,
+          detectionFilter: {
+            ...DEFAULT_CONFIG.preprocessing.detectionFilter,
+            ...parsed.preprocessing?.detectionFilter
+          },
+          merge: {
+            ...DEFAULT_CONFIG.preprocessing.merge,
+            ...parsed.preprocessing?.merge
+          },
+          sorting: {
+            ...DEFAULT_CONFIG.preprocessing.sorting,
+            ...parsed.preprocessing?.sorting
+          },
+          selection: {
+            ...DEFAULT_CONFIG.preprocessing.selection,
+            ...parsed.preprocessing?.selection,
+            ops: parsed.preprocessing?.selection?.ops ?? DEFAULT_CONFIG.preprocessing.selection.ops,
+            manualBoxes: parsed.preprocessing?.selection?.manualBoxes ?? DEFAULT_CONFIG.preprocessing.selection.manualBoxes
+          }
+        }
       };
     } catch {
       return DEFAULT_CONFIG;

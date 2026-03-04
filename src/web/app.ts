@@ -17,6 +17,10 @@ import { SettingsStore } from "../core/services/settings-store";
 import { WorkspaceResizer } from "../ui/workspace-resizer";
 import { buildReadingTimeline, cleanTextForTts, findChunkIndexByTime, normalizeText } from "../core/utils/chunking";
 import { APP_TEMPLATE } from "../ui/template";
+import { PreprocessModalController, type DrawRect } from "../features/preprocessing";
+import { applyPreprocessToDataUrl, normalizeImageDataUrl, scaleDataUrlMaxDimension } from "../features/preprocessing/image";
+import { detectRapidRawBoxes } from "../features/preprocessing/rapid-client";
+import { finalizeOcrBoxes } from "../features/preprocessing/logic";
 import "../ui/styles.css";
 
 interface NamedOption {
@@ -69,6 +73,10 @@ export class WebApp {
   private copyHotkeyRecording = false;
   private pendingCopyPlayHotkey: string | null = null;
   private copyHotkeyKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
+  private preprocessModal: PreprocessModalController | null = null;
+  private lastOriginalImageDataUrl: string | null = null;
+  private currentOcrImageDataUrl: string | null = null;
+  private currentOcrRegions: DrawRect[] = [];
 
   mount(root: HTMLElement): void {
     this.initializeLogging();
@@ -79,6 +87,7 @@ export class WebApp {
     this.bindModelSelectors();
     this.bindSettings();
     this.bindCapture();
+    this.bindPreprocessModal();
     this.bindPlayback();
     this.bindWorkspaceResizer();
     this.bindMobilePaneToggles();
@@ -190,6 +199,29 @@ export class WebApp {
     const voices = await this.tryFetchVoiceOptions(base, key);
     this.optionCache.set(cacheKey, voices);
     this.applyOptions(this.ttsVoiceSelect, voices, this.config.tts.voice);
+  }
+
+  private async checkRapidHealth(): Promise<void> {
+    const base = this.config.textProcessing.rapidBaseUrl;
+    try {
+      const response = await fetch(`${base.trim().replace(/\/+$/, "")}/healthz`);
+      if (!response.ok) {
+        this.updateStatusChip("rapid-status-chip", `HTTP ${response.status}`, "error");
+        this.setStatus(`RapidOCR health failed: HTTP ${response.status}`);
+        return;
+      }
+      const payload = (await response.json()) as { ok?: boolean; detector?: string };
+      if (!payload.ok) {
+        this.updateStatusChip("rapid-status-chip", "Unhealthy", "error");
+        this.setStatus("RapidOCR health failed: unhealthy");
+        return;
+      }
+      this.updateStatusChip("rapid-status-chip", `Healthy (${payload.detector ?? "rapid"})`, "ok");
+      this.setStatus("RapidOCR is healthy.");
+    } catch (error) {
+      this.updateStatusChip("rapid-status-chip", "Unreachable", "error");
+      this.setStatus(`RapidOCR health failed: ${String(error)}`);
+    }
   }
 
   private async tryFetchVoiceOptions(baseUrl: string, apiKey: string): Promise<NamedOption[]> {
@@ -431,6 +463,7 @@ export class WebApp {
       "llm-url",
       "llm-key",
       "llm-prompt",
+      "rapid-url",
       "tts-url",
       "tts-key",
       "chunk-min",
@@ -455,6 +488,10 @@ export class WebApp {
     });
 
     this.must<HTMLInputElement>("diagnostics-enabled").addEventListener("change", () => this.syncConfigFromInputs());
+    this.must<HTMLInputElement>("rapid-enabled").addEventListener("change", () => this.syncConfigFromInputs());
+    this.must<HTMLButtonElement>("rapid-health").addEventListener("click", async () => {
+      await this.checkRapidHealth();
+    });
     this.must<HTMLInputElement>("capture-draw-rectangle").addEventListener("change", () => {
       this.syncConfigFromInputs();
       void this.syncElectronCaptureRectangleSetting();
@@ -508,6 +545,8 @@ export class WebApp {
     this.config.llm.baseUrl = this.must<HTMLInputElement>("llm-url").value;
     this.config.llm.apiKey = this.must<HTMLInputElement>("llm-key").value;
     this.config.llm.promptTemplate = this.must<HTMLInputElement>("llm-prompt").value;
+    this.config.textProcessing.rapidEnabled = this.must<HTMLInputElement>("rapid-enabled").checked;
+    this.config.textProcessing.rapidBaseUrl = this.must<HTMLInputElement>("rapid-url").value;
     this.config.tts.baseUrl = this.must<HTMLInputElement>("tts-url").value;
     this.config.tts.apiKey = this.must<HTMLInputElement>("tts-key").value;
     const minWords = Number(this.must<HTMLInputElement>("chunk-min").value);
@@ -554,6 +593,8 @@ export class WebApp {
     this.must<HTMLInputElement>("llm-url").value = this.config.llm.baseUrl;
     this.must<HTMLInputElement>("llm-key").value = this.config.llm.apiKey;
     this.must<HTMLInputElement>("llm-prompt").value = this.config.llm.promptTemplate;
+    this.must<HTMLInputElement>("rapid-enabled").checked = this.config.textProcessing.rapidEnabled;
+    this.must<HTMLInputElement>("rapid-url").value = this.config.textProcessing.rapidBaseUrl;
     this.must<HTMLInputElement>("tts-url").value = this.config.tts.baseUrl;
     this.must<HTMLInputElement>("tts-key").value = this.config.tts.apiKey;
     this.must<HTMLInputElement>("chunk-min").value = String(this.config.reading.minWordsPerChunk);
@@ -596,6 +637,7 @@ export class WebApp {
     this.applyOptions(this.llmModelSelect, [{ value: this.config.llm.model, label: this.config.llm.model }], this.config.llm.model);
     this.applyOptions(this.ttsModelSelect, [{ value: this.config.tts.model, label: this.config.tts.model }], this.config.tts.model);
     this.applyOptions(this.ttsVoiceSelect, [{ value: this.config.tts.voice, label: this.config.tts.voice }], this.config.tts.voice);
+    this.updateStatusChip("rapid-status-chip", this.config.textProcessing.rapidEnabled ? "Enabled" : "Disabled", "idle");
   }
 
   private applyUiState(): void {
@@ -658,7 +700,30 @@ export class WebApp {
           panels: mergedPanels
         },
         system: { ...DEFAULT_CONFIG.system, ...parsed.system },
-        logging: { ...DEFAULT_CONFIG.logging, ...parsed.logging }
+        logging: { ...DEFAULT_CONFIG.logging, ...parsed.logging },
+        textProcessing: { ...DEFAULT_CONFIG.textProcessing, ...parsed.textProcessing },
+        preprocessing: {
+          ...DEFAULT_CONFIG.preprocessing,
+          ...parsed.preprocessing,
+          detectionFilter: {
+            ...DEFAULT_CONFIG.preprocessing.detectionFilter,
+            ...parsed.preprocessing?.detectionFilter
+          },
+          merge: {
+            ...DEFAULT_CONFIG.preprocessing.merge,
+            ...parsed.preprocessing?.merge
+          },
+          sorting: {
+            ...DEFAULT_CONFIG.preprocessing.sorting,
+            ...parsed.preprocessing?.sorting
+          },
+          selection: {
+            ...DEFAULT_CONFIG.preprocessing.selection,
+            ...parsed.preprocessing?.selection,
+            ops: parsed.preprocessing?.selection?.ops ?? DEFAULT_CONFIG.preprocessing.selection.ops,
+            manualBoxes: parsed.preprocessing?.selection?.manualBoxes ?? DEFAULT_CONFIG.preprocessing.selection.manualBoxes
+          }
+        }
       };
       Object.assign(this.config, merged);
       this.config.system.lastImportAt = new Date().toISOString();
@@ -769,6 +834,33 @@ export class WebApp {
 
     window.electronAPI?.onCopiedTextForPlayback(async (text: string) => {
       await this.playCopiedText(text);
+    });
+  }
+
+  private bindPreprocessModal(): void {
+    const root = this.must<HTMLElement>("app-shell");
+    this.preprocessModal = new PreprocessModalController({
+      root,
+      getConfig: () => this.config,
+      saveConfig: (cfg) => {
+        Object.assign(this.config, cfg);
+        this.store.save(this.config);
+        this.renderConfig();
+      },
+      getCurrentImageDataUrl: () => this.lastOriginalImageDataUrl,
+      onApply: (result) => {
+        this.currentOcrImageDataUrl = result.processedImageDataUrl;
+        this.currentOcrRegions = result.finalBoxes;
+        this.setPreviewImage(result.processedImageDataUrl);
+        this.setStatus(`Preprocessing applied (${result.finalBoxes.length} boxes).`);
+        void this.runPreparedOcr();
+      },
+      setStatus: (text) => this.setStatus(text)
+    });
+
+    this.must<HTMLImageElement>("preview-img").addEventListener("click", async () => {
+      if (!this.lastOriginalImageDataUrl) return;
+      await this.preprocessModal?.open();
     });
   }
 
@@ -1081,12 +1173,16 @@ export class WebApp {
   }
 
   private async runPipeline(dataUrl: string): Promise<void> {
-    this.setPreviewImage(dataUrl);
+    this.lastOriginalImageDataUrl = await normalizeImageDataUrl(dataUrl);
+    const ocrInput = await this.buildOcrInput(this.lastOriginalImageDataUrl);
+    this.currentOcrImageDataUrl = ocrInput.imageDataUrl;
+    this.currentOcrRegions = ocrInput.regions;
+    this.setPreviewImage(ocrInput.imageDataUrl);
     this.setStatus("Running OCR + TTS...");
     const done = loggers.pipeline.time("pipeline.run");
 
     try {
-      const result = await this.pipeline.run(dataUrl, this.config);
+      const result = await this.pipeline.run(ocrInput.imageDataUrl, this.config, { regions: ocrInput.regions });
       done();
       loggers.pipeline.info("Pipeline completed", { textLength: result.text.length });
       this.must<HTMLTextAreaElement>("raw-text").value = result.text;
@@ -1097,6 +1193,67 @@ export class WebApp {
       loggers.pipeline.error("Pipeline failed", { error: String(error) });
       this.setStatus(`Pipeline error: ${String(error)}`);
     }
+  }
+
+  private async runPreparedOcr(): Promise<void> {
+    if (!this.currentOcrImageDataUrl) return;
+    const done = loggers.pipeline.time("pipeline.run.prepared");
+    try {
+      const result = await this.pipeline.run(this.currentOcrImageDataUrl, this.config, { regions: this.currentOcrRegions });
+      done();
+      this.must<HTMLTextAreaElement>("raw-text").value = result.text;
+      this.updateTimelineFromRawText();
+      this.resetPlaybackForTextChange();
+      await this.startOrResumePlayback();
+    } catch (error) {
+      this.setStatus(`Pipeline error: ${String(error)}`);
+    }
+  }
+
+  private async buildOcrInput(originalDataUrl: string): Promise<{ imageDataUrl: string; regions: DrawRect[] }> {
+    const pre = this.config.preprocessing;
+    const processed = await applyPreprocessToDataUrl(originalDataUrl, {
+      maxImageDimension: pre.maxImageDimension,
+      binaryThreshold: pre.binaryThreshold,
+      contrast: pre.contrast,
+      brightness: pre.brightness,
+      dilation: pre.dilation,
+      invert: pre.invert
+    });
+    const scaled = await scaleDataUrlMaxDimension(processed, pre.maxImageDimension);
+
+    let rapidBoxes: Array<{ id: string; norm: { x: number; y: number; w: number; h: number }; px: { x1: number; y1: number; x2: number; y2: number } }> = [];
+    if (this.config.textProcessing.rapidEnabled) {
+      try {
+        const detect = await detectRapidRawBoxes(this.config.textProcessing.rapidBaseUrl, scaled);
+        rapidBoxes = detect.boxes;
+        this.updateStatusChip("rapid-status-chip", `Loaded ${detect.boxes.length}`, "ok");
+      } catch (error) {
+        this.updateStatusChip("rapid-status-chip", "Detect failed", "error");
+        loggers.pipeline.warn("Rapid detect failed, falling back to manual/full image", { error: String(error) });
+      }
+    }
+
+    const dims = await this.readImageSize(scaled);
+    const regions = finalizeOcrBoxes({
+      rapidRawBoxes: rapidBoxes,
+      manualBoxes: pre.selection.manualBoxes,
+      baseState: pre.selection.baseState,
+      ops: pre.selection.ops,
+      imageW: dims.width,
+      imageH: dims.height,
+      filter: pre.detectionFilter,
+      sorting: pre.sorting,
+      merge: pre.merge
+    });
+    return { imageDataUrl: scaled, regions };
+  }
+
+  private async readImageSize(dataUrl: string): Promise<{ width: number; height: number }> {
+    const image = new Image();
+    image.src = dataUrl;
+    await image.decode();
+    return { width: image.naturalWidth, height: image.naturalHeight };
   }
 
   private updateTimelineFromRawText(): void {

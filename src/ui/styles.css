@@ -303,6 +303,123 @@ body {
     color: var(--muted-fg);
 }
 
+.preproc-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    background: rgba(18, 20, 24, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.preproc-modal-backdrop[hidden] {
+    display: none !important;
+}
+
+.preproc-modal {
+    width: min(1320px, 96vw);
+    height: min(920px, 95vh);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.preproc-modal-header {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.preproc-modal-body {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+}
+
+.preproc-sidebar {
+    width: 360px;
+    border-right: 1px solid var(--line);
+    overflow: auto;
+    padding: 10px;
+    display: grid;
+    gap: 10px;
+}
+
+.preproc-sidebar section {
+    background: var(--panel);
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    padding: 10px;
+    display: grid;
+    gap: 6px;
+}
+
+.preproc-canvas-wrap {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+
+.preproc-viewer {
+    position: relative;
+    max-width: 100%;
+    max-height: 100%;
+}
+
+#preproc-preview {
+    display: block;
+    max-width: min(1000px, 100%);
+    max-height: calc(95vh - 180px);
+    object-fit: contain;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+}
+
+#preview-img {
+    cursor: pointer;
+}
+
+.preproc-overlay,
+.preproc-draw-preview {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.preproc-overlay .box,
+.preproc-draw-preview .box-preview {
+    position: absolute;
+    border: 2px solid #ec4899;
+    background: rgba(236, 72, 153, 0.12);
+}
+
+.preproc-overlay .box-final {
+    border-color: #22c55e;
+    background: rgba(34, 197, 94, 0.1);
+}
+
+.preproc-overlay .box-manual {
+    border-color: #3b82f6;
+    background: rgba(59, 130, 246, 0.1);
+}
+
+.row-inline {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
 .status-chip {
     font-size: 10px;
     font-weight: 700;
@@ -629,14 +746,16 @@ body {
 
 .workspace-resize-handle {
     border-radius: 999px;
-    background: color-mix(in srgb, var(--accent) 30%, var(--line));
-    border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+    background: var(--line-soft);
+    border: 1px solid var(--line);
     cursor: pointer;
     position: relative;
+    transition: background 0.2s ease, border-color 0.2s ease;
 }
 
 .workspace-resize-handle:hover {
-    background: color-mix(in srgb, var(--accent) 45%, var(--line));
+    background: var(--line);
+    border-color: color-mix(in srgb, var(--muted-fg) 40%, var(--line));
 }
 
 .workspace-resize-handle.vertical {
@@ -652,7 +771,12 @@ body {
     width: 3px;
     height: 34px;
     border-radius: 999px;
-    background: radial-gradient(circle at center, color-mix(in srgb, var(--accent-strong) 70%, #fff) 1.2px, transparent 1.2px)
+    background: radial-gradient(circle at center, var(--dot) 1.2px, transparent 1.2px)
+        center / 4px 8px repeat-y;
+}
+
+.workspace-resize-handle:hover.vertical::before {
+    background: radial-gradient(circle at center, var(--muted-fg) 1.2px, transparent 1.2px)
         center / 4px 8px repeat-y;
 }
 
@@ -669,7 +793,12 @@ body {
     width: 34px;
     height: 3px;
     border-radius: 999px;
-    background: radial-gradient(circle at center, color-mix(in srgb, var(--accent-strong) 70%, #fff) 1.2px, transparent 1.2px)
+    background: radial-gradient(circle at center, var(--dot) 1.2px, transparent 1.2px)
+        center / 8px 4px repeat-x;
+}
+
+.workspace-resize-handle:hover.horizontal::before {
+    background: radial-gradient(circle at center, var(--muted-fg) 1.2px, transparent 1.2px)
         center / 8px 4px repeat-x;
 }
 
@@ -1059,4 +1188,121 @@ body {
     .sidebar {
         z-index: 45;
     }
+}
+
+.preproc-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    background: rgba(18, 20, 24, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.preproc-modal-backdrop[hidden] {
+    display: none !important;
+}
+
+.preproc-modal {
+    width: min(1320px, 96vw);
+    height: min(920px, 95vh);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.preproc-modal-header {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.preproc-modal-body {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+}
+
+.preproc-sidebar {
+    width: 360px;
+    border-right: 1px solid var(--line);
+    overflow: auto;
+    padding: 10px;
+    display: grid;
+    gap: 10px;
+}
+
+.preproc-sidebar section {
+    background: var(--panel);
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    padding: 10px;
+    display: grid;
+    gap: 6px;
+}
+
+.preproc-canvas-wrap {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+
+.preproc-viewer {
+    position: relative;
+    max-width: 100%;
+    max-height: 100%;
+}
+
+#preproc-preview {
+    display: block;
+    max-width: min(1000px, 100%);
+    max-height: calc(95vh - 180px);
+    object-fit: contain;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+}
+
+.preproc-overlay,
+.preproc-draw-preview {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.preproc-overlay .box,
+.preproc-draw-preview .box-preview {
+    position: absolute;
+    border: 2px solid #ec4899;
+    background: rgba(236, 72, 153, 0.12);
+}
+
+.preproc-overlay .box-final {
+    border-color: #22c55e;
+    background: rgba(34, 197, 94, 0.1);
+}
+
+.preproc-overlay .box-manual {
+    border-color: #3b82f6;
+    background: rgba(59, 130, 246, 0.1);
+}
+
+.row-inline {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+#preview-img {
+    cursor: pointer;
 }

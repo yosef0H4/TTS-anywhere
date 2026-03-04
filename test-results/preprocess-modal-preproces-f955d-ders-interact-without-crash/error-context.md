@@ -1,0 +1,259 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e4]:
+  - generic [ref=e5]:
+    - generic [ref=e6]: TTS Snipper
+    - generic [ref=e7]:
+      - button "Toggle always-on-top" [disabled] [ref=e8]:
+        - img [ref=e9]
+      - button "Minimize" [disabled] [ref=e11]:
+        - img [ref=e12]
+      - button "Maximize" [disabled] [ref=e13]:
+        - img [ref=e14]
+      - button "Close" [disabled] [ref=e16]:
+        - img [ref=e17]
+  - generic [ref=e20]:
+    - button "Toggle settings" [ref=e21] [cursor=pointer]:
+      - img [ref=e22]
+    - generic [ref=e23]: ›
+  - complementary:
+    - generic:
+      - generic:
+        - heading [level=2]: Settings
+        - paragraph: Configure OCR, TTS, and playback behavior.
+      - button:
+        - img
+    - generic:
+      - generic:
+        - generic:
+          - heading [level=3]: Appearance
+          - generic: Theme and UI comfort
+        - generic:
+          - button:
+            - generic: Zen
+          - button:
+            - generic: Pink
+      - generic:
+        - generic:
+          - heading [level=3]: OCR
+          - generic: Idle
+        - generic:
+          - generic: OCR Base URL
+          - textbox: https://api.openai.com/v1
+        - generic:
+          - generic: OCR API Key
+          - textbox
+        - generic:
+          - generic: OCR Model
+          - generic:
+            - combobox
+            - generic:
+              - generic:
+                - generic: gpt-4.1-mini
+                - combobox
+            - button:
+              - img
+        - generic:
+          - generic: OCR Prompt
+          - textbox: Extract text exactly as shown.
+        - generic:
+          - generic: Enable RapidOCR Boxes
+          - checkbox
+        - generic:
+          - generic: RapidOCR Server URL
+          - generic:
+            - textbox: http://127.0.0.1:8091
+            - button:
+              - img
+        - generic:
+          - generic: RapidOCR Health
+          - generic: Disabled
+      - generic:
+        - generic:
+          - heading [level=3]: TTS
+          - generic: Idle
+        - generic:
+          - generic: TTS Base URL
+          - textbox: https://api.openai.com/v1
+        - generic:
+          - generic: TTS API Key
+          - textbox
+        - generic:
+          - generic: TTS Model
+          - generic:
+            - combobox
+            - generic:
+              - generic:
+                - generic: gpt-4o-mini-tts
+                - combobox
+            - button:
+              - img
+        - generic:
+          - generic: TTS Voice
+          - generic:
+            - combobox
+            - generic:
+              - generic:
+                - generic: alloy
+                - combobox
+            - button:
+              - img
+      - generic:
+        - generic:
+          - heading [level=3]: Reading & Highlight
+          - generic: Sentence-aware chunking
+        - generic:
+          - generic:
+            - generic: Min Words / Chunk
+            - spinbutton: "6"
+          - generic:
+            - generic: Max Words / Chunk
+            - spinbutton: "25"
+        - generic:
+          - generic: Clean Text Before Chunking/TTS
+          - checkbox
+        - generic:
+          - generic:
+            - generic: WPM
+            - spinbutton: "180"
+          - generic:
+            - generic: Punctuation Pause
+            - combobox
+        - generic:
+          - generic:
+            - generic: Stream Window
+            - spinbutton: "3"
+          - generic:
+            - generic: Concurrency
+            - spinbutton: "2"
+        - generic:
+          - generic:
+            - generic: Retries / Chunk
+            - spinbutton: "2"
+          - generic:
+            - generic: Timeout (ms)
+            - spinbutton: "30000"
+        - generic:
+          - generic:
+            - generic: Large Edit Reset Ratio
+            - spinbutton: "0.35"
+          - generic:
+            - generic: Failure Cooldown (ms)
+            - spinbutton: "5000"
+        - generic:
+          - generic:
+            - generic: Cache Limit (chunks)
+            - spinbutton: "300"
+          - generic:
+            - generic: Cache Limit (bytes)
+            - spinbutton: "120000000"
+        - generic:
+          - generic: Show Chunk Diagnostics
+          - checkbox [checked]
+      - generic:
+        - generic:
+          - heading [level=3]: System & Data
+          - generic: Persistence and diagnostics
+        - generic:
+          - generic: Capture Hotkey
+          - textbox: ctrl+shift+alt+s
+        - generic:
+          - button [disabled]:
+            - img
+            - text: Record
+          - button [disabled]:
+            - img
+            - text: Apply
+          - button [disabled]:
+            - img
+            - text: Cancel
+        - generic: Hotkey editing is available in Electron only.
+        - generic:
+          - generic: Copy & Play Hotkey
+          - textbox: ctrl+shift+alt+x
+        - generic:
+          - button [disabled]:
+            - img
+            - text: Record
+          - button [disabled]:
+            - img
+            - text: Apply
+          - button [disabled]:
+            - img
+            - text: Cancel
+        - generic: Hotkey editing is available in Electron only.
+        - generic:
+          - generic: Draw Selection Rectangle
+          - checkbox [checked]
+        - generic:
+          - generic: Diagnostics Enabled
+          - checkbox [checked]
+        - generic:
+          - button:
+            - img
+            - text: Export
+          - button:
+            - img
+            - text: Import
+          - button:
+            - img
+            - text: Reset
+        - generic: No import yet.
+      - generic:
+        - generic:
+          - heading [level=3]: Logging
+          - generic: Debug and crash analysis
+        - generic:
+          - generic: Log Level
+          - combobox
+        - generic:
+          - generic: Console Logging
+          - checkbox [checked]
+        - generic:
+          - generic: File Logging
+          - checkbox [checked]
+        - generic:
+          - button:
+            - img
+            - text: View Logs
+          - button:
+            - img
+            - text: Clear Logs
+        - generic: "Log path: not available"
+  - generic [ref=e24]:
+    - generic [ref=e25]:
+      - button "Capture" [ref=e26] [cursor=pointer]:
+        - img [ref=e27]
+      - generic "Upload image" [ref=e30] [cursor=pointer]:
+        - img [ref=e31]
+      - generic [ref=e34]: Desktop window controls unavailable (running in browser mode).
+    - generic [ref=e35]:
+      - generic [ref=e36]:
+        - generic [ref=e38]: Image Preview
+        - img "Capture" [ref=e40] [cursor=pointer]
+      - generic "Resize left and right panes" [ref=e41]
+      - generic [ref=e42]:
+        - generic [ref=e43]:
+          - generic [ref=e45]: Text Editor
+          - textbox "Text will appear here..." [ref=e47]
+        - generic "Resize editor and reading panes" [ref=e48]
+        - generic [ref=e51]: Reading Preview
+    - generic [ref=e54]:
+      - generic [ref=e55]:
+        - button "Previous chunk" [ref=e56] [cursor=pointer]:
+          - img [ref=e57]
+        - button "Play" [ref=e59] [cursor=pointer]:
+          - img [ref=e60]
+        - button "Next chunk" [ref=e62] [cursor=pointer]:
+          - img [ref=e63]
+      - generic [ref=e65]:
+        - generic [ref=e66]:
+          - img [ref=e67]
+          - slider [ref=e71]: "80"
+          - spinbutton [ref=e72]: "80"
+        - generic [ref=e73]:
+          - img [ref=e74]
+          - slider [ref=e77]: "1"
+          - spinbutton [ref=e78]: "1"
+```

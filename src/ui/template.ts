@@ -64,6 +64,21 @@ export const APP_TEMPLATE = `
             </div>
           </div>
           <div class="setting-group"><label>OCR Prompt</label><input type="text" id="llm-prompt"></div>
+          <div class="setting-group setting-toggle-row">
+            <label for="rapid-enabled">Enable RapidOCR Boxes</label>
+            <input id="rapid-enabled" type="checkbox">
+          </div>
+          <div class="setting-group">
+            <label>RapidOCR Server URL</label>
+            <div class="setting-inline">
+              <input type="text" id="rapid-url">
+              <button id="rapid-health" class="refetch-btn" type="button" title="Check RapidOCR health"><i data-lucide="activity" class="ui-icon"></i></button>
+            </div>
+          </div>
+          <div class="setting-group">
+            <label>RapidOCR Health</label>
+            <span class="status-chip" id="rapid-status-chip">Idle</span>
+          </div>
         </section>
 
         <section class="setting-section" data-section="tts">

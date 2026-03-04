@@ -64,5 +64,36 @@ export const DEFAULT_CONFIG: AppConfig = {
     level: "info",
     enableFileLogging: true,
     enableConsoleLogging: true
+  },
+  textProcessing: {
+    rapidEnabled: false,
+    rapidBaseUrl: "http://127.0.0.1:8091"
+  },
+  preprocessing: {
+    maxImageDimension: 1080,
+    binaryThreshold: 0,
+    contrast: 1,
+    brightness: 0,
+    dilation: 0,
+    invert: false,
+    detectionFilter: {
+      minWidthRatio: 0,
+      minHeightRatio: 0,
+      medianHeightFraction: 0.45
+    },
+    merge: {
+      mergeVerticalRatio: 0.07,
+      mergeHorizontalRatio: 0.37,
+      mergeWidthRatioThreshold: 0.75
+    },
+    sorting: {
+      direction: "horizontal_ltr",
+      groupTolerance: 0.5
+    },
+    selection: {
+      baseState: true,
+      ops: [],
+      manualBoxes: []
+    }
   }
 };

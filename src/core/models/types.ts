@@ -74,6 +74,41 @@ export interface SystemConfig {
   captureDrawRectangle: boolean;
 }
 
+export interface TextProcessingConfig {
+  rapidEnabled: boolean;
+  rapidBaseUrl: string;
+}
+
+export interface PreprocessingSelectionConfig {
+  baseState: boolean;
+  ops: Array<{ id: string; op: "add" | "sub"; nx: number; ny: number; nw: number; nh: number }>;
+  manualBoxes: Array<{ id: string; nx: number; ny: number; nw: number; nh: number }>;
+}
+
+export interface PreprocessingConfig {
+  maxImageDimension: number;
+  binaryThreshold: number;
+  contrast: number;
+  brightness: number;
+  dilation: number;
+  invert: boolean;
+  detectionFilter: {
+    minWidthRatio: number;
+    minHeightRatio: number;
+    medianHeightFraction: number;
+  };
+  merge: {
+    mergeVerticalRatio: number;
+    mergeHorizontalRatio: number;
+    mergeWidthRatioThreshold: number;
+  };
+  sorting: {
+    direction: "horizontal_ltr" | "horizontal_rtl" | "vertical_ltr" | "vertical_rtl";
+    groupTolerance: number;
+  };
+  selection: PreprocessingSelectionConfig;
+}
+
 export interface AppConfig {
   llm: LlmConfig;
   tts: TtsConfig;
@@ -81,6 +116,8 @@ export interface AppConfig {
   ui: UiConfig;
   system: SystemConfig;
   logging: LoggingConfig;
+  textProcessing: TextProcessingConfig;
+  preprocessing: PreprocessingConfig;
 }
 
 export interface Chunk {
