@@ -7,3 +7,12 @@ dist-electron/
 .idea/
 AutoHotkey/
 piperanywhere/
+experiments/electron-preprocess-lab/node_modules/
+experiments/electron-preprocess-lab/dist/
+experiments/electron-preprocess-lab/dist-electron/
+services/text-processing/rapidocr-preprocess/.venv/
+services/text-processing/rapidocr-preprocess/.mypy_cache/
+services/text-processing/rapidocr-preprocess/.pytest_cache/
+services/text-processing/rapidocr-preprocess/.ruff_cache/
+services/text-processing/rapidocr-preprocess/**/__pycache__/
+services/text-processing/rapidocr-preprocess/**/*.pyc
