@@ -27,6 +27,7 @@ type PostprocessSettings = {
 
 type DetectRequest = {
   detector: { include_polygons: boolean };
+  image: { max_dimension: number };
 };
 
 type RawBox = {
@@ -67,6 +68,7 @@ type SelectionOp = DrawRect & { op: "add" | "sub" };
 type LabState = {
   preprocess: PreprocessingSettings;
   postprocess: PostprocessSettings;
+  maxImageDimension: number;
   image: {
     naturalWidth: number;
     naturalHeight: number;
@@ -91,6 +93,7 @@ type LabState = {
   metrics: { detect_ms: number; total_ms: number; raw_count: number; live_count: number } | null;
   status: string;
   serverUrl: string;
+  serverHealthy: boolean;
   pendingDetect: boolean;
 };
 
@@ -132,6 +135,32 @@ const FIXTURE_BASE = "/fixtures";
 const PREPROCESS_CONTROL_IDS = ["binary-threshold", "contrast", "brightness", "dilation", "invert"] as const;
 const FILTER_PREVIEW_IDS = ["min-width-ratio", "min-height-ratio", "median-height-fraction"] as const;
 const MERGE_PREVIEW_IDS = ["merge-vertical-ratio", "merge-horizontal-ratio", "merge-width-ratio-threshold", "group-tolerance", "reading-direction"] as const;
+const MAX_IMAGE_DIMENSION_DEFAULT = (() => {
+  const raw = localStorage.getItem("preproc:maxImageDimension");
+  const parsed = raw === null ? Number.NaN : Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1080;
+})();
+const RANGE_CONTROL_DEFAULTS: Record<string, number> = {
+  "max-image-dimension": 1080,
+  "binary-threshold": 0,
+  "contrast": 1,
+  "brightness": 0,
+  "dilation": 0,
+  "min-width-ratio": 0,
+  "min-height-ratio": 0,
+  "median-height-fraction": 0.45,
+  "merge-vertical-ratio": 0.07,
+  "merge-horizontal-ratio": 0.37,
+  "merge-width-ratio-threshold": 0.75,
+  "group-tolerance": 0.5
+};
+const INVERT_DEFAULT = false;
+const READING_DIRECTION_DEFAULT = "horizontal_ltr" as ReadingDirection;
+const RANGE_CONTROL_IDS = [
+  "max-image-dimension", "binary-threshold", "contrast", "brightness", "dilation",
+  "min-width-ratio", "min-height-ratio", "median-height-fraction",
+  "merge-vertical-ratio", "merge-horizontal-ratio", "merge-width-ratio-threshold", "group-tolerance"
+] as const;
 
 const LS_SELECTION_BASE = "preproc:selectionBaseState";
 const LS_SELECTION_OPS = "preproc:selectionOps";
@@ -153,6 +182,7 @@ let overlayModeTimer: number | null = null;
 let currentDetectSeq = 0;
 let pendingDetect = false;
 let activeLayers: string[] = [];
+let serverHealthy = false;
 
 let toolMode: ToolMode = "none";
 let selectionBaseState = true;
@@ -190,6 +220,19 @@ app.innerHTML = `
     </section>
 
     <section>
+      <h2>Quality</h2>
+      <div class="viz-wrap">
+        <canvas id="quality-viz" class="side-viz" width="320" height="60"></canvas>
+      </div>
+      <label>Max Image Dimension <span id="val-max-image-dimension"></span></label>
+      <div class="control-row">
+        <input id="max-image-dimension" type="range" min="360" max="3840" step="60" value="${MAX_IMAGE_DIMENSION_DEFAULT}">
+        <input id="max-image-dimension-num" type="number" min="360" max="3840" step="60" value="${MAX_IMAGE_DIMENSION_DEFAULT}" class="control-num">
+        <button id="max-image-dimension-reset" class="control-reset" title="Reset">↻</button>
+      </div>
+    </section>
+
+    <section>
       <h2>Selection Tools</h2>
       <p class="hint">Add/Sub changes selectable mask; Manual creates explicit boxes with delete handles.</p>
       <div class="row tool-row">
@@ -209,37 +252,74 @@ app.innerHTML = `
       <h2>Preprocessing (re-run OCR)</h2>
       <p class="hint">These sliders change the image itself, then run model detection again.</p>
       <label>Binary Threshold <span data-testid="val-threshold" id="val-threshold"></span></label>
-      <input data-testid="binary-threshold" id="binary-threshold" type="range" min="0" max="255" step="1" value="0">
+      <div class="control-row">
+        <input data-testid="binary-threshold" id="binary-threshold" type="range" min="0" max="255" step="1" value="0">
+        <input id="binary-threshold-num" type="number" min="0" max="255" step="1" value="0" class="control-num">
+        <button id="binary-threshold-reset" class="control-reset" title="Reset">↻</button>
+      </div>
 
       <label>Contrast <span data-testid="val-contrast" id="val-contrast"></span></label>
-      <input data-testid="contrast" id="contrast" type="range" min="0.2" max="3" step="0.1" value="1">
+      <div class="control-row">
+        <input data-testid="contrast" id="contrast" type="range" min="0.2" max="3" step="0.1" value="1">
+        <input id="contrast-num" type="number" min="0.2" max="3" step="0.1" value="1" class="control-num">
+        <button id="contrast-reset" class="control-reset" title="Reset">↻</button>
+      </div>
 
       <label>Brightness <span data-testid="val-brightness" id="val-brightness"></span></label>
-      <input data-testid="brightness" id="brightness" type="range" min="-100" max="100" step="1" value="0">
+      <div class="control-row">
+        <input data-testid="brightness" id="brightness" type="range" min="-100" max="100" step="1" value="0">
+        <input id="brightness-num" type="number" min="-100" max="100" step="1" value="0" class="control-num">
+        <button id="brightness-reset" class="control-reset" title="Reset">↻</button>
+      </div>
 
       <label>Dilation/Erosion <span data-testid="val-dilation" id="val-dilation"></span></label>
-      <input data-testid="dilation" id="dilation" type="range" min="-5" max="5" step="1" value="0">
+      <div class="control-row">
+        <input data-testid="dilation" id="dilation" type="range" min="-5" max="5" step="1" value="0">
+        <input id="dilation-num" type="number" min="-5" max="5" step="1" value="0" class="control-num">
+        <button id="dilation-reset" class="control-reset" title="Reset">↻</button>
+      </div>
 
-      <label class="checkbox-row"><input data-testid="invert" id="invert" type="checkbox">Invert</label>
+      <div class="control-row checkbox-row">
+        <label style="margin:0; flex:1;"><input data-testid="invert" id="invert" type="checkbox">Invert</label>
+        <button id="invert-reset" class="control-reset" title="Reset">↻</button>
+      </div>
     </section>
 
-    <section>
+    <section data-ocr-controls>
       <h2>Detection Filter (live)</h2>
+      <div class="viz-wrap">
+        <canvas id="settings-viz" class="side-viz" width="320" height="60"></canvas>
+      </div>
       <p class="hint">Green boxes survive filtering. Red dashed boxes are discarded as noise.</p>
       <label>Min Width Ratio <span data-testid="val-min-width-ratio" id="val-min-width-ratio"></span></label>
-      <input data-testid="min-width-ratio" id="min-width-ratio" type="range" min="0" max="0.1" step="0.001" value="0">
+      <div class="control-row">
+        <input data-testid="min-width-ratio" id="min-width-ratio" type="range" min="0" max="0.1" step="0.001" value="0">
+        <input id="min-width-ratio-num" type="number" min="0" max="0.1" step="0.001" value="0" class="control-num">
+        <button id="min-width-ratio-reset" class="control-reset" title="Reset">↻</button>
+      </div>
 
       <label>Min Height Ratio <span data-testid="val-min-height-ratio" id="val-min-height-ratio"></span></label>
-      <input data-testid="min-height-ratio" id="min-height-ratio" type="range" min="0" max="0.1" step="0.001" value="0">
+      <div class="control-row">
+        <input data-testid="min-height-ratio" id="min-height-ratio" type="range" min="0" max="0.1" step="0.001" value="0">
+        <input id="min-height-ratio-num" type="number" min="0" max="0.1" step="0.001" value="0" class="control-num">
+        <button id="min-height-ratio-reset" class="control-reset" title="Reset">↻</button>
+      </div>
 
       <label>Median Height Fraction <span data-testid="val-median-height" id="val-median-height"></span></label>
-      <input data-testid="median-height-fraction" id="median-height-fraction" type="range" min="0.1" max="1.2" step="0.05" value="0.45">
+      <div class="control-row">
+        <input data-testid="median-height-fraction" id="median-height-fraction" type="range" min="0.1" max="1.2" step="0.05" value="0.45">
+        <input id="median-height-fraction-num" type="number" min="0.1" max="1.2" step="0.05" value="0.45" class="control-num">
+        <button id="median-height-fraction-reset" class="control-reset" title="Reset">↻</button>
+      </div>
     </section>
 
-    <section>
+    <section data-ocr-controls>
       <h2>Merging + Ordering (live)</h2>
       <p class="hint">Yellow zones, cyan bars, and magenta arrows explain why boxes merge and in what order.</p>
-      <label>Reading Direction</label>
+      <div class="control-row">
+        <label style="margin:0; flex:1;">Reading Direction</label>
+        <button id="reading-direction-reset" class="control-reset" title="Reset">↻</button>
+      </div>
       <select data-testid="reading-direction" id="reading-direction">
         <option value="horizontal_ltr">Horizontal LTR</option>
         <option value="horizontal_rtl">Horizontal RTL</option>
@@ -248,16 +328,32 @@ app.innerHTML = `
       </select>
 
       <label>Merge Vertical Ratio <span data-testid="val-merge-v" id="val-merge-v"></span></label>
-      <input data-testid="merge-vertical-ratio" id="merge-vertical-ratio" type="range" min="0" max="1" step="0.01" value="0.07">
+      <div class="control-row">
+        <input data-testid="merge-vertical-ratio" id="merge-vertical-ratio" type="range" min="0" max="1" step="0.01" value="0.07">
+        <input id="merge-vertical-ratio-num" type="number" min="0" max="1" step="0.01" value="0.07" class="control-num">
+        <button id="merge-vertical-ratio-reset" class="control-reset" title="Reset">↻</button>
+      </div>
 
       <label>Merge Horizontal Ratio <span data-testid="val-merge-h" id="val-merge-h"></span></label>
-      <input data-testid="merge-horizontal-ratio" id="merge-horizontal-ratio" type="range" min="0" max="2" step="0.01" value="0.37">
+      <div class="control-row">
+        <input data-testid="merge-horizontal-ratio" id="merge-horizontal-ratio" type="range" min="0" max="2" step="0.01" value="0.37">
+        <input id="merge-horizontal-ratio-num" type="number" min="0" max="2" step="0.01" value="0.37" class="control-num">
+        <button id="merge-horizontal-ratio-reset" class="control-reset" title="Reset">↻</button>
+      </div>
 
       <label>Merge Width Ratio Threshold <span data-testid="val-merge-w" id="val-merge-w"></span></label>
-      <input data-testid="merge-width-ratio-threshold" id="merge-width-ratio-threshold" type="range" min="0" max="1" step="0.01" value="0.75">
+      <div class="control-row">
+        <input data-testid="merge-width-ratio-threshold" id="merge-width-ratio-threshold" type="range" min="0" max="1" step="0.01" value="0.75">
+        <input id="merge-width-ratio-threshold-num" type="number" min="0" max="1" step="0.01" value="0.75" class="control-num">
+        <button id="merge-width-ratio-threshold-reset" class="control-reset" title="Reset">↻</button>
+      </div>
 
       <label>Group Tolerance <span data-testid="val-group-tolerance" id="val-group-tolerance"></span></label>
-      <input data-testid="group-tolerance" id="group-tolerance" type="range" min="0.1" max="1.2" step="0.01" value="0.5">
+      <div class="control-row">
+        <input data-testid="group-tolerance" id="group-tolerance" type="range" min="0.1" max="1.2" step="0.01" value="0.5">
+        <input id="group-tolerance-num" type="number" min="0.1" max="1.2" step="0.01" value="0.5" class="control-num">
+        <button id="group-tolerance-reset" class="control-reset" title="Reset">↻</button>
+      </div>
     </section>
 
     <section>
@@ -311,9 +407,15 @@ const selectionMaskEl = byId<HTMLCanvasElement>("selection-mask");
 const overlaySvgEl = byId<SVGSVGElement>("overlay-svg");
 const viewerEl = byId<HTMLDivElement>("viewer");
 const emptyEl = byId<HTMLDivElement>("empty");
+const qualityVizEl = byId<HTMLCanvasElement>("quality-viz");
+const settingsVizEl = byId<HTMLCanvasElement>("settings-viz");
 
 loadDrawingState();
 setTool("none");
+setupRangeControls();
+setupResetButtons();
+setupVisualizers();
+applyHealthUiGate();
 
 serverUrlEl.addEventListener("change", () => localStorage.setItem("preproc:serverUrl", serverUrlEl.value.trim()));
 byId<HTMLButtonElement>("btn-health").addEventListener("click", async () => {
@@ -332,6 +434,7 @@ byId<HTMLButtonElement>("btn-server-stop").addEventListener("click", async () =>
   if (!window.electronAPI) return;
   const res = await window.electronAPI.stopPythonServer();
   setStatus(res.message);
+  setServerHealthy(false);
   refreshDebugState();
 });
 byId<HTMLButtonElement>("btn-clear").addEventListener("click", () => {
@@ -641,6 +744,9 @@ function setTool(mode: ToolMode): void {
   for (const item of ids) {
     byId<HTMLButtonElement>(item.id).classList.toggle("active-tool", item.mode === mode);
   }
+
+  const pasteTarget = byId<HTMLElement>("paste-target");
+  pasteTarget.style.cursor = mode === "none" ? "default" : "crosshair";
 }
 
 function persistDrawingState(): void {
@@ -773,7 +879,7 @@ async function preprocessAndDetectNow(): Promise<void> {
     previewEl.src = previewObjectUrl;
     await previewEl.decode();
 
-    const request: DetectRequest = { detector: { include_polygons: true } };
+    const request: DetectRequest = { detector: { include_polygons: true }, image: { max_dimension: num("max-image-dimension") } };
     const form = new FormData();
     form.append("image", processed, "processed.png");
     form.append("settings", JSON.stringify(request));
@@ -786,6 +892,7 @@ async function preprocessAndDetectNow(): Promise<void> {
     }
     if (seq !== currentDetectSeq) return;
 
+    setServerHealthy(true);
     rawBoxes = data.raw_boxes;
     setOverlayMode("committed");
     recomputeLiveBoxes();
@@ -800,6 +907,7 @@ async function preprocessAndDetectNow(): Promise<void> {
   } catch (error) {
     setStatus(`Detection failed: ${String(error)}`);
     currentMetrics = null;
+    setServerHealthy(false);
   } finally {
     pendingDetect = false;
   }
@@ -1093,6 +1201,7 @@ function renderOverlay(): void {
   activeLayers = [];
   const g = getImageGeometry();
   if (!g) return;
+  updateVisualizers();
 
   overlayEl.style.width = `${g.displayWidth}px`;
   overlayEl.style.height = `${g.displayHeight}px`;
@@ -1391,6 +1500,7 @@ function setControlValue(controlId: string, value: Primitive): void {
 }
 
 function refreshValueLabels(): void {
+  label("val-max-image-dimension", `${num("max-image-dimension")}`);
   label("val-threshold", `${num("binary-threshold")}`);
   label("val-contrast", num("contrast").toFixed(1));
   label("val-brightness", `${num("brightness")}`);
@@ -1412,6 +1522,7 @@ function getLabState(): LabState {
   return {
     preprocess: readPreprocess(),
     postprocess: readPostprocess(),
+    maxImageDimension: num("max-image-dimension"),
     image: getImageGeometry(),
     rawCount: rawBoxes.length,
     liveCount: liveBoxes.length,
@@ -1429,6 +1540,7 @@ function getLabState(): LabState {
     metrics: currentMetrics,
     status: currentStatus,
     serverUrl: serverUrlEl.value,
+    serverHealthy,
     pendingDetect
   };
 }
@@ -1469,15 +1581,36 @@ function resetState(): void {
   setStatus("Cleared");
 }
 
-async function checkHealth(): Promise<void> {
+async function checkHealth(): Promise<boolean> {
   try {
     const res = await fetch(`${normalizeServerUrl(serverUrlEl.value)}/healthz`);
     const data = (await res.json()) as { ok: boolean; detector?: string };
     if (!res.ok || !data.ok) throw new Error("unhealthy");
     setStatus(`Healthy (${data.detector ?? "unknown"})`);
+    setServerHealthy(true);
+    return true;
   } catch {
     setStatus("Server unreachable");
+    setServerHealthy(false);
+    return false;
   }
+}
+
+function setServerHealthy(healthy: boolean): void {
+  serverHealthy = healthy;
+  applyHealthUiGate();
+}
+
+function applyHealthUiGate(): void {
+  const sections = Array.from(document.querySelectorAll<HTMLElement>("section[data-ocr-controls]"));
+  for (const section of sections) {
+    section.classList.toggle("section-disabled", !serverHealthy);
+    const controls = section.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement>("input, button, select, textarea");
+    for (const control of controls) {
+      control.disabled = !serverHealthy;
+    }
+  }
+  detectBtn.disabled = !serverHealthy;
 }
 
 function setStatus(text: string): void {
@@ -1506,4 +1639,209 @@ function byId<T extends Element>(id: string): T {
 function mustEl<T>(el: T | null, errorMessage: string): T {
   if (!el) throw new Error(errorMessage);
   return el;
+}
+
+function setupRangeControls(): void {
+  for (const id of RANGE_CONTROL_IDS) {
+    const slider = byId<HTMLInputElement>(id);
+    const numInput = byId<HTMLInputElement>(`${id}-num`);
+
+    slider.addEventListener("input", () => {
+      numInput.value = slider.value;
+      refreshValueLabels();
+      if (id === "max-image-dimension") {
+        localStorage.setItem("preproc:maxImageDimension", slider.value);
+      } else if (PREPROCESS_CONTROL_IDS.includes(id as any)) {
+        schedulePreprocessAndDetect();
+      } else {
+        setOverlayMode(FILTER_PREVIEW_IDS.includes(id as any) ? "filter-preview" : "merge-preview");
+        recomputeLiveBoxes();
+      }
+      updateVisualizers();
+    });
+
+    numInput.addEventListener("input", () => {
+      const val = Number(numInput.value);
+      const min = Number(slider.min);
+      const max = Number(slider.max);
+      const step = Number(slider.step);
+      const clamped = clamp(val, min, max);
+      numInput.value = String(clamped);
+      slider.value = String(clamped);
+      refreshValueLabels();
+      if (id === "max-image-dimension") {
+        localStorage.setItem("preproc:maxImageDimension", slider.value);
+      } else if (PREPROCESS_CONTROL_IDS.includes(id as any)) {
+        schedulePreprocessAndDetect();
+      } else {
+        setOverlayMode(FILTER_PREVIEW_IDS.includes(id as any) ? "filter-preview" : "merge-preview");
+        recomputeLiveBoxes();
+      }
+      updateVisualizers();
+    });
+  }
+
+  byId<HTMLInputElement>("invert").addEventListener("change", () => {
+    refreshValueLabels();
+    schedulePreprocessAndDetect();
+  });
+
+  byId<HTMLSelectElement>("reading-direction").addEventListener("change", () => {
+    refreshValueLabels();
+    setOverlayMode("merge-preview");
+    recomputeLiveBoxes();
+    updateVisualizers();
+  });
+}
+
+function setupResetButtons(): void {
+  for (const id of RANGE_CONTROL_IDS) {
+    const resetBtn = byId<HTMLButtonElement>(`${id}-reset`);
+    const defaultVal = RANGE_CONTROL_DEFAULTS[id];
+    resetBtn.addEventListener("click", () => {
+      byId<HTMLInputElement>(id).value = String(defaultVal);
+      byId<HTMLInputElement>(`${id}-num`).value = String(defaultVal);
+      refreshValueLabels();
+      if (id === "max-image-dimension") {
+        localStorage.setItem("preproc:maxImageDimension", String(defaultVal));
+      } else if (PREPROCESS_CONTROL_IDS.includes(id as any)) {
+        schedulePreprocessAndDetect();
+      } else {
+        setOverlayMode(FILTER_PREVIEW_IDS.includes(id as any) ? "filter-preview" : "merge-preview");
+        recomputeLiveBoxes();
+      }
+      updateVisualizers();
+    });
+  }
+
+  byId<HTMLButtonElement>("invert-reset").addEventListener("click", () => {
+    byId<HTMLInputElement>("invert").checked = INVERT_DEFAULT;
+    refreshValueLabels();
+    schedulePreprocessAndDetect();
+  });
+
+  byId<HTMLButtonElement>("reading-direction-reset").addEventListener("click", () => {
+    byId<HTMLSelectElement>("reading-direction").value = READING_DIRECTION_DEFAULT;
+    refreshValueLabels();
+    setOverlayMode("merge-preview");
+    recomputeLiveBoxes();
+    updateVisualizers();
+  });
+}
+
+function setupVisualizers(): void {
+  updateVisualizers();
+}
+
+function updateVisualizers(): void {
+  drawQualityViz();
+  drawSettingsViz();
+}
+
+function drawQualityViz(): void {
+  const ctx = qualityVizEl.getContext("2d");
+  if (!ctx) return;
+  const w = qualityVizEl.width;
+  const h = qualityVizEl.height;
+  ctx.clearRect(0, 0, w, h);
+  ctx.imageSmoothingEnabled = false;
+
+  const maxDim = num("max-image-dimension");
+
+  ctx.fillStyle = "#000000";
+  ctx.fillRect(0, 0, w, h);
+
+  const sourceW = 240;
+  const sourceH = 120;
+  const src = document.createElement("canvas");
+  src.width = sourceW;
+  src.height = sourceH;
+  const sctx = src.getContext("2d");
+  if (!sctx) return;
+  sctx.fillStyle = "#000";
+  sctx.fillRect(0, 0, sourceW, sourceH);
+  sctx.fillStyle = "#fff";
+  sctx.font = "700 24px 'Segoe UI', sans-serif";
+  sctx.textAlign = "center";
+  sctx.textBaseline = "middle";
+  sctx.fillText("Quality", sourceW / 2, sourceH / 2);
+
+  const scaleFactor = clamp(maxDim / 1080, 0.2, 1);
+  const tinyW = Math.max(1, Math.round(sourceW * scaleFactor));
+  const tinyH = Math.max(1, Math.round(sourceH * scaleFactor));
+  const tiny = document.createElement("canvas");
+  tiny.width = tinyW;
+  tiny.height = tinyH;
+  const tctx = tiny.getContext("2d");
+  if (!tctx) return;
+  tctx.imageSmoothingEnabled = false;
+  tctx.drawImage(src, 0, 0, tinyW, tinyH);
+
+  const drawW = Math.min(w - 8, sourceW);
+  const drawH = Math.min(h - 8, sourceH);
+  const dx = Math.round((w - drawW) / 2);
+  const dy = Math.round((h - drawH) / 2);
+  ctx.drawImage(tiny, dx, dy, drawW, drawH);
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "10px 'IBM Plex Sans', sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  ctx.fillText(`${maxDim}px`, 4, 4);
+}
+
+function drawSettingsViz(): void {
+  const ctx = settingsVizEl.getContext("2d");
+  if (!ctx) return;
+  const w = settingsVizEl.width;
+  const h = settingsVizEl.height;
+  ctx.clearRect(0, 0, w, h);
+
+  ctx.fillStyle = "rgb(20,20,20)";
+  ctx.fillRect(0, 0, w, h);
+
+  const centerX = w / 2;
+  const centerY = h / 2;
+  const scale = 0.45;
+
+  const refW = 60;
+  const refH = 30;
+  const refX = centerX - refW / 2;
+  const refY = centerY - refH / 2;
+
+  const vTol = Math.round(num("merge-vertical-ratio") * 20);
+  const hTol = Math.round(num("merge-horizontal-ratio") * 20);
+  const ratio = num("merge-width-ratio-threshold");
+  const minW = Math.round(num("min-width-ratio") * 1080);
+  const minH = Math.round(num("min-height-ratio") * 1080);
+
+  const zoneW = refW + hTol * 2 * scale;
+  const zoneH = refH + vTol * 2 * scale;
+  const zoneX = centerX - zoneW / 2;
+  const zoneY = centerY - zoneH / 2;
+
+  ctx.setLineDash([6, 4]);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgb(255,255,0)";
+  ctx.fillStyle = "rgba(255,255,0,0.08)";
+  ctx.fillRect(zoneX, zoneY, zoneW, zoneH);
+  ctx.strokeRect(zoneX, zoneY, zoneW, zoneH);
+  ctx.setLineDash([]);
+
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgb(0,150,255)";
+  ctx.strokeRect(refX, refY, refW, refH);
+
+  const minWScaled = minW * scale;
+  const minHScaled = minH * scale;
+  const minX = centerX - minWScaled / 2;
+  const minY = centerY - minHScaled / 2;
+  ctx.strokeStyle = "rgb(255,50,50)";
+  ctx.fillStyle = "rgba(255,50,50,0.45)";
+  ctx.fillRect(minX, minY, minWScaled, minHScaled);
+  ctx.strokeRect(minX, minY, minWScaled, minHScaled);
+
+  const ratioW = refW * ratio;
+  ctx.fillStyle = "rgba(0,255,255,0.6)";
+  ctx.fillRect(refX, refY + refH - 6, ratioW, 6);
 }
