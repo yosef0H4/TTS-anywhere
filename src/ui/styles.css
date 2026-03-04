@@ -327,14 +327,34 @@ body {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
 }
 
 .preproc-modal-header {
-    padding: 10px 12px;
+    padding: 12px 16px;
     border-bottom: 1px solid var(--line);
     display: flex;
     align-items: center;
     justify-content: space-between;
+    background: color-mix(in srgb, var(--bg) 92%, #fff 8%);
+}
+
+.preproc-header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.preproc-header-left .ui-icon {
+    color: var(--accent);
+}
+
+.preproc-header-left h3 {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--fg);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
 .preproc-modal-body {
@@ -344,21 +364,196 @@ body {
 }
 
 .preproc-sidebar {
-    width: 360px;
+    width: 340px;
     border-right: 1px solid var(--line);
     overflow: auto;
-    padding: 10px;
+    padding: 12px;
     display: grid;
     gap: 10px;
+    background: color-mix(in srgb, var(--panel) 50%, var(--panel-2) 50%);
 }
 
-.preproc-sidebar section {
-    background: var(--panel);
-    border: 1px solid var(--line-soft);
-    border-radius: 8px;
-    padding: 10px;
+.preproc-section {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px;
     display: grid;
+    gap: 10px;
+    box-shadow: 0 2px 0 var(--line-soft);
+}
+
+.preproc-section.section-disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.preproc-section-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--line-soft);
+}
+
+.preproc-section-head .ui-icon {
+    width: 14px;
+    height: 14px;
+    color: var(--accent);
+}
+
+.preproc-section-head h4 {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    color: var(--muted-fg);
+    flex: 1;
+}
+
+.preproc-live-badge {
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    padding: 2px 6px;
+    border-radius: 4px;
+    letter-spacing: 0.5px;
+}
+
+.preproc-hint {
+    font-size: 11px;
+    color: var(--muted-fg);
+    line-height: 1.4;
+}
+
+.preproc-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.preproc-field {
+    display: grid;
+    gap: 4px;
+}
+
+.preproc-field label,
+.preproc-checkbox span {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--fg);
+}
+
+.val-badge {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    padding: 1px 6px;
+    border-radius: 4px;
+    margin-left: 4px;
+}
+
+.preproc-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    flex: 1;
+}
+
+.preproc-checkbox input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+
+.preproc-input-row {
+    display: flex;
+    align-items: center;
     gap: 6px;
+}
+
+.preproc-input-row input {
+    flex: 1;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel-2);
+    color: var(--fg);
+    font-size: 13px;
+}
+
+.preproc-input-row input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.preproc-tool-group {
+    display: flex;
+    gap: 6px;
+}
+
+.preproc-tool-btn {
+    flex: 1;
+    height: 36px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel-2);
+    color: var(--muted-fg);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+}
+
+.preproc-tool-btn:hover {
+    background: var(--panel);
+    color: var(--fg);
+    border-color: var(--line);
+}
+
+.preproc-tool-btn.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+
+.preproc-tool-btn .ui-icon {
+    width: 16px;
+    height: 16px;
+}
+
+.preproc-action-btn {
+    width: 100%;
+    height: 36px;
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: all 0.15s ease;
+}
+
+.preproc-action-btn:hover {
+    background: var(--accent);
+    color: #fff;
+}
+
+.preproc-action-btn .ui-icon {
+    width: 16px;
+    height: 16px;
 }
 
 .preproc-sidebar .control-row {
@@ -367,28 +562,76 @@ body {
     gap: 6px;
 }
 
-.preproc-sidebar .control-num {
-    width: 76px;
-    height: 30px;
+.preproc-sidebar .control-row input[type="range"] {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 6px;
+    background: var(--line-soft);
+    border-radius: 999px;
+}
+
+.preproc-sidebar .control-row input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 1px solid var(--accent-strong);
+    cursor: pointer;
+}
+
+.preproc-sidebar .control-row select {
+    flex: 1;
+    height: 32px;
+    padding: 0 10px;
     border: 1px solid var(--line);
-    border-radius: 6px;
+    border-radius: 8px;
+    background: var(--panel-2);
+    color: var(--fg);
+    font-size: 13px;
+}
+
+.preproc-sidebar .control-num {
+    width: 68px;
+    height: 32px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
     padding: 0 8px;
     background: var(--panel-2);
     color: var(--fg);
+    font-size: 12px;
+    text-align: center;
+}
+
+.preproc-sidebar .control-num:focus,
+.preproc-sidebar .control-row select:focus {
+    outline: none;
+    border-color: var(--accent);
 }
 
 .preproc-sidebar .control-reset {
-    width: 30px;
-    height: 30px;
+    width: 32px;
+    height: 32px;
     border: 1px solid var(--line);
-    border-radius: 6px;
+    border-radius: 8px;
     background: var(--panel-2);
     color: var(--muted-fg);
     cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
 }
 
 .preproc-sidebar .control-reset:hover {
     background: var(--panel);
+    color: var(--fg);
+}
+
+.preproc-sidebar .control-reset .ui-icon {
+    width: 14px;
+    height: 14px;
 }
 
 .preproc-sidebar .viz-wrap {
@@ -565,10 +808,6 @@ body {
     padding: 5px 8px;
     border-radius: 6px;
     border: 1px solid var(--line-soft);
-}
-
-.preproc-sidebar section.section-disabled {
-    opacity: 0.58;
 }
 
 .preproc-debug {
