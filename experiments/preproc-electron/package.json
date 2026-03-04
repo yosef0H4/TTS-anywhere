@@ -1,0 +1,35 @@
+{
+  "name": "preproc-electron",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev:web": "vite",
+    "dev:web:deterministic": "vite --host 127.0.0.1 --port 5173",
+    "build:web": "vite build",
+    "build:electron:main": "tsc -p tsconfig.electron.json",
+    "dev:electron:main": "tsc -p tsconfig.electron.json --watch",
+    "dev:electron": "npm run build:electron:main && concurrently -k \"npm:dev:web\" \"npm:dev:electron:main\" \"npm:dev:electron:launch\"",
+    "dev:electron:launch": "wait-on tcp:5173 file:dist-electron/main.js && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
+    "build:electron": "npm run build:web && npm run build:electron:main",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:update": "playwright test --update-snapshots",
+    "loop:test": "bash scripts/loop-test.sh"
+  },
+  "dependencies": {
+    "lucide": "^0.576.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^25.3.3",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^40.6.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1",
+    "wait-on": "^9.0.4"
+  }
+}

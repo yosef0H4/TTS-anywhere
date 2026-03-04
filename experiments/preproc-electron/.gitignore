@@ -1,0 +1,23 @@
+# Node
+node_modules/
+dist/
+dist-electron/
+
+# Playwright outputs
+test-results/
+playwright-report/
+
+# Local loop artifacts
+test-artifacts/
+
+# Python venv/cache
+python-server/.venv/
+python-server/.pytest_cache/
+python-server/.mypy_cache/
+python-server/.ruff_cache/
+python-server/**/__pycache__/
+python-server/**/*.pyc
+
+# OS/editor
+.DS_Store
+Thumbs.db
