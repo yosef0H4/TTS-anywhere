@@ -64,6 +64,13 @@ export const APP_TEMPLATE = `
             </div>
           </div>
           <div class="setting-group"><label>OCR Prompt</label><input type="text" id="llm-prompt"></div>
+          <div class="setting-group">
+            <label>OCR Image Detail</label>
+            <select id="llm-image-detail">
+              <option value="low">Low (faster)</option>
+              <option value="high">High (more accurate)</option>
+            </select>
+          </div>
           <div class="setting-group setting-toggle-row">
             <label for="rapid-enabled">Enable RapidOCR Boxes</label>
             <input id="rapid-enabled" type="checkbox">

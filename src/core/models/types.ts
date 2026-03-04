@@ -3,6 +3,7 @@ export interface LlmConfig {
   apiKey: string;
   model: string;
   promptTemplate: string;
+  imageDetail: "low" | "high";
 }
 
 export interface TtsConfig {

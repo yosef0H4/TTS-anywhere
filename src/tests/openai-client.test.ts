@@ -19,10 +19,23 @@ describe("openai compatible clients", () => {
       baseUrl: "https://example.com/v1",
       apiKey: "k",
       model: "m",
-      promptTemplate: "Extract"
+      promptTemplate: "Extract",
+      imageDetail: "low"
     });
 
     expect(create).toHaveBeenCalledOnce();
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      messages: expect.arrayContaining([
+        expect.objectContaining({
+          content: expect.arrayContaining([
+            expect.objectContaining({
+              type: "image_url",
+              image_url: expect.objectContaining({ detail: "low" })
+            })
+          ])
+        })
+      ])
+    }));
     expect(result.text).toBe("hello world");
   });
 

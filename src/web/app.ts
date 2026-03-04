@@ -463,6 +463,7 @@ export class WebApp {
       "llm-url",
       "llm-key",
       "llm-prompt",
+      "llm-image-detail",
       "rapid-url",
       "tts-url",
       "tts-key",
@@ -545,6 +546,7 @@ export class WebApp {
     this.config.llm.baseUrl = this.must<HTMLInputElement>("llm-url").value;
     this.config.llm.apiKey = this.must<HTMLInputElement>("llm-key").value;
     this.config.llm.promptTemplate = this.must<HTMLInputElement>("llm-prompt").value;
+    this.config.llm.imageDetail = this.must<HTMLSelectElement>("llm-image-detail").value as AppConfig["llm"]["imageDetail"];
     this.config.textProcessing.rapidEnabled = this.must<HTMLInputElement>("rapid-enabled").checked;
     this.config.textProcessing.rapidBaseUrl = this.must<HTMLInputElement>("rapid-url").value;
     this.config.tts.baseUrl = this.must<HTMLInputElement>("tts-url").value;
@@ -593,6 +595,7 @@ export class WebApp {
     this.must<HTMLInputElement>("llm-url").value = this.config.llm.baseUrl;
     this.must<HTMLInputElement>("llm-key").value = this.config.llm.apiKey;
     this.must<HTMLInputElement>("llm-prompt").value = this.config.llm.promptTemplate;
+    this.must<HTMLSelectElement>("llm-image-detail").value = this.config.llm.imageDetail;
     this.must<HTMLInputElement>("rapid-enabled").checked = this.config.textProcessing.rapidEnabled;
     this.must<HTMLInputElement>("rapid-url").value = this.config.textProcessing.rapidBaseUrl;
     this.must<HTMLInputElement>("tts-url").value = this.config.tts.baseUrl;

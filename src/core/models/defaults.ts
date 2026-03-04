@@ -5,7 +5,8 @@ export const DEFAULT_CONFIG: AppConfig = {
     baseUrl: "https://api.openai.com/v1",
     apiKey: "",
     model: "gpt-4.1-mini",
-    promptTemplate: "Extract text exactly as shown."
+    promptTemplate: "Extract text exactly as shown.",
+    imageDetail: "low"
   },
   tts: {
     baseUrl: "https://api.openai.com/v1",

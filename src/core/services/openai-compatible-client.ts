@@ -67,7 +67,7 @@ export class OpenAiCompatibleLlmService {
         role: "user",
         content: [
           { type: "text", text: config.promptTemplate },
-          { type: "image_url", image_url: { url: dataUrl } }
+          { type: "image_url", image_url: { url: dataUrl, detail: config.imageDetail } as { url: string; detail: "low" | "high" } }
         ]
       }
     ];
