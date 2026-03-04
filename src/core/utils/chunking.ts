@@ -7,7 +7,9 @@ export function normalizeText(input: string): string {
 export function cleanTextForTts(input: string): string {
   // Match PiperAnywhere behavior: strip decorative symbols/emojis, normalize whitespace,
   // and cap excessive terminal punctuation.
-  let cleaned = input.replace(/[^\p{L}\p{N}\p{P}\p{Z}]/gu, "");
+  // First convert newlines to spaces so they become word boundaries
+  let cleaned = input.replace(/[\r\n]+/g, " ");
+  cleaned = cleaned.replace(/[^\p{L}\p{N}\p{P}\p{Z}]/gu, "");
   cleaned = cleaned.replace(/\s+/g, " ").trim();
   cleaned = cleaned.replace(/([.!?]){4,}/g, "$1$1$1");
   return cleaned;

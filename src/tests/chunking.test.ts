@@ -10,6 +10,11 @@ describe("chunking", () => {
     expect(cleanTextForTts("Hi 😊   there!!!!\n\n#ok")).toBe("Hi there!!! #ok");
   });
 
+  it("preserves word boundaries from newlines", () => {
+    expect(cleanTextForTts("hi\nhi")).toBe("hi hi");
+    expect(cleanTextForTts("word1\r\nword2\nword3")).toBe("word1 word2 word3");
+  });
+
   it("splits by sentence boundaries and punctuation", () => {
     expect(splitIntoChunks("one two. three four?", 2, 5)).toEqual(["one two.", "three four?"]);
   });
