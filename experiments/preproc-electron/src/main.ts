@@ -168,6 +168,63 @@ const RANGE_CONTROL_IDS = [
   "min-width-ratio", "min-height-ratio", "median-height-fraction",
   "merge-vertical-ratio", "merge-horizontal-ratio", "merge-width-ratio-threshold", "group-tolerance"
 ] as const;
+const CONTROL_TOOLTIPS: Record<string, string> = {
+  "server-url": "Base URL for the RapidOCR Python service. All health checks and detection requests are sent to this endpoint.",
+  "btn-health": "Checks /healthz on the current server URL and updates UI health state. Use this to verify connectivity before detection.",
+  "btn-server-start": "Asks Electron main process to start the local Python server. After startup, run Health to confirm it is reachable.",
+  "btn-server-stop": "Stops the local Python server process started by Electron. OCR-dependent controls are disabled until the server is healthy again.",
+  "image-upload": "Load an image file into the lab preview. The image is preprocessed client-side and sent to RapidOCR only when detection runs.",
+  "btn-clear": "Clears the current image, overlays, metrics, and transient preview state. Saved selection/manual normalized geometry remains available across images.",
+  "max-image-dimension": "Maximum dimension used in detection request settings. Lower values run faster with less detail; higher values preserve detail but cost more time.",
+  "max-image-dimension-num": "Numeric value for Max Image Dimension. Use this for precise sizing instead of dragging the slider.",
+  "max-image-dimension-reset": "Reset Max Image Dimension to its default value (1080).",
+  "tool-none": "View mode. Drawing is disabled and the canvas behaves as a read-only preview.",
+  "tool-add": "Draw areas to add into the selection mask. Boxes overlapping added zones are more likely to be kept.",
+  "tool-sub": "Draw areas to remove from the selection mask. Boxes overlapping removed zones are filtered out.",
+  "tool-manual": "Draw explicit manual boxes. Manual boxes are injected directly into merge/output flow even when auto detection misses text.",
+  "btn-select-all": "Set base selection to all-visible and clear add/sub operations. Equivalent to accepting the full image area.",
+  "btn-deselect-all": "Set base selection to none and clear add/sub operations. Use with Add Area to whitelist only specific regions.",
+  "btn-clear-manual": "Remove all manual boxes from state and overlay. Auto-detected boxes remain available.",
+  "binary-threshold": "Convert image to binary using this luminance threshold. Higher values keep only brighter text and can remove low-contrast noise.",
+  "binary-threshold-num": "Numeric Binary Threshold entry for precise control.",
+  "binary-threshold-reset": "Reset Binary Threshold to default (0, disabled).",
+  "contrast": "Adjust contrast before OCR. Increasing can separate text from background; too high can crush details and break characters.",
+  "contrast-num": "Numeric Contrast entry for precise control.",
+  "contrast-reset": "Reset Contrast to default (1.0).",
+  "brightness": "Adjust brightness before OCR. Positive brightens dark scenes; negative darkens bright scenes to improve text edge separation.",
+  "brightness-num": "Numeric Brightness entry for precise control.",
+  "brightness-reset": "Reset Brightness to default (0).",
+  "dilation": "Morphological text thickness control. Positive thickens strokes (dilate), negative thins strokes (erode).",
+  "dilation-num": "Numeric Dilation/Erosion entry for precise control.",
+  "dilation-reset": "Reset Dilation/Erosion to default (0).",
+  "invert": "Invert image colors before OCR. Useful when text/background polarity is opposite expected contrast.",
+  "invert-reset": "Reset Invert to default (unchecked).",
+  "min-width-ratio": "Reject boxes narrower than this fraction of image width. Increase to remove tiny false positives like punctuation speckles.",
+  "min-width-ratio-num": "Numeric Min Width Ratio entry for precise control.",
+  "min-width-ratio-reset": "Reset Min Width Ratio to default (0.0).",
+  "min-height-ratio": "Reject boxes shorter than this fraction of image height. Increase to suppress thin artifacts and subtitle noise.",
+  "min-height-ratio-num": "Numeric Min Height Ratio entry for precise control.",
+  "min-height-ratio-reset": "Reset Min Height Ratio to default (0.0).",
+  "median-height-fraction": "Adaptive noise filter based on median detected text height. Higher values remove more small boxes relative to typical text size.",
+  "median-height-fraction-num": "Numeric Median Height Fraction entry for precise control.",
+  "median-height-fraction-reset": "Reset Median Height Fraction to default (0.45).",
+  "reading-direction": "Controls reading order sort strategy (LTR/RTL horizontal or vertical columns). Affects sequence numbers and merge order.",
+  "reading-direction-reset": "Reset Reading Direction to default (Horizontal LTR).",
+  "merge-vertical-ratio": "Maximum vertical gap allowed for merge, relative to text height. Increase to merge stacked lines more aggressively.",
+  "merge-vertical-ratio-num": "Numeric Merge Vertical Ratio entry for precise control.",
+  "merge-vertical-ratio-reset": "Reset Merge Vertical Ratio to default (0.07).",
+  "merge-horizontal-ratio": "Maximum horizontal gap allowed for merge, relative to text height. Increase to join words farther apart on a line.",
+  "merge-horizontal-ratio-num": "Numeric Merge Horizontal Ratio entry for precise control.",
+  "merge-horizontal-ratio-reset": "Reset Merge Horizontal Ratio to default (0.37).",
+  "merge-width-ratio-threshold": "Minimum width similarity/overlap constraint used in vertical merge checks. Higher values enforce stricter merge compatibility.",
+  "merge-width-ratio-threshold-num": "Numeric Merge Width Ratio Threshold entry for precise control.",
+  "merge-width-ratio-threshold-reset": "Reset Merge Width Ratio Threshold to default (0.75).",
+  "group-tolerance": "Reading-order grouping tolerance. Higher values merge nearby lines/columns into broader reading bands.",
+  "group-tolerance-num": "Numeric Group Tolerance entry for precise control.",
+  "group-tolerance-reset": "Reset Group Tolerance to default (0.5).",
+  "btn-detect": "Run immediate detection using current preprocessing and OCR settings. Replaces raw detections and recomputes all overlays.",
+  "btn-debug-refresh": "Refresh the debug state snapshot shown below without changing OCR results."
+};
 
 const LS_SELECTION_BASE = "preproc:selectionBaseState";
 const LS_SELECTION_OPS = "preproc:selectionOps";
@@ -427,6 +484,7 @@ setTool("none");
 setupRangeControls();
 setupResetButtons();
 setupVisualizers();
+applyDetailedTooltips();
 applyHealthUiGate();
 
 serverUrlEl.addEventListener("change", () => localStorage.setItem("preproc:serverUrl", serverUrlEl.value.trim()));
@@ -1759,6 +1817,14 @@ function num(id: string): number {
 
 function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
+}
+
+function applyDetailedTooltips(): void {
+  for (const [id, text] of Object.entries(CONTROL_TOOLTIPS)) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.setAttribute("title", text);
+  }
 }
 
 function byId<T extends Element>(id: string): T {

@@ -39,4 +39,9 @@ test("non-TTS controls expose numeric inputs and reset buttons", async ({ page }
   await page.fill("#max-image-dimension-num", "1440");
   const state = await readState<{ maxImageDimension: number }>(page);
   expect(state.maxImageDimension).toBe(1440);
+
+  await expect(page.locator("#binary-threshold")).toHaveAttribute("title", /Convert image to binary/i);
+  await expect(page.locator("#tool-manual")).toHaveAttribute("title", /Draw explicit manual boxes/i);
+  await expect(page.locator("#btn-detect")).toHaveAttribute("title", /Run immediate detection/i);
+  await expect(page.locator("#merge-horizontal-ratio")).toHaveAttribute("title", /Maximum horizontal gap/i);
 });
