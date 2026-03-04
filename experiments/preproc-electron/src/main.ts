@@ -3,6 +3,7 @@ import "./styles.css";
 
 type Primitive = string | number | boolean;
 type OverlayMode = "committed" | "filter-preview" | "merge-preview";
+type FilterRule = "width" | "height" | "median" | null;
 type ReadingDirection = "horizontal_ltr" | "horizontal_rtl" | "vertical_ltr" | "vertical_rtl";
 type ToolMode = "none" | "add" | "sub" | "manual";
 
@@ -55,6 +56,7 @@ type RenderedBox = {
 type BoxFilterResult = {
   box: RawBox;
   keep: boolean;
+  removedBy: { width: boolean; height: boolean; median: boolean };
 };
 
 type MergeGroup = {
@@ -175,10 +177,12 @@ let mergedGroups: MergeGroup[] = [];
 let liveBoxes: RawBox[] = [];
 let renderedBoxes: RenderedBox[] = [];
 let currentMetrics: { detect_ms: number; total_ms: number; raw_count: number; live_count: number } | null = null;
+let filterStats = { widthRemoved: 0, heightRemoved: 0, medianRemoved: 0, medianHeightPx: 0 };
 let currentStatus = "idle";
 let preprocessTimer: number | null = null;
 let overlayMode: OverlayMode = "committed";
 let overlayModeTimer: number | null = null;
+let activeFilterRule: FilterRule = null;
 let currentDetectSeq = 0;
 let pendingDetect = false;
 let activeLayers: string[] = [];
@@ -287,11 +291,10 @@ app.innerHTML = `
 
     <section data-ocr-controls>
       <h2>Detection Filter (live)</h2>
-      <div class="viz-wrap">
-        <canvas id="settings-viz" class="side-viz" width="320" height="60"></canvas>
-      </div>
-      <p class="hint">Green boxes survive filtering. Red dashed boxes are discarded as noise.</p>
+      <p class="hint">While dragging a filter slider, each box turns green/red live and shows that rule's threshold guide directly on the image.</p>
       <label>Min Width Ratio <span data-testid="val-min-width-ratio" id="val-min-width-ratio"></span></label>
+      <div class="hint" id="rule-min-width">Reject widths below 0.0% of image width.</div>
+      <div class="hint" id="stat-min-width">Removed by width rule: 0</div>
       <div class="control-row">
         <input data-testid="min-width-ratio" id="min-width-ratio" type="range" min="0" max="0.1" step="0.001" value="0">
         <input id="min-width-ratio-num" type="number" min="0" max="0.1" step="0.001" value="0" class="control-num">
@@ -299,6 +302,8 @@ app.innerHTML = `
       </div>
 
       <label>Min Height Ratio <span data-testid="val-min-height-ratio" id="val-min-height-ratio"></span></label>
+      <div class="hint" id="rule-min-height">Reject heights below 0.0% of image height.</div>
+      <div class="hint" id="stat-min-height">Removed by height rule: 0</div>
       <div class="control-row">
         <input data-testid="min-height-ratio" id="min-height-ratio" type="range" min="0" max="0.1" step="0.001" value="0">
         <input id="min-height-ratio-num" type="number" min="0" max="0.1" step="0.001" value="0" class="control-num">
@@ -306,6 +311,8 @@ app.innerHTML = `
       </div>
 
       <label>Median Height Fraction <span data-testid="val-median-height" id="val-median-height"></span></label>
+      <div class="hint" id="rule-median-height">Reject narrow boxes below median-height rule.</div>
+      <div class="hint" id="stat-median-height">Removed by median rule: 0</div>
       <div class="control-row">
         <input data-testid="median-height-fraction" id="median-height-fraction" type="range" min="0.1" max="1.2" step="0.05" value="0.45">
         <input id="median-height-fraction-num" type="number" min="0.1" max="1.2" step="0.05" value="0.45" class="control-num">
@@ -408,7 +415,6 @@ const overlaySvgEl = byId<SVGSVGElement>("overlay-svg");
 const viewerEl = byId<HTMLDivElement>("viewer");
 const emptyEl = byId<HTMLDivElement>("empty");
 const qualityVizEl = byId<HTMLCanvasElement>("quality-viz");
-const settingsVizEl = byId<HTMLCanvasElement>("settings-viz");
 
 loadDrawingState();
 setTool("none");
@@ -517,7 +523,13 @@ for (const id of PREPROCESS_CONTROL_IDS) {
 for (const id of FILTER_PREVIEW_IDS) {
   byId<HTMLInputElement>(id).addEventListener("input", () => {
     refreshValueLabels();
+    activeFilterRule = id === "min-width-ratio" ? "width" : id === "min-height-ratio" ? "height" : "median";
     setOverlayMode("filter-preview");
+    recomputeLiveBoxes();
+  });
+  byId<HTMLInputElement>(id).addEventListener("change", () => {
+    activeFilterRule = null;
+    setOverlayMode("committed");
     recomputeLiveBoxes();
   });
 }
@@ -527,6 +539,7 @@ for (const id of MERGE_PREVIEW_IDS) {
   if (!el) throw new Error(`Missing element: ${id}`);
   el.addEventListener("input", () => {
     refreshValueLabels();
+    activeFilterRule = null;
     setOverlayMode("merge-preview");
     recomputeLiveBoxes();
   });
@@ -568,6 +581,7 @@ window.lab = {
     refreshValueLabels();
     if (PREPROCESS_CONTROL_IDS.includes(controlId as (typeof PREPROCESS_CONTROL_IDS)[number])) schedulePreprocessAndDetect();
     else {
+      activeFilterRule = controlId === "min-width-ratio" ? "width" : controlId === "min-height-ratio" ? "height" : controlId === "median-height-fraction" ? "median" : null;
       setOverlayMode(FILTER_PREVIEW_IDS.includes(controlId as (typeof FILTER_PREVIEW_IDS)[number]) ? "filter-preview" : "merge-preview");
       recomputeLiveBoxes();
     }
@@ -576,15 +590,20 @@ window.lab = {
   batchSet: (values: Record<string, Primitive>) => {
     let rerun = false;
     let preview: OverlayMode = "committed";
+    let filterRule: FilterRule = null;
     for (const [k, v] of Object.entries(values)) {
       setControlValue(k, v);
       if (PREPROCESS_CONTROL_IDS.includes(k as (typeof PREPROCESS_CONTROL_IDS)[number])) rerun = true;
+      if (k === "min-width-ratio") filterRule = "width";
+      if (k === "min-height-ratio") filterRule = "height";
+      if (k === "median-height-fraction") filterRule = "median";
       if (FILTER_PREVIEW_IDS.includes(k as (typeof FILTER_PREVIEW_IDS)[number])) preview = "filter-preview";
       if (MERGE_PREVIEW_IDS.includes(k as (typeof MERGE_PREVIEW_IDS)[number])) preview = "merge-preview";
     }
     refreshValueLabels();
     if (rerun) schedulePreprocessAndDetect();
     else {
+      activeFilterRule = preview === "filter-preview" ? filterRule : null;
       setOverlayMode(preview);
       recomputeLiveBoxes();
     }
@@ -1006,6 +1025,12 @@ function recomputeLiveBoxes(): void {
   const selectionFiltered = rawBoxes.filter((b) => selectionKeepRatio(b) > 0.1);
   const filter = filterBySize(selectionFiltered, previewEl.naturalWidth, previewEl.naturalHeight, p);
   filterResults = filter;
+  filterStats = {
+    widthRemoved: filter.filter((f) => f.removedBy.width).length,
+    heightRemoved: filter.filter((f) => f.removedBy.height).length,
+    medianRemoved: filter.filter((f) => f.removedBy.median).length,
+    medianHeightPx: Math.round(median(selectionFiltered.map((b) => b.px.y2 - b.px.y1).filter((h) => h > 0)))
+  };
   const filtered = filter.filter((f) => f.keep).map((f) => f.box);
 
   const manualRaw = manualBoxes.map((m) => normalizedRectToRaw(m));
@@ -1019,6 +1044,8 @@ function recomputeLiveBoxes(): void {
   liveBoxes = mergedGroups.map((g) => g.rect);
 
   renderOverlay();
+  refreshValueLabels();
+  updateVisualizers();
   if (currentMetrics) {
     currentMetrics = { ...currentMetrics, live_count: liveBoxes.length };
     metricsEl.textContent = JSON.stringify(currentMetrics, null, 2);
@@ -1075,11 +1102,12 @@ function filterBySize(boxes: RawBox[], imgW: number, imgH: number, p: Postproces
   return boxes.map((box) => {
     const w = box.px.x2 - box.px.x1;
     const h = box.px.y2 - box.px.y1;
-    let keep = w > 0 && h > 0;
-    if (keep && p.min_height_ratio > 0 && h < imgH * p.min_height_ratio) keep = false;
-    if (keep && p.min_width_ratio > 0 && w < imgW * p.min_width_ratio) keep = false;
-    if (keep && medianH > 0 && h < medianH * p.median_height_fraction && w < medianH * 2) keep = false;
-    return { box, keep };
+    const invalid = !(w > 0 && h > 0);
+    const removedByHeight = !invalid && p.min_height_ratio > 0 && h < imgH * p.min_height_ratio;
+    const removedByWidth = !invalid && p.min_width_ratio > 0 && w < imgW * p.min_width_ratio;
+    const removedByMedian = !invalid && medianH > 0 && h < medianH * p.median_height_fraction && w < medianH * 2;
+    const keep = !invalid && !removedByHeight && !removedByWidth && !removedByMedian;
+    return { box, keep, removedBy: { width: removedByWidth, height: removedByHeight, median: removedByMedian } };
   });
 }
 
@@ -1308,17 +1336,52 @@ function renderManualLayer(g: NonNullable<LabState["image"]>): void {
 
 function drawFilterPreview(g: NonNullable<LabState["image"]>): void {
   activeLayers.push("overlay-filter-keep", "overlay-filter-drop");
+  let failCount = 0;
   for (const r of filterResults) {
     const rendered = toRendered(r.box, g);
+    const failedActive = activeFilterRule ? r.removedBy[activeFilterRule] : !r.keep;
+    if (failedActive) failCount += 1;
     const el = document.createElement("div");
-    el.className = r.keep ? "box box-keep" : "box box-drop";
-    el.dataset.testid = r.keep ? "overlay-filter-keep" : "overlay-filter-drop";
-    if (!r.keep) el.style.borderStyle = "dashed";
+    el.className = failedActive ? "box box-drop" : "box box-keep";
+    el.dataset.testid = failedActive ? "overlay-filter-drop" : "overlay-filter-keep";
     el.style.left = `${rendered.left}px`;
     el.style.top = `${rendered.top}px`;
     el.style.width = `${rendered.width}px`;
     el.style.height = `${rendered.height}px`;
+    if (activeFilterRule === "width") {
+      const guide = document.createElement("div");
+      guide.className = "filter-guide-line vertical";
+      const minWpx = (num("min-width-ratio") * Math.max(1, previewEl.naturalWidth) / Math.max(1, previewEl.naturalWidth)) * g.displayWidth;
+      guide.style.left = `${Math.min(rendered.width - 1, Math.max(1, minWpx))}px`;
+      el.appendChild(guide);
+    } else if (activeFilterRule === "height") {
+      const guide = document.createElement("div");
+      guide.className = "filter-guide-line horizontal";
+      const minHpx = (num("min-height-ratio") * Math.max(1, previewEl.naturalHeight) / Math.max(1, previewEl.naturalHeight)) * g.displayHeight;
+      guide.style.top = `${Math.min(rendered.height - 1, Math.max(1, minHpx))}px`;
+      el.appendChild(guide);
+    } else if (activeFilterRule === "median") {
+      const guide = document.createElement("div");
+      guide.className = "filter-guide-box";
+      const targetH = (filterStats.medianHeightPx * num("median-height-fraction")) / Math.max(1, previewEl.naturalHeight) * g.displayHeight;
+      const h = Math.max(2, Math.min(rendered.height - 2, targetH));
+      const w = Math.max(2, Math.min(rendered.width - 2, (filterStats.medianHeightPx * 2) / Math.max(1, previewEl.naturalWidth) * g.displayWidth));
+      guide.style.height = `${h}px`;
+      guide.style.width = `${w}px`;
+      guide.style.left = `${Math.max(1, (rendered.width - w) / 2)}px`;
+      guide.style.top = `${Math.max(1, (rendered.height - h) / 2)}px`;
+      el.appendChild(guide);
+    }
     overlayEl.appendChild(el);
+  }
+  if (activeFilterRule) {
+    const badge = document.createElement("div");
+    badge.className = "filter-live-badge";
+    const total = filterResults.length;
+    const label = activeFilterRule === "width" ? "width" : activeFilterRule === "height" ? "height" : "median";
+    badge.textContent = `Failing ${failCount} / ${total} by ${label}`;
+    badge.dataset.testid = "overlay-filter-live-badge";
+    overlayEl.appendChild(badge);
   }
 }
 
@@ -1453,6 +1516,7 @@ function setOverlayMode(mode: OverlayMode): void {
   if (mode !== "committed") {
     overlayModeTimer = window.setTimeout(() => {
       overlayMode = "committed";
+      activeFilterRule = null;
       renderOverlay();
       refreshDebugState();
     }, 280);
@@ -1512,6 +1576,12 @@ function refreshValueLabels(): void {
   label("val-merge-h", num("merge-horizontal-ratio").toFixed(2));
   label("val-merge-w", num("merge-width-ratio-threshold").toFixed(2));
   label("val-group-tolerance", num("group-tolerance").toFixed(2));
+  label("rule-min-width", `Reject widths below ${(num("min-width-ratio") * 100).toFixed(1)}% of image width.`);
+  label("rule-min-height", `Reject heights below ${(num("min-height-ratio") * 100).toFixed(1)}% of image height.`);
+  label("rule-median-height", `Reject narrow boxes shorter than ${(num("median-height-fraction") * 100).toFixed(0)}% of median height (${Math.max(0, filterStats.medianHeightPx)}px).`);
+  label("stat-min-width", `Removed by width rule: ${filterStats.widthRemoved}`);
+  label("stat-min-height", `Removed by height rule: ${filterStats.heightRemoved}`);
+  label("stat-median-height", `Removed by median rule: ${filterStats.medianRemoved}`);
 }
 
 function label(id: string, text: string): void {
@@ -1565,6 +1635,7 @@ function resetState(): void {
   liveBoxes = [];
   renderedBoxes = [];
   currentMetrics = null;
+  filterStats = { widthRemoved: 0, heightRemoved: 0, medianRemoved: 0, medianHeightPx: 0 };
   pendingDetect = false;
   activeLayers = [];
   overlayMode = "committed";
@@ -1654,6 +1725,7 @@ function setupRangeControls(): void {
       } else if (PREPROCESS_CONTROL_IDS.includes(id as any)) {
         schedulePreprocessAndDetect();
       } else {
+        activeFilterRule = id === "min-width-ratio" ? "width" : id === "min-height-ratio" ? "height" : id === "median-height-fraction" ? "median" : null;
         setOverlayMode(FILTER_PREVIEW_IDS.includes(id as any) ? "filter-preview" : "merge-preview");
         recomputeLiveBoxes();
       }
@@ -1674,6 +1746,7 @@ function setupRangeControls(): void {
       } else if (PREPROCESS_CONTROL_IDS.includes(id as any)) {
         schedulePreprocessAndDetect();
       } else {
+        activeFilterRule = id === "min-width-ratio" ? "width" : id === "min-height-ratio" ? "height" : id === "median-height-fraction" ? "median" : null;
         setOverlayMode(FILTER_PREVIEW_IDS.includes(id as any) ? "filter-preview" : "merge-preview");
         recomputeLiveBoxes();
       }
@@ -1688,6 +1761,7 @@ function setupRangeControls(): void {
 
   byId<HTMLSelectElement>("reading-direction").addEventListener("change", () => {
     refreshValueLabels();
+    activeFilterRule = null;
     setOverlayMode("merge-preview");
     recomputeLiveBoxes();
     updateVisualizers();
@@ -1707,6 +1781,7 @@ function setupResetButtons(): void {
       } else if (PREPROCESS_CONTROL_IDS.includes(id as any)) {
         schedulePreprocessAndDetect();
       } else {
+        activeFilterRule = id === "min-width-ratio" ? "width" : id === "min-height-ratio" ? "height" : id === "median-height-fraction" ? "median" : null;
         setOverlayMode(FILTER_PREVIEW_IDS.includes(id as any) ? "filter-preview" : "merge-preview");
         recomputeLiveBoxes();
       }
@@ -1723,6 +1798,7 @@ function setupResetButtons(): void {
   byId<HTMLButtonElement>("reading-direction-reset").addEventListener("click", () => {
     byId<HTMLSelectElement>("reading-direction").value = READING_DIRECTION_DEFAULT;
     refreshValueLabels();
+    activeFilterRule = null;
     setOverlayMode("merge-preview");
     recomputeLiveBoxes();
     updateVisualizers();
@@ -1735,7 +1811,6 @@ function setupVisualizers(): void {
 
 function updateVisualizers(): void {
   drawQualityViz();
-  drawSettingsViz();
 }
 
 function drawQualityViz(): void {
@@ -1788,60 +1863,4 @@ function drawQualityViz(): void {
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
   ctx.fillText(`${maxDim}px`, 4, 4);
-}
-
-function drawSettingsViz(): void {
-  const ctx = settingsVizEl.getContext("2d");
-  if (!ctx) return;
-  const w = settingsVizEl.width;
-  const h = settingsVizEl.height;
-  ctx.clearRect(0, 0, w, h);
-
-  ctx.fillStyle = "rgb(20,20,20)";
-  ctx.fillRect(0, 0, w, h);
-
-  const centerX = w / 2;
-  const centerY = h / 2;
-  const scale = 0.45;
-
-  const refW = 60;
-  const refH = 30;
-  const refX = centerX - refW / 2;
-  const refY = centerY - refH / 2;
-
-  const vTol = Math.round(num("merge-vertical-ratio") * 20);
-  const hTol = Math.round(num("merge-horizontal-ratio") * 20);
-  const ratio = num("merge-width-ratio-threshold");
-  const minW = Math.round(num("min-width-ratio") * 1080);
-  const minH = Math.round(num("min-height-ratio") * 1080);
-
-  const zoneW = refW + hTol * 2 * scale;
-  const zoneH = refH + vTol * 2 * scale;
-  const zoneX = centerX - zoneW / 2;
-  const zoneY = centerY - zoneH / 2;
-
-  ctx.setLineDash([6, 4]);
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = "rgb(255,255,0)";
-  ctx.fillStyle = "rgba(255,255,0,0.08)";
-  ctx.fillRect(zoneX, zoneY, zoneW, zoneH);
-  ctx.strokeRect(zoneX, zoneY, zoneW, zoneH);
-  ctx.setLineDash([]);
-
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = "rgb(0,150,255)";
-  ctx.strokeRect(refX, refY, refW, refH);
-
-  const minWScaled = minW * scale;
-  const minHScaled = minH * scale;
-  const minX = centerX - minWScaled / 2;
-  const minY = centerY - minHScaled / 2;
-  ctx.strokeStyle = "rgb(255,50,50)";
-  ctx.fillStyle = "rgba(255,50,50,0.45)";
-  ctx.fillRect(minX, minY, minWScaled, minHScaled);
-  ctx.strokeRect(minX, minY, minWScaled, minHScaled);
-
-  const ratioW = refW * ratio;
-  ctx.fillStyle = "rgba(0,255,255,0.6)";
-  ctx.fillRect(refX, refY + refH - 6, ratioW, 6);
 }

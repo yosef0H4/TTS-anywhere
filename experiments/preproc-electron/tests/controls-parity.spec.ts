@@ -27,7 +27,9 @@ test("non-TTS controls expose numeric inputs and reset buttons", async ({ page }
   await expect(page.locator("#invert-reset")).toBeVisible();
   await expect(page.locator("#reading-direction-reset")).toBeVisible();
   await expect(page.locator("#quality-viz")).toBeVisible();
-  await expect(page.locator("#settings-viz")).toBeVisible();
+  await expect(page.locator("#rule-min-width")).toBeVisible();
+  await expect(page.locator("#rule-min-height")).toBeVisible();
+  await expect(page.locator("#rule-median-height")).toBeVisible();
 
   await page.fill("#contrast-num", "2.1");
   await expect(page.locator("#contrast")).toHaveValue("2.1");
