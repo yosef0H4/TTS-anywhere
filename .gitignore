@@ -17,3 +17,10 @@ services/text-processing/rapidocr-preprocess/.ruff_cache/
 services/text-processing/rapidocr-preprocess/**/__pycache__/
 services/text-processing/rapidocr-preprocess/**/*.pyc
 .cache/
+.mitm-logs/
+services/text_processing/openai_mitm/.venv/
+services/text_processing/openai_mitm/.mypy_cache/
+services/text_processing/openai_mitm/.pytest_cache/
+services/text_processing/openai_mitm/.ruff_cache/
+services/text_processing/openai_mitm/**/__pycache__/
+services/text_processing/openai_mitm/**/*.pyc

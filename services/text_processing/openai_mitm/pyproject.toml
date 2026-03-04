@@ -1,0 +1,18 @@
+[project]
+name = "openai-mitm-proxy"
+version = "0.1.0"
+description = "OpenAI-compatible MITM proxy that logs payloads and saves incoming OCR images"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.116.1",
+  "uvicorn[standard]>=0.35.0",
+  "httpx>=0.28.1"
+]
+
+[project.scripts]
+openai-mitm-proxy = "openai_mitm_proxy.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
