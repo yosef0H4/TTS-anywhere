@@ -4,6 +4,7 @@ import "./styles.css";
 type Primitive = string | number | boolean;
 type OverlayMode = "committed" | "filter-preview" | "merge-preview";
 type ReadingDirection = "horizontal_ltr" | "horizontal_rtl" | "vertical_ltr" | "vertical_rtl";
+type ToolMode = "none" | "add" | "sub" | "manual";
 
 type PreprocessingSettings = {
   binary_threshold: number;
@@ -60,6 +61,9 @@ type MergeGroup = {
   members: RawBox[];
 };
 
+type DrawRect = { id: string; nx: number; ny: number; nw: number; nh: number };
+type SelectionOp = DrawRect & { op: "add" | "sub" };
+
 type LabState = {
   preprocess: PreprocessingSettings;
   postprocess: PostprocessSettings;
@@ -78,6 +82,11 @@ type LabState = {
   direction: ReadingDirection;
   overlayMode: OverlayMode;
   overlayLayersActive: string[];
+  toolMode: ToolMode;
+  selectionBaseState: boolean;
+  selectionOpCount: number;
+  manualBoxCount: number;
+  drawingActive: boolean;
   boxes: RenderedBox[];
   metrics: { detect_ms: number; total_ms: number; raw_count: number; live_count: number } | null;
   status: string;
@@ -99,6 +108,13 @@ type LabAPI = {
   batchSet: (values: Record<string, Primitive>) => void;
   redetectNow: () => Promise<void>;
   recomputeBoxesNow: () => void;
+  setTool: (mode: ToolMode) => void;
+  selectAll: () => void;
+  deselectAll: () => void;
+  clearManual: () => void;
+  drawNormalized: (rect: { nx: number; ny: number; nw: number; nh: number }) => boolean;
+  getDrawingState: () => { selectionBaseState: boolean; selectionOps: SelectionOp[]; manualBoxes: DrawRect[] };
+  setDrawingState: (state: { selectionBaseState?: boolean; selectionOps?: SelectionOp[]; manualBoxes?: DrawRect[] }) => void;
   getState: () => LabState;
   assertNoOffCanvasBoxes: () => { ok: boolean; offenders: string[] };
   reset: () => void;
@@ -117,6 +133,10 @@ const PREPROCESS_CONTROL_IDS = ["binary-threshold", "contrast", "brightness", "d
 const FILTER_PREVIEW_IDS = ["min-width-ratio", "min-height-ratio", "median-height-fraction"] as const;
 const MERGE_PREVIEW_IDS = ["merge-vertical-ratio", "merge-horizontal-ratio", "merge-width-ratio-threshold", "group-tolerance", "reading-direction"] as const;
 
+const LS_SELECTION_BASE = "preproc:selectionBaseState";
+const LS_SELECTION_OPS = "preproc:selectionOps";
+const LS_MANUAL = "preproc:manualBoxes";
+
 let originalImageBitmap: ImageBitmap | null = null;
 let previewObjectUrl: string | null = null;
 
@@ -133,6 +153,14 @@ let overlayModeTimer: number | null = null;
 let currentDetectSeq = 0;
 let pendingDetect = false;
 let activeLayers: string[] = [];
+
+let toolMode: ToolMode = "none";
+let selectionBaseState = true;
+let selectionOps: SelectionOp[] = [];
+let manualBoxes: DrawRect[] = [];
+let drawingActive = false;
+let drawStart: { x: number; y: number } | null = null;
+let drawCurrent: { x: number; y: number } | null = null;
 
 const app = mustEl<HTMLDivElement>(document.querySelector("#app"), "App root not found");
 app.innerHTML = `
@@ -159,6 +187,22 @@ app.innerHTML = `
       <input data-testid="image-upload" id="image-upload" type="file" accept="image/png,image/jpeg,image/webp">
       <div class="hint">Tip: paste image with Ctrl+V</div>
       <div class="row"><button data-testid="btn-clear" id="btn-clear">Clear</button></div>
+    </section>
+
+    <section>
+      <h2>Selection Tools</h2>
+      <p class="hint">Add/Sub changes selectable mask; Manual creates explicit boxes with delete handles.</p>
+      <div class="row tool-row">
+        <button data-testid="tool-none" id="tool-none">View</button>
+        <button data-testid="tool-add" id="tool-add">Add Area</button>
+        <button data-testid="tool-sub" id="tool-sub">Remove Area</button>
+        <button data-testid="tool-manual" id="tool-manual">Manual Box</button>
+      </div>
+      <div class="row">
+        <button data-testid="btn-select-all" id="btn-select-all">Select All</button>
+        <button data-testid="btn-deselect-all" id="btn-deselect-all">Deselect All</button>
+        <button data-testid="btn-clear-manual" id="btn-clear-manual">Clear Manual</button>
+      </div>
     </section>
 
     <section>
@@ -242,8 +286,11 @@ app.innerHTML = `
     <div data-testid="empty" id="empty" class="empty"><i data-lucide="image-plus"></i><p>Upload or paste an image to start.</p></div>
     <div data-testid="viewer" id="viewer" class="viewer hidden">
       <img data-testid="preview" id="preview" alt="preview">
+      <canvas data-testid="selection-mask" id="selection-mask" class="selection-mask"></canvas>
       <svg data-testid="overlay-svg" id="overlay-svg" class="overlay-svg"></svg>
       <div data-testid="overlay" id="overlay" class="overlay"></div>
+      <div data-testid="manual-layer" id="manual-layer" class="manual-layer"></div>
+      <div data-testid="draw-preview-layer" id="draw-preview-layer" class="draw-preview-layer"></div>
     </div>
   </main>
 </div>`;
@@ -258,9 +305,15 @@ const metricsEl = byId<HTMLElement>("metrics");
 const debugStateEl = byId<HTMLElement>("debug-state");
 const previewEl = byId<HTMLImageElement>("preview");
 const overlayEl = byId<HTMLDivElement>("overlay");
+const manualLayerEl = byId<HTMLDivElement>("manual-layer");
+const drawPreviewLayerEl = byId<HTMLDivElement>("draw-preview-layer");
+const selectionMaskEl = byId<HTMLCanvasElement>("selection-mask");
 const overlaySvgEl = byId<SVGSVGElement>("overlay-svg");
 const viewerEl = byId<HTMLDivElement>("viewer");
 const emptyEl = byId<HTMLDivElement>("empty");
+
+loadDrawingState();
+setTool("none");
 
 serverUrlEl.addEventListener("change", () => localStorage.setItem("preproc:serverUrl", serverUrlEl.value.trim()));
 byId<HTMLButtonElement>("btn-health").addEventListener("click", async () => {
@@ -286,6 +339,37 @@ byId<HTMLButtonElement>("btn-clear").addEventListener("click", () => {
   refreshDebugState();
 });
 byId<HTMLButtonElement>("btn-debug-refresh").addEventListener("click", refreshDebugState);
+
+byId<HTMLButtonElement>("tool-none").addEventListener("click", () => setTool("none"));
+byId<HTMLButtonElement>("tool-add").addEventListener("click", () => setTool("add"));
+byId<HTMLButtonElement>("tool-sub").addEventListener("click", () => setTool("sub"));
+byId<HTMLButtonElement>("tool-manual").addEventListener("click", () => setTool("manual"));
+
+byId<HTMLButtonElement>("btn-select-all").addEventListener("click", () => {
+  selectionBaseState = true;
+  selectionOps = [];
+  persistDrawingState();
+  setOverlayMode("committed");
+  recomputeLiveBoxes();
+  refreshDebugState();
+});
+byId<HTMLButtonElement>("btn-deselect-all").addEventListener("click", () => {
+  selectionBaseState = false;
+  selectionOps = [];
+  persistDrawingState();
+  setOverlayMode("committed");
+  recomputeLiveBoxes();
+  refreshDebugState();
+});
+byId<HTMLButtonElement>("btn-clear-manual").addEventListener("click", () => {
+  manualBoxes = [];
+  persistDrawingState();
+  setOverlayMode("committed");
+  recomputeLiveBoxes();
+  refreshDebugState();
+});
+
+setupPointerDrawing();
 
 imageUploadEl.addEventListener("change", async () => {
   const file = imageUploadEl.files?.[0];
@@ -411,6 +495,40 @@ window.lab = {
     recomputeLiveBoxes();
     refreshDebugState();
   },
+  setTool: (mode) => {
+    setTool(mode);
+    refreshDebugState();
+  },
+  selectAll: () => {
+    selectionBaseState = true;
+    selectionOps = [];
+    persistDrawingState();
+    recomputeLiveBoxes();
+    refreshDebugState();
+  },
+  deselectAll: () => {
+    selectionBaseState = false;
+    selectionOps = [];
+    persistDrawingState();
+    recomputeLiveBoxes();
+    refreshDebugState();
+  },
+  clearManual: () => {
+    manualBoxes = [];
+    persistDrawingState();
+    recomputeLiveBoxes();
+    refreshDebugState();
+  },
+  drawNormalized: (rect) => commitDrawRect(rect.nx, rect.ny, rect.nw, rect.nh),
+  getDrawingState: () => ({ selectionBaseState, selectionOps: [...selectionOps], manualBoxes: [...manualBoxes] }),
+  setDrawingState: (next) => {
+    if (typeof next.selectionBaseState === "boolean") selectionBaseState = next.selectionBaseState;
+    if (Array.isArray(next.selectionOps)) selectionOps = sanitizeSelectionOps(next.selectionOps);
+    if (Array.isArray(next.manualBoxes)) manualBoxes = sanitizeManualBoxes(next.manualBoxes);
+    persistDrawingState();
+    recomputeLiveBoxes();
+    refreshDebugState();
+  },
   getState: () => getLabState(),
   assertNoOffCanvasBoxes: () => {
     const image = getImageGeometry();
@@ -418,7 +536,7 @@ window.lab = {
     const offenders = renderedBoxes
       .filter((box) => {
         const r = box.rendered;
-        return r.left < 0 || r.top < 0 || r.left + r.width > image.displayWidth + 0.5 || r.top + r.height > image.displayHeight + 0.5;
+        return r.left < -0.5 || r.top < -0.5 || r.left + r.width > image.displayWidth + 0.5 || r.top + r.height > image.displayHeight + 0.5;
       })
       .map((box) => box.id);
     return { ok: offenders.length === 0, offenders };
@@ -431,6 +549,152 @@ window.lab = {
 
 refreshValueLabels();
 void checkHealth().then(refreshDebugState);
+
+function setupPointerDrawing(): void {
+  const target = byId<HTMLElement>("paste-target");
+  target.addEventListener("pointerdown", (event) => {
+    if (toolMode === "none" || !getImageGeometry()) return;
+    if (event.button !== 0) return;
+    const point = pointerToNormalized(event.clientX, event.clientY);
+    if (!point) return;
+    drawingActive = true;
+    drawStart = point;
+    drawCurrent = point;
+    renderDrawPreview();
+    event.preventDefault();
+  });
+
+  window.addEventListener("pointermove", (event) => {
+    if (!drawingActive || !drawStart) return;
+    const point = pointerToNormalized(event.clientX, event.clientY);
+    if (!point) return;
+    drawCurrent = point;
+    renderDrawPreview();
+  });
+
+  window.addEventListener("pointerup", () => {
+    if (!drawingActive || !drawStart || !drawCurrent) return;
+    const rect = normalizeRect(drawStart.x, drawStart.y, drawCurrent.x, drawCurrent.y);
+    drawingActive = false;
+    drawStart = null;
+    drawCurrent = null;
+    drawPreviewLayerEl.innerHTML = "";
+    commitDrawRect(rect.nx, rect.ny, rect.nw, rect.nh);
+    refreshDebugState();
+  });
+}
+
+function pointerToNormalized(clientX: number, clientY: number): { x: number; y: number } | null {
+  const g = getImageGeometry();
+  if (!g) return null;
+  const rect = previewEl.getBoundingClientRect();
+  const x = (clientX - rect.left) / Math.max(1, rect.width);
+  const y = (clientY - rect.top) / Math.max(1, rect.height);
+  return {
+    x: clamp(x, 0, 1),
+    y: clamp(y, 0, 1)
+  };
+}
+
+function renderDrawPreview(): void {
+  drawPreviewLayerEl.innerHTML = "";
+  const g = getImageGeometry();
+  if (!g || !drawStart || !drawCurrent) return;
+  const r = normalizeRect(drawStart.x, drawStart.y, drawCurrent.x, drawCurrent.y);
+  const el = document.createElement("div");
+  el.className = `draw-preview ${toolMode === "add" ? "draw-preview-add" : toolMode === "sub" ? "draw-preview-sub" : "draw-preview-manual"}`;
+  el.style.left = `${r.nx * g.displayWidth}px`;
+  el.style.top = `${r.ny * g.displayHeight}px`;
+  el.style.width = `${r.nw * g.displayWidth}px`;
+  el.style.height = `${r.nh * g.displayHeight}px`;
+  drawPreviewLayerEl.appendChild(el);
+}
+
+function commitDrawRect(nx: number, ny: number, nw: number, nh: number): boolean {
+  const r = clampNormRect({ id: crypto.randomUUID(), nx, ny, nw, nh });
+  if (r.nw <= 0.001 || r.nh <= 0.001) return false;
+
+  if (toolMode === "manual") {
+    if (!manualBoxes.some((b) => almostEqualRect(b, r))) {
+      manualBoxes.push(r);
+    }
+  } else if (toolMode === "add" || toolMode === "sub") {
+    selectionOps.push({ ...r, op: toolMode });
+  } else {
+    return false;
+  }
+
+  persistDrawingState();
+  setOverlayMode("committed");
+  recomputeLiveBoxes();
+  return true;
+}
+
+function setTool(mode: ToolMode): void {
+  toolMode = mode;
+  const ids: Array<{ id: string; mode: ToolMode }> = [
+    { id: "tool-none", mode: "none" },
+    { id: "tool-add", mode: "add" },
+    { id: "tool-sub", mode: "sub" },
+    { id: "tool-manual", mode: "manual" }
+  ];
+  for (const item of ids) {
+    byId<HTMLButtonElement>(item.id).classList.toggle("active-tool", item.mode === mode);
+  }
+}
+
+function persistDrawingState(): void {
+  localStorage.setItem(LS_SELECTION_BASE, JSON.stringify(selectionBaseState));
+  localStorage.setItem(LS_SELECTION_OPS, JSON.stringify(selectionOps));
+  localStorage.setItem(LS_MANUAL, JSON.stringify(manualBoxes));
+}
+
+function loadDrawingState(): void {
+  try {
+    const baseRaw = localStorage.getItem(LS_SELECTION_BASE);
+    if (baseRaw !== null) selectionBaseState = Boolean(JSON.parse(baseRaw));
+    const opsRaw = localStorage.getItem(LS_SELECTION_OPS);
+    if (opsRaw) selectionOps = sanitizeSelectionOps(JSON.parse(opsRaw) as SelectionOp[]);
+    const manualRaw = localStorage.getItem(LS_MANUAL);
+    if (manualRaw) manualBoxes = sanitizeManualBoxes(JSON.parse(manualRaw) as DrawRect[]);
+  } catch {
+    selectionBaseState = true;
+    selectionOps = [];
+    manualBoxes = [];
+  }
+}
+
+function sanitizeSelectionOps(values: SelectionOp[]): SelectionOp[] {
+  if (!Array.isArray(values)) return [];
+  return values
+    .filter((v) => v && (v.op === "add" || v.op === "sub"))
+    .map((v) => clampNormRect({ id: v.id || crypto.randomUUID(), op: v.op, nx: Number(v.nx), ny: Number(v.ny), nw: Number(v.nw), nh: Number(v.nh) }));
+}
+
+function sanitizeManualBoxes(values: DrawRect[]): DrawRect[] {
+  if (!Array.isArray(values)) return [];
+  return values.map((v) => clampNormRect({ id: v.id || crypto.randomUUID(), nx: Number(v.nx), ny: Number(v.ny), nw: Number(v.nw), nh: Number(v.nh) }));
+}
+
+function clampNormRect<T extends { nx: number; ny: number; nw: number; nh: number }>(box: T): T {
+  const nx = clamp(box.nx, 0, 1);
+  const ny = clamp(box.ny, 0, 1);
+  const nw = clamp(box.nw, 0, 1 - nx);
+  const nh = clamp(box.nh, 0, 1 - ny);
+  return { ...box, nx, ny, nw, nh };
+}
+
+function normalizeRect(x1: number, y1: number, x2: number, y2: number): { nx: number; ny: number; nw: number; nh: number } {
+  const nx = Math.min(x1, x2);
+  const ny = Math.min(y1, y2);
+  const nw = Math.abs(x2 - x1);
+  const nh = Math.abs(y2 - y1);
+  return clampNormRect({ nx, ny, nw, nh });
+}
+
+function almostEqualRect(a: DrawRect, b: DrawRect): boolean {
+  return Math.abs(a.nx - b.nx) < 0.001 && Math.abs(a.ny - b.ny) < 0.001 && Math.abs(a.nw - b.nw) < 0.001 && Math.abs(a.nh - b.nh) < 0.001;
+}
 
 async function loadOriginalImage(blob: Blob): Promise<void> {
   if (originalImageBitmap) originalImageBitmap.close();
@@ -450,6 +714,8 @@ async function loadOriginalImage(blob: Blob): Promise<void> {
   renderedBoxes = [];
   overlayEl.innerHTML = "";
   overlaySvgEl.innerHTML = "";
+  manualLayerEl.innerHTML = "";
+  drawPreviewLayerEl.innerHTML = "";
   currentMetrics = null;
   setStatus("Image loaded.");
 }
@@ -629,10 +895,15 @@ function applyMorphology(imgData: ImageData, width: number, height: number, dila
 
 function recomputeLiveBoxes(): void {
   const p = readPostprocess();
-  const filter = filterBySize(rawBoxes, previewEl.naturalWidth, previewEl.naturalHeight, p);
+  const selectionFiltered = rawBoxes.filter((b) => selectionKeepRatio(b) > 0.1);
+  const filter = filterBySize(selectionFiltered, previewEl.naturalWidth, previewEl.naturalHeight, p);
   filterResults = filter;
   const filtered = filter.filter((f) => f.keep).map((f) => f.box);
-  const sorted = sortByReadingOrder(filtered, p.group_tolerance, p.direction);
+
+  const manualRaw = manualBoxes.map((m) => normalizedRectToRaw(m));
+  const mergedInput = [...filtered, ...manualRaw];
+
+  const sorted = sortByReadingOrder(mergedInput, p.group_tolerance, p.direction);
   mergedGroups = mergeCloseBoxes(sorted, p);
   const sortedMerged = sortByReadingOrder(mergedGroups.map((g) => g.rect), p.group_tolerance, p.direction);
   const groupMap = new Map(mergedGroups.map((g) => [g.rect.id, g]));
@@ -644,6 +915,49 @@ function recomputeLiveBoxes(): void {
     currentMetrics = { ...currentMetrics, live_count: liveBoxes.length };
     metricsEl.textContent = JSON.stringify(currentMetrics, null, 2);
   }
+}
+
+function normalizedRectToRaw(rect: DrawRect): RawBox {
+  const w = Math.max(1, previewEl.naturalWidth);
+  const h = Math.max(1, previewEl.naturalHeight);
+  const x1 = Math.round(rect.nx * w);
+  const y1 = Math.round(rect.ny * h);
+  const x2 = Math.round((rect.nx + rect.nw) * w);
+  const y2 = Math.round((rect.ny + rect.nh) * h);
+  return {
+    id: rect.id,
+    norm: { x: rect.nx, y: rect.ny, w: rect.nw, h: rect.nh },
+    px: { x1, y1, x2, y2 },
+    polygon: null
+  };
+}
+
+function selectionKeepRatio(box: RawBox): number {
+  const w = Math.max(1, box.px.x2 - box.px.x1);
+  const h = Math.max(1, box.px.y2 - box.px.y1);
+  const stepX = Math.max(1, Math.floor(w / 8));
+  const stepY = Math.max(1, Math.floor(h / 8));
+  let keep = 0;
+  let total = 0;
+  for (let y = box.px.y1; y < box.px.y2; y += stepY) {
+    for (let x = box.px.x1; x < box.px.x2; x += stepX) {
+      const nx = x / Math.max(1, previewEl.naturalWidth);
+      const ny = y / Math.max(1, previewEl.naturalHeight);
+      if (isSelected(nx, ny)) keep += 1;
+      total += 1;
+    }
+  }
+  return total > 0 ? keep / total : 0;
+}
+
+function isSelected(nx: number, ny: number): boolean {
+  let selected = selectionBaseState;
+  for (const op of selectionOps) {
+    const hit = nx >= op.nx && nx <= op.nx + op.nw && ny >= op.ny && ny <= op.ny + op.nh;
+    if (!hit) continue;
+    selected = op.op === "add";
+  }
+  return selected;
 }
 
 function filterBySize(boxes: RawBox[], imgW: number, imgH: number, p: PostprocessSettings): BoxFilterResult[] {
@@ -691,7 +1005,7 @@ function sortByReadingOrder(boxes: RawBox[], groupTolerance: number, direction: 
 
   const out: RawBox[] = [];
   for (const line of lines) {
-    line.sort((a, b) => reverse ? b.px[secondaryStart] - a.px[secondaryStart] : a.px[secondaryStart] - b.px[secondaryStart]);
+    line.sort((a, b) => (reverse ? b.px[secondaryStart] - a.px[secondaryStart] : a.px[secondaryStart] - b.px[secondaryStart]));
     out.push(...line);
   }
   return out;
@@ -790,10 +1104,96 @@ function renderOverlay(): void {
   overlaySvgEl.style.top = `${g.top}px`;
   overlaySvgEl.setAttribute("viewBox", `0 0 ${g.displayWidth} ${g.displayHeight}`);
 
+  manualLayerEl.style.width = `${g.displayWidth}px`;
+  manualLayerEl.style.height = `${g.displayHeight}px`;
+  manualLayerEl.style.left = `${g.left}px`;
+  manualLayerEl.style.top = `${g.top}px`;
+  drawPreviewLayerEl.style.width = `${g.displayWidth}px`;
+  drawPreviewLayerEl.style.height = `${g.displayHeight}px`;
+  drawPreviewLayerEl.style.left = `${g.left}px`;
+  drawPreviewLayerEl.style.top = `${g.top}px`;
+
+  renderSelectionMask(g);
+  renderManualLayer(g);
+
   if (overlayMode === "filter-preview" && filterResults.length > 0) {
     drawFilterPreview(g);
   } else {
     drawMergedView(g, overlayMode === "merge-preview");
+  }
+}
+
+function renderSelectionMask(g: NonNullable<LabState["image"]>): void {
+  selectionMaskEl.style.width = `${g.displayWidth}px`;
+  selectionMaskEl.style.height = `${g.displayHeight}px`;
+  selectionMaskEl.style.left = `${g.left}px`;
+  selectionMaskEl.style.top = `${g.top}px`;
+  selectionMaskEl.width = Math.max(1, Math.round(g.displayWidth));
+  selectionMaskEl.height = Math.max(1, Math.round(g.displayHeight));
+
+  const ctx = selectionMaskEl.getContext("2d");
+  if (!ctx) return;
+  ctx.clearRect(0, 0, selectionMaskEl.width, selectionMaskEl.height);
+
+  const dark = "rgba(0,0,0,0.5)";
+  if (!selectionBaseState) {
+    ctx.fillStyle = dark;
+    ctx.fillRect(0, 0, selectionMaskEl.width, selectionMaskEl.height);
+  }
+
+  for (const op of selectionOps) {
+    const x = op.nx * selectionMaskEl.width;
+    const y = op.ny * selectionMaskEl.height;
+    const w = op.nw * selectionMaskEl.width;
+    const h = op.nh * selectionMaskEl.height;
+    if (op.op === "add") {
+      ctx.clearRect(x, y, w, h);
+    } else {
+      ctx.fillStyle = dark;
+      ctx.fillRect(x, y, w, h);
+    }
+  }
+
+  if (!selectionBaseState || selectionOps.some((o) => o.op === "sub")) {
+    activeLayers.push("selection-mask");
+  }
+}
+
+function renderManualLayer(g: NonNullable<LabState["image"]>): void {
+  manualLayerEl.innerHTML = "";
+  if (!manualBoxes.length) return;
+  activeLayers.push("manual-box");
+  for (const box of manualBoxes) {
+    const rendered = {
+      left: box.nx * g.displayWidth,
+      top: box.ny * g.displayHeight,
+      width: box.nw * g.displayWidth,
+      height: box.nh * g.displayHeight
+    };
+
+    const el = document.createElement("div");
+    el.className = "manual-box";
+    el.dataset.testid = "manual-box";
+    el.style.left = `${rendered.left}px`;
+    el.style.top = `${rendered.top}px`;
+    el.style.width = `${rendered.width}px`;
+    el.style.height = `${rendered.height}px`;
+
+    const del = document.createElement("button");
+    del.className = "manual-delete";
+    del.dataset.testid = "manual-delete";
+    del.textContent = "×";
+    del.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      manualBoxes = manualBoxes.filter((m) => m.id !== box.id);
+      persistDrawingState();
+      recomputeLiveBoxes();
+      refreshDebugState();
+    });
+
+    el.appendChild(del);
+    manualLayerEl.appendChild(el);
   }
 }
 
@@ -1020,6 +1420,11 @@ function getLabState(): LabState {
     direction: readPostprocess().direction,
     overlayMode,
     overlayLayersActive: [...activeLayers],
+    toolMode,
+    selectionBaseState,
+    selectionOpCount: selectionOps.length,
+    manualBoxCount: manualBoxes.length,
+    drawingActive,
     boxes: renderedBoxes,
     metrics: currentMetrics,
     status: currentStatus,
@@ -1056,6 +1461,8 @@ function resetState(): void {
   previewEl.src = "";
   overlayEl.innerHTML = "";
   overlaySvgEl.innerHTML = "";
+  manualLayerEl.innerHTML = "";
+  drawPreviewLayerEl.innerHTML = "";
   viewerEl.classList.add("hidden");
   emptyEl.classList.remove("hidden");
   metricsEl.textContent = "No run yet";
@@ -1084,6 +1491,10 @@ function normalizeServerUrl(value: string): string {
 
 function num(id: string): number {
   return Number(byId<HTMLInputElement>(id).value);
+}
+
+function clamp(v: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, v));
 }
 
 function byId<T extends Element>(id: string): T {
