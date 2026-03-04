@@ -7,7 +7,7 @@ test("overlay boxes remain on canvas after resize", async ({ page }, testInfo) =
   await loadFixture(page, "test.png");
   await runDetect(page);
 
-  const state = await readState(page) as { status: string; metrics: null | { filtered_count: number } };
+  const state = await readState<{ status: string; metrics: null | { raw_count: number } }>(page);
   if (state.status.startsWith("Detection failed") || state.metrics === null) {
     test.skip(true, "Python server unavailable; skipping overlay assertions.");
   }

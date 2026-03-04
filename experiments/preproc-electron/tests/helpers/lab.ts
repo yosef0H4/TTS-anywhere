@@ -13,7 +13,7 @@ export async function loadFixture(page: Page, name: string): Promise<void> {
 
 export async function setControls(page: Page, values: Record<string, string | number | boolean>): Promise<void> {
   await getLab(page);
-  await page.evaluate(async (nextValues) => {
+  await page.evaluate((nextValues) => {
     window.lab.batchSet(nextValues);
   }, values);
 }
@@ -21,13 +21,13 @@ export async function setControls(page: Page, values: Record<string, string | nu
 export async function runDetect(page: Page): Promise<void> {
   await getLab(page);
   await page.evaluate(async () => {
-    await window.lab.detect();
+    await window.lab.redetectNow();
   });
 }
 
-export async function readState(page: Page): Promise<unknown> {
+export async function readState<T = unknown>(page: Page): Promise<T> {
   await getLab(page);
-  return page.evaluate(() => window.lab.getState());
+  return page.evaluate(() => window.lab.getState()) as Promise<T>;
 }
 
 export async function assertNoOffCanvas(page: Page): Promise<void> {
