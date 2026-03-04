@@ -16,3 +16,4 @@ services/text-processing/rapidocr-preprocess/.pytest_cache/
 services/text-processing/rapidocr-preprocess/.ruff_cache/
 services/text-processing/rapidocr-preprocess/**/__pycache__/
 services/text-processing/rapidocr-preprocess/**/*.pyc
+.cache/
