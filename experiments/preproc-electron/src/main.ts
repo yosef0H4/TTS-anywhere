@@ -96,6 +96,11 @@ type LabState = {
   status: string;
   serverUrl: string;
   serverHealthy: boolean;
+  imageMeta: {
+    oriented: boolean;
+    sourceWidth: number;
+    sourceHeight: number;
+  } | null;
   pendingDetect: boolean;
 };
 
@@ -179,6 +184,7 @@ let renderedBoxes: RenderedBox[] = [];
 let currentMetrics: { detect_ms: number; total_ms: number; raw_count: number; live_count: number } | null = null;
 let filterStats = { widthRemoved: 0, heightRemoved: 0, medianRemoved: 0, medianHeightPx: 0 };
 let currentStatus = "idle";
+let currentImageMeta: LabState["imageMeta"] = null;
 let preprocessTimer: number | null = null;
 let overlayMode: OverlayMode = "committed";
 let overlayModeTimer: number | null = null;
@@ -725,10 +731,11 @@ function renderDrawPreview(): void {
   const r = normalizeRect(drawStart.x, drawStart.y, drawCurrent.x, drawCurrent.y);
   const el = document.createElement("div");
   el.className = `draw-preview ${toolMode === "add" ? "draw-preview-add" : toolMode === "sub" ? "draw-preview-sub" : "draw-preview-manual"}`;
-  el.style.left = `${r.nx * g.displayWidth}px`;
-  el.style.top = `${r.ny * g.displayHeight}px`;
-  el.style.width = `${r.nw * g.displayWidth}px`;
-  el.style.height = `${r.nh * g.displayHeight}px`;
+  const rendered = normRectToDisplayRect(r, g);
+  el.style.left = `${rendered.left}px`;
+  el.style.top = `${rendered.top}px`;
+  el.style.width = `${rendered.width}px`;
+  el.style.height = `${rendered.height}px`;
   drawPreviewLayerEl.appendChild(el);
 }
 
@@ -823,10 +830,16 @@ function almostEqualRect(a: DrawRect, b: DrawRect): boolean {
 
 async function loadOriginalImage(blob: Blob): Promise<void> {
   if (originalImageBitmap) originalImageBitmap.close();
-  originalImageBitmap = await createImageBitmap(blob);
+  const canonical = await normalizeInputImage(blob);
+  originalImageBitmap = canonical.bitmap;
+  currentImageMeta = {
+    oriented: canonical.oriented,
+    sourceWidth: canonical.sourceWidth,
+    sourceHeight: canonical.sourceHeight
+  };
 
   if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl);
-  previewObjectUrl = URL.createObjectURL(blob);
+  previewObjectUrl = URL.createObjectURL(canonical.blob);
   previewEl.src = previewObjectUrl;
   await previewEl.decode();
 
@@ -842,7 +855,53 @@ async function loadOriginalImage(blob: Blob): Promise<void> {
   manualLayerEl.innerHTML = "";
   drawPreviewLayerEl.innerHTML = "";
   currentMetrics = null;
+  // Reproject persisted normalized geometry to the newly loaded image dimensions.
+  recomputeLiveBoxes();
   setStatus("Image loaded.");
+}
+
+async function normalizeInputImage(blob: Blob): Promise<{ bitmap: ImageBitmap; blob: Blob; oriented: boolean; sourceWidth: number; sourceHeight: number }> {
+  const sourceDims = await readImageSize(blob);
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(blob, { imageOrientation: "from-image" });
+  } catch {
+    bitmap = await createImageBitmap(blob);
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas 2D context unavailable for image normalization");
+  ctx.drawImage(bitmap, 0, 0);
+  const normalizedBlob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((out) => {
+      if (!out) {
+        reject(new Error("Failed to create normalized image blob"));
+        return;
+      }
+      resolve(out);
+    }, "image/png");
+  });
+  return {
+    bitmap,
+    blob: normalizedBlob,
+    oriented: true,
+    sourceWidth: sourceDims.width,
+    sourceHeight: sourceDims.height
+  };
+}
+
+async function readImageSize(blob: Blob): Promise<{ width: number; height: number }> {
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    return { width: img.naturalWidth, height: img.naturalHeight };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 function readPreprocess(): PreprocessingSettings {
@@ -1064,6 +1123,15 @@ function normalizedRectToRaw(rect: DrawRect): RawBox {
     norm: { x: rect.nx, y: rect.ny, w: rect.nw, h: rect.nh },
     px: { x1, y1, x2, y2 },
     polygon: null
+  };
+}
+
+function normRectToDisplayRect(rect: { nx: number; ny: number; nw: number; nh: number }, g: NonNullable<LabState["image"]>): RenderedBox["rendered"] {
+  return {
+    left: rect.nx * g.displayWidth,
+    top: rect.ny * g.displayHeight,
+    width: rect.nw * g.displayWidth,
+    height: rect.nh * g.displayHeight
   };
 }
 
@@ -1301,12 +1369,7 @@ function renderManualLayer(g: NonNullable<LabState["image"]>): void {
   if (!manualBoxes.length) return;
   activeLayers.push("manual-box");
   for (const box of manualBoxes) {
-    const rendered = {
-      left: box.nx * g.displayWidth,
-      top: box.ny * g.displayHeight,
-      width: box.nw * g.displayWidth,
-      height: box.nh * g.displayHeight
-    };
+    const rendered = normRectToDisplayRect(box, g);
 
     const el = document.createElement("div");
     el.className = "manual-box";
@@ -1502,12 +1565,7 @@ function drawArrow(from: { x: number; y: number }, to: { x: number; y: number })
 }
 
 function toRendered(box: RawBox, g: NonNullable<LabState["image"]>): RenderedBox["rendered"] {
-  return {
-    left: box.norm.x * g.displayWidth,
-    top: box.norm.y * g.displayHeight,
-    width: box.norm.w * g.displayWidth,
-    height: box.norm.h * g.displayHeight
-  };
+  return normRectToDisplayRect({ nx: box.norm.x, ny: box.norm.y, nw: box.norm.w, nh: box.norm.h }, g);
 }
 
 function setOverlayMode(mode: OverlayMode): void {
@@ -1611,6 +1669,7 @@ function getLabState(): LabState {
     status: currentStatus,
     serverUrl: serverUrlEl.value,
     serverHealthy,
+    imageMeta: currentImageMeta,
     pendingDetect
   };
 }
@@ -1646,6 +1705,7 @@ function resetState(): void {
   overlaySvgEl.innerHTML = "";
   manualLayerEl.innerHTML = "";
   drawPreviewLayerEl.innerHTML = "";
+  currentImageMeta = null;
   viewerEl.classList.add("hidden");
   emptyEl.classList.remove("hidden");
   metricsEl.textContent = "No run yet";
