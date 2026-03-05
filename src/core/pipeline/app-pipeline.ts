@@ -23,9 +23,13 @@ export class AppPipeline {
     private readonly tts = new OpenAiCompatibleTtsService()
   ) {}
 
-  async run(imageDataUrl: string, config: AppConfig, options?: { regions?: OcrRegion[] }): Promise<PipelineResult> {
+  async run(
+    imageDataUrl: string,
+    config: AppConfig,
+    options?: { regions?: OcrRegion[]; signal?: AbortSignal }
+  ): Promise<PipelineResult> {
     const done = loggers.pipeline.time("pipeline.ocr.chunking");
-    const text = await this.extractText(imageDataUrl, config, options?.regions ?? []);
+    const text = await this.extractText(imageDataUrl, config, options?.regions ?? [], options?.signal);
     const timeline = buildReadingTimeline(
       text,
       config.reading.minWordsPerChunk,
@@ -43,26 +47,49 @@ export class AppPipeline {
     return tts.audioBlob;
   }
 
-  private async extractText(imageDataUrl: string, config: AppConfig, regions: OcrRegion[]): Promise<string> {
+  private async extractText(
+    imageDataUrl: string,
+    config: AppConfig,
+    regions: OcrRegion[],
+    signal?: AbortSignal
+  ): Promise<string> {
+    this.throwIfAborted(signal);
     if (!regions.length) {
-      const ocr = await this.llm.extractTextFromImage(imageDataUrl, config.llm);
+      const ocr = await this.llm.extractTextFromImage(imageDataUrl, config.llm, signal ? { signal } : undefined);
       return ocr.text;
     }
     const parts: string[] = [];
     for (const region of regions) {
+      this.throwIfAborted(signal);
       try {
         const cropped = await this.cropDataUrl(imageDataUrl, region);
-        const ocr = await this.llm.extractTextFromImage(cropped, config.llm);
+        this.throwIfAborted(signal);
+        const ocr = await this.llm.extractTextFromImage(cropped, config.llm, signal ? { signal } : undefined);
         if (ocr.text.trim()) parts.push(ocr.text.trim());
       } catch (error) {
+        if (this.isAbortError(error)) {
+          throw error;
+        }
         loggers.pipeline.warn("Per-box OCR failed", { regionId: region.id, error: String(error) });
       }
     }
     if (!parts.length) {
-      const ocr = await this.llm.extractTextFromImage(imageDataUrl, config.llm);
+      this.throwIfAborted(signal);
+      const ocr = await this.llm.extractTextFromImage(imageDataUrl, config.llm, signal ? { signal } : undefined);
       return ocr.text;
     }
     return parts.join("\n");
+  }
+
+  private throwIfAborted(signal?: AbortSignal): void {
+    if (signal?.aborted) {
+      throw new Error("Cancelled");
+    }
+  }
+
+  private isAbortError(error: unknown): boolean {
+    const text = String((error as { message?: unknown })?.message ?? error).toLowerCase();
+    return text.includes("abort") || text.includes("cancel");
   }
 
   private async cropDataUrl(dataUrl: string, region: OcrRegion): Promise<string> {

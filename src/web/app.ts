@@ -84,6 +84,10 @@ export class WebApp {
   private currentFilterResults: FilteredBox[] = [];
   private currentMergedGroups: MergeGroup[] = [];
   private currentFilterStats = { widthRemoved: 0, heightRemoved: 0, medianRemoved: 0, medianHeightPx: 0 };
+  private activeRunId = 0;
+  private activeRunAbortController: AbortController | null = null;
+  private modalAbortController: AbortController | null = null;
+  private runInProgress = false;
 
   mount(root: HTMLElement): void {
     this.initializeLogging();
@@ -94,6 +98,7 @@ export class WebApp {
     this.bindModelSelectors();
     this.bindSettings();
     this.bindCapture();
+    this.bindBreak();
     this.bindMainPreviewRenderer();
     this.bindPreprocessModal();
     this.bindPlayback();
@@ -791,10 +796,69 @@ export class WebApp {
     // Diagnostics were intentionally simplified out of the playback flow.
   }
 
+  private bindBreak(): void {
+    const btn = this.must<HTMLButtonElement>("btn-break");
+    btn.disabled = true;
+    btn.addEventListener("click", () => {
+      void this.abortAllWork("user");
+    });
+  }
+
+  private updateBreakButtonState(): void {
+    const btn = this.must<HTMLButtonElement>("btn-break");
+    btn.disabled = !this.hasActiveWork();
+  }
+
+  private hasActiveWork(): boolean {
+    return this.runInProgress || this.chunkPlaybackMode || !this.audio.paused || this.chunkInFlightByHash.size > 0 || this.modalAbortController !== null;
+  }
+
+  private isAbortError(error: unknown): boolean {
+    const text = String((error as { message?: unknown })?.message ?? error).toLowerCase();
+    return text.includes("abort") || text.includes("cancel");
+  }
+
+  private throwIfStale(runId: number): void {
+    if (runId !== this.activeRunId || this.activeRunAbortController?.signal.aborted) {
+      throw new Error("Cancelled");
+    }
+  }
+
+  private startRun(): { runId: number; signal: AbortSignal } {
+    this.activeRunAbortController?.abort();
+    this.activeRunAbortController = new AbortController();
+    this.activeRunId += 1;
+    this.runInProgress = true;
+    this.updateBreakButtonState();
+    return { runId: this.activeRunId, signal: this.activeRunAbortController.signal };
+  }
+
+  private finishRun(runId: number): void {
+    if (runId !== this.activeRunId) return;
+    this.runInProgress = false;
+    this.activeRunAbortController = null;
+    this.updateBreakButtonState();
+  }
+
+  private async abortAllWork(reason: "user" | "superseded"): Promise<void> {
+    this.activeRunAbortController?.abort();
+    this.modalAbortController?.abort();
+    this.modalAbortController = null;
+    this.preprocessModal?.abortRunningWork();
+    this.activeRunId += 1;
+    this.runInProgress = false;
+    this.abortPlaybackAndSynthesis();
+    if (reason === "user") {
+      this.setStatus("Stopped");
+    }
+    this.updateBreakButtonState();
+  }
+
   private bindCapture(): void {
     this.must<HTMLButtonElement>("btn-capture").addEventListener("click", async () => {
       loggers.capture.info("Capture requested");
       try {
+        if (this.hasActiveWork()) await this.abortAllWork("superseded");
         const dataUrl = await this.pickImageFromClipboard();
         if (dataUrl) {
           await this.runPipeline(dataUrl);
@@ -812,6 +876,7 @@ export class WebApp {
       const file = input.files?.[0];
       if (!file) return;
       loggers.capture.info("Image uploaded", { fileName: file.name, type: file.type });
+      if (this.hasActiveWork()) await this.abortAllWork("superseded");
       const dataUrl = await this.fileToDataUrl(file);
       await this.runPipeline(dataUrl);
     });
@@ -823,6 +888,7 @@ export class WebApp {
           const file = item.getAsFile();
           if (file) {
             loggers.capture.info("Image pasted");
+            if (this.hasActiveWork()) await this.abortAllWork("superseded");
             await this.runPipeline(await this.fileToDataUrl(file));
           }
           return;
@@ -836,15 +902,18 @@ export class WebApp {
       const file = event.dataTransfer?.files?.[0];
       if (!file || !file.type.startsWith("image/")) return;
       loggers.capture.info("Image dropped", { fileName: file.name });
+      if (this.hasActiveWork()) await this.abortAllWork("superseded");
       await this.runPipeline(await this.fileToDataUrl(file));
     });
 
     window.electronAPI?.onCapturedImage(async (dataUrl: string) => {
       loggers.capture.info("Hotkey capture image received");
+      if (this.hasActiveWork()) await this.abortAllWork("superseded");
       await this.runPipeline(dataUrl);
     });
 
     window.electronAPI?.onCopiedTextForPlayback(async (text: string) => {
+      if (this.hasActiveWork()) await this.abortAllWork("superseded");
       await this.playCopiedText(text);
     });
   }
@@ -889,6 +958,9 @@ export class WebApp {
       },
       getCurrentImageDataUrl: () => this.lastOriginalImageDataUrl,
       onApply: (result) => {
+        if (this.hasActiveWork()) {
+          void this.abortAllWork("superseded");
+        }
         this.currentOcrImageDataUrl = result.processedImageDataUrl;
         this.currentOcrRegions = result.finalBoxes;
         this.setPreviewImage(result.processedImageDataUrl);
@@ -896,10 +968,15 @@ export class WebApp {
         this.setStatus(`Preprocessing applied (${result.finalBoxes.length} boxes).`);
         void this.runPreparedOcr();
       },
-      setStatus: (text) => this.setStatus(text)
+      setStatus: (text) => this.setStatus(text),
+      registerAbortController: (controller) => {
+        this.modalAbortController = controller;
+        this.updateBreakButtonState();
+      },
+      isCancelled: () => this.activeRunAbortController?.signal.aborted ?? false
     });
 
-    this.must<HTMLImageElement>("preview-img").addEventListener("click", async () => {
+    this.must<HTMLDivElement>("preview-viewer").addEventListener("click", async () => {
       if (!this.lastOriginalImageDataUrl) return;
       await this.preprocessModal?.open();
     });
@@ -1214,17 +1291,29 @@ export class WebApp {
   }
 
   private async runPipeline(dataUrl: string): Promise<void> {
-    this.lastOriginalImageDataUrl = await normalizeImageDataUrl(dataUrl);
-    const ocrInput = await this.buildOcrInput(this.lastOriginalImageDataUrl);
-    this.currentOcrImageDataUrl = ocrInput.imageDataUrl;
-    this.currentOcrRegions = ocrInput.regions;
-    this.setPreviewImage(ocrInput.imageDataUrl);
-    this.renderMainPreviewOverlay();
+    const { runId, signal } = this.startRun();
     this.setStatus("Running OCR + TTS...");
     const done = loggers.pipeline.time("pipeline.run");
-
     try {
-      const result = await this.pipeline.run(ocrInput.imageDataUrl, this.config, { regions: ocrInput.regions });
+      this.lastOriginalImageDataUrl = await normalizeImageDataUrl(dataUrl);
+      this.throwIfStale(runId);
+      const ocrInput = await this.buildOcrInput(this.lastOriginalImageDataUrl, signal, runId, (imageDataUrl) => {
+        if (runId !== this.activeRunId) return;
+        // Show image immediately; Rapid boxes will be layered when detect finishes.
+        this.currentRapidRawBoxes = [];
+        this.currentFilterResults = [];
+        this.currentMergedGroups = [];
+        this.currentFilterStats = { widthRemoved: 0, heightRemoved: 0, medianRemoved: 0, medianHeightPx: 0 };
+        this.setPreviewImage(imageDataUrl);
+        this.renderMainPreviewOverlay();
+      });
+      this.throwIfStale(runId);
+      this.currentOcrImageDataUrl = ocrInput.imageDataUrl;
+      this.currentOcrRegions = ocrInput.regions;
+      this.setPreviewImage(ocrInput.imageDataUrl);
+      this.renderMainPreviewOverlay();
+      const result = await this.pipeline.run(ocrInput.imageDataUrl, this.config, { regions: ocrInput.regions, signal });
+      this.throwIfStale(runId);
       done();
       loggers.pipeline.info("Pipeline completed", { textLength: result.text.length });
       this.must<HTMLTextAreaElement>("raw-text").value = result.text;
@@ -1232,23 +1321,37 @@ export class WebApp {
       this.resetPlaybackForTextChange();
       await this.startOrResumePlayback();
     } catch (error) {
-      loggers.pipeline.error("Pipeline failed", { error: String(error) });
-      this.setStatus(`Pipeline error: ${String(error)}`);
+      if (this.isAbortError(error)) {
+        loggers.pipeline.info("Pipeline cancelled", { runId });
+      } else {
+        loggers.pipeline.error("Pipeline failed", { error: String(error) });
+        this.setStatus(`Pipeline error: ${String(error)}`);
+      }
+    } finally {
+      this.finishRun(runId);
     }
   }
 
   private async runPreparedOcr(): Promise<void> {
     if (!this.currentOcrImageDataUrl) return;
+    const { runId, signal } = this.startRun();
     const done = loggers.pipeline.time("pipeline.run.prepared");
     try {
-      const result = await this.pipeline.run(this.currentOcrImageDataUrl, this.config, { regions: this.currentOcrRegions });
+      const result = await this.pipeline.run(this.currentOcrImageDataUrl, this.config, { regions: this.currentOcrRegions, signal });
+      this.throwIfStale(runId);
       done();
       this.must<HTMLTextAreaElement>("raw-text").value = result.text;
       this.updateTimelineFromRawText();
       this.resetPlaybackForTextChange();
       await this.startOrResumePlayback();
     } catch (error) {
-      this.setStatus(`Pipeline error: ${String(error)}`);
+      if (this.isAbortError(error)) {
+        loggers.pipeline.info("Prepared OCR cancelled", { runId });
+      } else {
+        this.setStatus(`Pipeline error: ${String(error)}`);
+      }
+    } finally {
+      this.finishRun(runId);
     }
   }
 
@@ -1261,7 +1364,13 @@ export class WebApp {
     this.renderMainPreviewOverlay();
   }
 
-  private async buildOcrInput(originalDataUrl: string): Promise<{ imageDataUrl: string; regions: DrawRect[] }> {
+  private async buildOcrInput(
+    originalDataUrl: string,
+    signal?: AbortSignal,
+    runId?: number,
+    onImageReady?: (imageDataUrl: string) => void
+  ): Promise<{ imageDataUrl: string; regions: DrawRect[] }> {
+    if (signal?.aborted) throw new Error("Cancelled");
     const pre = this.config.preprocessing;
     const processed = await applyPreprocessToDataUrl(originalDataUrl, {
       maxImageDimension: pre.maxImageDimension,
@@ -1272,14 +1381,24 @@ export class WebApp {
       invert: pre.invert
     });
     const scaled = await scaleDataUrlMaxDimension(processed, pre.maxImageDimension);
+    if (signal?.aborted) throw new Error("Cancelled");
+    if (runId !== undefined) this.throwIfStale(runId);
+    onImageReady?.(scaled);
 
     let rapidBoxes: Array<{ id: string; norm: { x: number; y: number; w: number; h: number }; px: { x1: number; y1: number; x2: number; y2: number } }> = [];
     if (this.config.textProcessing.rapidEnabled) {
       try {
-        const detect = await detectRapidRawBoxes(this.config.textProcessing.rapidBaseUrl, scaled);
+        const detect = await detectRapidRawBoxes(
+          this.config.textProcessing.rapidBaseUrl,
+          scaled,
+          signal ? { signal } : undefined
+        );
+        if (signal?.aborted) throw new Error("Cancelled");
+        if (runId !== undefined) this.throwIfStale(runId);
         rapidBoxes = detect.boxes;
         this.updateStatusChip("rapid-status-chip", `Loaded ${detect.boxes.length}`, "ok");
       } catch (error) {
+        if (this.isAbortError(error)) throw error;
         this.updateStatusChip("rapid-status-chip", "Detect failed", "error");
         loggers.pipeline.warn("Rapid detect failed, falling back to manual/full image", { error: String(error) });
       }
@@ -1452,6 +1571,7 @@ export class WebApp {
     this.chunkAbortControllersByHash.clear();
     this.chunkInFlightByHash.clear();
     this.renderPlayState();
+    this.updateBreakButtonState();
   }
 
   private resetPlaybackForTextChange(): void {
@@ -1575,6 +1695,7 @@ export class WebApp {
       ? '<i data-lucide="play" class="ui-icon"></i>'
       : '<i data-lucide="pause" class="ui-icon"></i>';
     this.renderIcons();
+    this.updateBreakButtonState();
   }
 
   private renderIcons(): void {

@@ -235,6 +235,7 @@ export const APP_TEMPLATE = `
       <div class="top-actions">
         <button id="btn-capture" class="icon-pill" title="Capture"><i data-lucide="camera" class="ui-icon"></i></button>
         <label class="upload-btn icon-pill" title="Upload image"><i data-lucide="upload" class="ui-icon"></i><input id="image-upload" type="file" accept="image/*"></label>
+        <button id="btn-break" class="icon-pill break-pill" title="Break (stop all)"> <i data-lucide="octagon-x" class="ui-icon"></i></button>
         <span id="status-text"></span>
       </div>
       <div class="workspace" id="workspace">

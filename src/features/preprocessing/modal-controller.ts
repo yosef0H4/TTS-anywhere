@@ -29,6 +29,8 @@ interface ModalControllerOptions {
   getCurrentImageDataUrl: () => string | null;
   onApply: (result: PreprocessResult) => void;
   setStatus: (text: string) => void;
+  registerAbortController?: (controller: AbortController | null) => void;
+  isCancelled?: () => boolean;
 }
 
 const CONTROL_DEFAULTS: Record<string, number | string | boolean> = {
@@ -85,6 +87,7 @@ export class PreprocessModalController {
   private rapidHealthy = false;
   private pendingDetect = false;
   private detectSeq = 0;
+  private detectAbortController: AbortController | null = null;
 
   private toolMode: ToolMode = "none";
   private overlayMode: OverlayMode = "committed";
@@ -182,16 +185,16 @@ export class PreprocessModalController {
     this.renderLabels();
     this.updateQualityViz();
 
-    await this.runPreprocessAndDetect();
-    this.previewRenderer.startAutoSync();
-
     this.backdrop.hidden = false;
     this.backdrop.style.display = "flex";
     this.backdrop.style.pointerEvents = "auto";
+    this.previewRenderer.startAutoSync();
+    void this.runPreprocessAndDetect();
   }
 
   close(): void {
     this.previewRenderer.stopAutoSync();
+    this.abortRunningWork();
     this.backdrop.hidden = true;
     this.backdrop.style.display = "none";
     this.backdrop.style.pointerEvents = "none";
@@ -366,10 +369,14 @@ export class PreprocessModalController {
 
   private async runPreprocessAndDetect(): Promise<void> {
     if (!this.originalDataUrl) return;
+    this.abortRunningWork();
     const seq = ++this.detectSeq;
+    this.detectAbortController = new AbortController();
+    this.opts.registerAbortController?.(this.detectAbortController);
     this.pendingDetect = true;
 
     try {
+      if (this.opts.isCancelled?.()) return;
       const processed = await applyPreprocessToDataUrl(this.originalDataUrl, {
         maxImageDimension: this.getNum("preproc-max-dim", 1080),
         binaryThreshold: this.getNum("preproc-threshold", 0),
@@ -379,16 +386,25 @@ export class PreprocessModalController {
         invert: this.mustById<HTMLInputElement>("preproc-invert").checked
       });
       if (seq !== this.detectSeq) return;
+      if (this.opts.isCancelled?.()) return;
 
       this.processedDataUrl = await scaleDataUrlMaxDimension(processed, this.getNum("preproc-max-dim", 1080));
       this.preview.src = this.processedDataUrl;
       await this.preview.decode();
+      // Phase 1 render: show image immediately; boxes update after detect.
+      this.rawBoxes = [];
+      this.recomputeLiveBoxes();
 
       const rapidEnabled = this.mustById<HTMLInputElement>("preproc-rapid-enabled").checked;
       if (rapidEnabled) {
         try {
-          const detect = await detectRapidRawBoxes(this.getRapidUrl(), this.processedDataUrl);
+          const detect = await detectRapidRawBoxes(
+            this.getRapidUrl(),
+            this.processedDataUrl,
+            this.detectAbortController ? { signal: this.detectAbortController.signal } : undefined
+          );
           if (seq !== this.detectSeq) return;
+          if (this.opts.isCancelled?.()) return;
           this.rawBoxes = detect.boxes ?? [];
           this.rapidHealthy = true;
           this.mustById<HTMLDivElement>("preproc-health-status").textContent = "Healthy";
@@ -408,7 +424,16 @@ export class PreprocessModalController {
       this.recomputeLiveBoxes();
     } finally {
       this.pendingDetect = false;
+      this.detectAbortController = null;
+      this.opts.registerAbortController?.(null);
     }
+  }
+
+  abortRunningWork(): void {
+    this.detectSeq += 1;
+    this.detectAbortController?.abort();
+    this.detectAbortController = null;
+    this.opts.registerAbortController?.(null);
   }
 
   private recomputeLiveBoxes(): void {

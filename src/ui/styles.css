@@ -692,6 +692,14 @@ body {
     min-height: 0;
 }
 
+#preview-viewer.hidden {
+    display: none;
+}
+
+#preview-manual-layer {
+    pointer-events: none;
+}
+
 .image-pane .pane-body {
     position: relative;
     overflow: hidden;
@@ -1091,6 +1099,17 @@ body {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+}
+
+.break-pill {
+    border-color: #ef4444 !important;
+    color: #ef4444 !important;
+    background: color-mix(in srgb, #ef4444 12%, var(--panel-2)) !important;
+}
+
+.break-pill:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
 }
 
 .upload-btn input {

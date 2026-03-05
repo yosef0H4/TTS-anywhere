@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import time
 import uuid
 from io import BytesIO
 from typing import Any
 
 import numpy as np
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from PIL import Image
 from rapidocr_onnxruntime import RapidOCR
+
+# Reuse uvicorn logger so app-level INFO logs appear in run_server console.
+logger = logging.getLogger("uvicorn.error")
 
 
 class DetectorSettings(BaseModel):
@@ -30,27 +35,22 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    ocr = RapidOCR()
-
     @app.get("/healthz")
     def healthz() -> dict[str, object]:
         return {"ok": True, "detector": "rapidocr", "version": "0.1.0"}
 
     @app.post("/v1/detect")
-    async def detect(image: UploadFile = File(...), settings: str | None = Form(default=None)) -> dict[str, object]:
+    async def detect(request: Request, image: UploadFile = File(...), settings: str | None = Form(default=None)) -> dict[str, object]:
         started = time.perf_counter()
         request_id = str(uuid.uuid4())
+        logger.info("Detect started request_id=%s", request_id)
 
         parsed_settings = DetectSettings()
-        if settings:
-            try:
+        try:
+            if settings:
                 parsed_settings = DetectSettings.model_validate_json(settings)
-            except Exception as error:
-                return {
-                    "status": "error",
-                    "request_id": request_id,
-                    "error": {"code": "invalid_settings", "message": f"Settings JSON is invalid: {error}"},
-                }
+        except Exception:
+            parsed_settings = DetectSettings()
 
         try:
             payload = await image.read()
@@ -65,9 +65,18 @@ def create_app() -> FastAPI:
         image_rgb = np.array(pil_image)
         img_h, img_w = image_rgb.shape[:2]
 
+        ocr = RapidOCR()
         detect_start = time.perf_counter()
-        result, _ = ocr(image_rgb, use_det=True, use_rec=False)
+        try:
+            result, _ = ocr(image_rgb, use_det=True, use_rec=False)
+        except asyncio.CancelledError:
+            logger.info("Detect cancelled by client request_id=%s", request_id)
+            raise
         detect_ms = (time.perf_counter() - detect_start) * 1000
+
+        # Detect stale/disconnected clients for observability.
+        if await request.is_disconnected():
+            logger.info("Client disconnected during detect request_id=%s", request_id)
 
         raw_boxes: list[dict[str, Any]] = []
         if result:
@@ -110,7 +119,7 @@ def create_app() -> FastAPI:
                     }
                 )
 
-        return {
+        response = {
             "status": "success",
             "request_id": request_id,
             "image": {"width": img_w, "height": img_h},
@@ -121,5 +130,13 @@ def create_app() -> FastAPI:
                 "raw_count": len(raw_boxes),
             },
         }
+        logger.info(
+            "Detect completed request_id=%s raw_count=%d detect_ms=%.2f total_ms=%.2f",
+            request_id,
+            len(raw_boxes),
+            response["metrics"]["detect_ms"],
+            response["metrics"]["total_ms"],
+        )
+        return response
 
     return app

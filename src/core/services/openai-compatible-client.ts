@@ -9,7 +9,7 @@ interface LlmClient {
       create: (params: {
         model: string;
         messages: ChatCompletionMessageParam[];
-      }) => Promise<{ choices?: Array<{ message?: { content?: string | null } }> }>;
+      }, requestOptions?: { signal?: AbortSignal }) => Promise<{ choices?: Array<{ message?: { content?: string | null } }> }>;
     };
   };
 }
@@ -58,10 +58,15 @@ function extractErrorMessage(error: unknown): string {
   return String(error);
 }
 
+function isAbortError(error: unknown): boolean {
+  const text = extractErrorMessage(error).toLowerCase();
+  return text.includes("abort") || text.includes("cancel");
+}
+
 export class OpenAiCompatibleLlmService {
   constructor(private readonly clientFactory: (config: LlmConfig) => LlmClient = (config) => createClient(config.baseUrl, config.apiKey)) {}
 
-  async extractTextFromImage(dataUrl: string, config: LlmConfig): Promise<OcrResult> {
+  async extractTextFromImage(dataUrl: string, config: LlmConfig, options?: { signal?: AbortSignal }): Promise<OcrResult> {
     const messages: ChatCompletionMessageParam[] = [
       {
         role: "user",
@@ -79,7 +84,7 @@ export class OpenAiCompatibleLlmService {
       const response = await this.clientFactory(config).chat.completions.create({
         model: config.model,
         messages
-      });
+      }, options?.signal ? { signal: options.signal } : undefined);
 
       const text = response.choices?.[0]?.message?.content?.trim() ?? "";
       if (!text) {
@@ -90,8 +95,13 @@ export class OpenAiCompatibleLlmService {
 
       return { text };
     } catch (error) {
-      loggers.api.error("OCR request failed", { error: extractErrorMessage(error), endpoint, model: config.model });
-      throw new Error(`OCR request failed (${endpoint}/chat/completions): ${extractErrorMessage(error)}`);
+      const message = extractErrorMessage(error);
+      if (isAbortError(error)) {
+        loggers.api.info("OCR request cancelled", { endpoint, model: config.model });
+        throw new Error("Cancelled");
+      }
+      loggers.api.error("OCR request failed", { error: message, endpoint, model: config.model });
+      throw new Error(`OCR request failed (${endpoint}/chat/completions): ${message}`);
     }
   }
 }
@@ -129,8 +139,13 @@ export class OpenAiCompatibleTtsService {
       loggers.api.info("TTS request completed", { bytes: audioArrayBuffer.byteLength });
       return { audioBlob: new Blob([audioArrayBuffer]) };
     } catch (error) {
-      loggers.api.error("TTS request failed", { error: extractErrorMessage(error), endpoint, model: config.model });
-      throw new Error(`TTS request failed (${endpoint}/audio/speech): ${extractErrorMessage(error)}`);
+      const message = extractErrorMessage(error);
+      if (isAbortError(error)) {
+        loggers.api.info("TTS request cancelled", { endpoint, model: config.model, voice: config.voice });
+        throw new Error("Cancelled");
+      }
+      loggers.api.error("TTS request failed", { error: message, endpoint, model: config.model });
+      throw new Error(`TTS request failed (${endpoint}/audio/speech): ${message}`);
     } finally {
       clearTimeout(timeout);
       timeoutController.signal.removeEventListener("abort", onAbort);
