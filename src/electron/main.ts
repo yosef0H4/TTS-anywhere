@@ -49,7 +49,14 @@ function prefsPath(): string {
   return path.join(app.getPath("userData"), "window-prefs.json");
 }
 
+function isDevMode(): boolean {
+  return !app.isPackaged || Boolean(process.env.VITE_DEV_SERVER_URL);
+}
+
 function getLogDir(): string {
+  if (isDevMode()) {
+    return path.resolve(process.cwd(), "logs");
+  }
   return path.join(app.getPath("userData"), "logs");
 }
 
@@ -58,7 +65,7 @@ function getLogFilePath(): string {
 }
 
 function diagnosticsPath(): string {
-  return path.join(app.getPath("userData"), "capture-diagnostics.log");
+  return path.join(getLogDir(), "capture-diagnostics.log");
 }
 
 function loadPinnedPref(): boolean {

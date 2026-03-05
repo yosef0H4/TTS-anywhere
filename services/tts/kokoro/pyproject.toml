@@ -1,0 +1,35 @@
+[project]
+name = "tts-kokoro-adapter"
+version = "0.1.0"
+description = "OpenAI-compatible adapter for Kokoro TTS (GPU-only)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.116.1",
+  "uvicorn[standard]>=0.35.0",
+  "pydantic>=2.11.0",
+  "pydantic-settings>=2.10.1",
+  "kokoro>=0.9.4",
+  "misaki[en]>=0.9.4",
+  "soundfile>=0.13.1",
+  "torch>=2.0.0",
+  "huggingface_hub>=0.34.0",
+  "pip>=26.0.1",
+]
+
+[project.scripts]
+tts-kokoro = "tts_kokoro_adapter.cli:main"
+
+[tool.uv]
+# Use PyTorch CUDA index for torch package
+[[tool.uv.index]]
+name = "pytorch-cuda"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cuda" }
+
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"

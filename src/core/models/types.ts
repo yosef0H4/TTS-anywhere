@@ -124,6 +124,8 @@ export interface AppConfig {
 export interface Chunk {
   index: number;
   text: string;
+  startChar: number;
+  endChar: number;
   startMs: number;
   endMs: number;
 }

@@ -39,8 +39,13 @@ describe("chunking", () => {
     const timeline = buildReadingTimeline("one two three four", 1, 2, 120);
     expect(timeline.chunks).toHaveLength(2);
     const firstChunk = timeline.chunks[0];
+    const secondChunk = timeline.chunks[1];
     expect(firstChunk?.startMs).toBe(0);
     expect(firstChunk?.endMs).toBe(1000);
+    expect(firstChunk?.startChar).toBe(0);
+    expect(firstChunk?.endChar).toBe(7);
+    expect(secondChunk?.startChar).toBe(8);
+    expect(secondChunk?.endChar).toBe(18);
     expect(timeline.durationMs).toBe(2000);
   });
 

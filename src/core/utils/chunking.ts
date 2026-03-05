@@ -112,13 +112,18 @@ export function buildReadingTimeline(
   const msPerWord = 60000 / safeWpm;
 
   let cursor = 0;
+  let charCursor = 0;
   const chunks: Chunk[] = chunksText.map((chunkText, index) => {
     const wordsInChunk = chunkText.split(" ").filter(Boolean).length;
     const duration = Math.round(wordsInChunk * msPerWord);
     const startMs = cursor;
     const endMs = startMs + duration;
     cursor = endMs;
-    return { index, text: chunkText, startMs, endMs };
+    const startChar = charCursor;
+    const endChar = startChar + chunkText.length;
+    // Reading preview joins chunks with a single space token.
+    charCursor = endChar + 1;
+    return { index, text: chunkText, startChar, endChar, startMs, endMs };
   });
 
   return { chunks, durationMs: cursor };

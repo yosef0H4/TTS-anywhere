@@ -17,6 +17,13 @@ import { SettingsStore } from "../core/services/settings-store";
 import { WorkspaceResizer } from "../ui/workspace-resizer";
 import { buildReadingTimeline, cleanTextForTts, findChunkIndexByTime, normalizeText } from "../core/utils/chunking";
 import { RequestPreemptor } from "../core/utils/request-preemptor";
+import {
+  classifyEffectiveTextEdit,
+  findChunkIndexAtOrAfterChar,
+  shouldHardResetTailSubtract,
+  stripNonEffectiveTrailing,
+  type TextEditKind
+} from "../core/utils/live-text-edit";
 import { APP_TEMPLATE } from "../ui/template";
 import { PreprocessModalController, type DrawRect } from "../features/preprocessing";
 import { applyPreprocessToDataUrl, normalizeImageDataUrl, scaleDataUrlMaxDimension } from "../features/preprocessing/image";
@@ -56,6 +63,7 @@ export class WebApp {
   private lastSynthText = "";
   private timeline: ReadingTimeline = { chunks: [], durationMs: 0 };
   private activeChunkIndex = 0;
+  private pendingNextChunkFromChar: number | null = null;
   private readonly optionCache = new Map<string, NamedOption[]>();
   private llmModelSelect: TomSelect | null = null;
   private ttsModelSelect: TomSelect | null = null;
@@ -553,9 +561,70 @@ export class WebApp {
     });
 
     this.must<HTMLTextAreaElement>("raw-text").addEventListener("input", () => {
+      const previousText = this.lastSynthText;
+      const nextText = this.getPlaybackText();
+      const editKind = classifyEffectiveTextEdit(previousText, nextText);
+      loggers.playback.info("Text edit detected", {
+        editKind,
+        previousLength: previousText.length,
+        nextLength: nextText.length,
+        activeChunkIndex: this.activeChunkIndex,
+        activeChunkEndChar: this.timeline.chunks[this.activeChunkIndex]?.endChar ?? null,
+        isPlaying: this.chunkPlaybackMode && !this.audio.paused
+      });
+      if (editKind === "no_effect") {
+        this.setStatus("Text formatting updated.");
+        return;
+      }
+
+      if (editKind === "append_only" || editKind === "tail_subtract_only") {
+        const previousTrimmed = stripNonEffectiveTrailing(previousText);
+        const nextTrimmed = stripNonEffectiveTrailing(nextText);
+        const preservedChars = editKind === "append_only" ? previousTrimmed.length : nextTrimmed.length;
+        const activeEndChar = this.timeline.chunks[this.activeChunkIndex]?.endChar ?? previousText.length;
+        const isPlayingNow = this.chunkPlaybackMode && !this.audio.paused;
+        if (editKind === "tail_subtract_only" && shouldHardResetTailSubtract(activeEndChar, preservedChars)) {
+          loggers.playback.info("Tail subtraction crossed active chunk boundary; forcing hard reset", {
+            activeEndChar,
+            preservedChars,
+            activeChunkIndex: this.activeChunkIndex
+          });
+          this.updateTimelineFromRawText();
+          this.resetPlaybackForTextChange();
+          this.setStatus("Text removed from current chunk. Playback stopped.");
+          return;
+        }
+
+        const previousTimeline = this.timeline.chunks.map((chunk) => ({ ...chunk }));
+        const previousHashes = new Map(this.chunkHashByIndex);
+        if (isPlayingNow) {
+          this.pendingNextChunkFromChar = activeEndChar;
+        }
+        this.updateTimelineFromRawText(activeEndChar, isPlayingNow);
+        this.reconcileCacheAfterSafeTextEdit(previousTimeline, previousHashes, preservedChars, isPlayingNow);
+        loggers.playback.info("Safe text edit applied", {
+          editKind,
+          preservedChars,
+          remappedActiveChunkIndex: this.activeChunkIndex,
+          remappedActiveChunkRange: this.timeline.chunks[this.activeChunkIndex]
+            ? {
+                startChar: this.timeline.chunks[this.activeChunkIndex]?.startChar,
+                endChar: this.timeline.chunks[this.activeChunkIndex]?.endChar
+              }
+            : null,
+          chunkCount: this.timeline.chunks.length
+        });
+        if (this.chunkPlaybackMode && !this.audio.paused) {
+          this.setStatus(editKind === "append_only" ? "Text appended. Continuing playback..." : "Tail removed. Continuing playback...");
+        } else {
+          this.setStatus(editKind === "append_only" ? "Text appended." : "Tail removed.");
+        }
+        return;
+      }
+
       this.updateTimelineFromRawText();
       this.resetPlaybackForTextChange();
-      this.setStatus("Text updated. Press play.");
+      this.setStatus("Text changed. Press play.");
     });
   }
 
@@ -1301,7 +1370,17 @@ export class WebApp {
       loggers.playback.info("Audio ended", { chunkPlaybackMode: this.chunkPlaybackMode, chunkIndex: this.activeChunkIndex });
       if (!this.chunkPlaybackMode) return;
       this.setChunkState(this.activeChunkIndex, "ready");
-      const nextIndex = this.activeChunkIndex + 1;
+      const remapFromChar = this.pendingNextChunkFromChar;
+      const nextIndex = remapFromChar !== null
+        ? findChunkIndexAtOrAfterChar(this.timeline.chunks, remapFromChar)
+        : this.activeChunkIndex + 1;
+      this.pendingNextChunkFromChar = null;
+      loggers.playback.info("Selecting next chunk after ended", {
+        previousChunkIndex: this.activeChunkIndex,
+        remapFromChar,
+        nextIndex,
+        totalChunks: this.timeline.chunks.length
+      });
       if (nextIndex >= this.timeline.chunks.length) {
         this.chunkPlaybackMode = false;
         this.setStatus("Ready");
@@ -1475,16 +1554,34 @@ export class WebApp {
     return { width: image.naturalWidth, height: image.naturalHeight };
   }
 
-  private updateTimelineFromRawText(): void {
+  private updateTimelineFromRawText(preserveFromChar?: number, keepActiveIndexWhenPlaying = false): void {
     const text = this.getPlaybackText();
+    const previousActiveIndex = this.activeChunkIndex;
+    const previousChunkCount = this.timeline.chunks.length;
     this.timeline = buildReadingTimeline(
       text,
       this.config.reading.minWordsPerChunk,
       this.config.reading.maxWordsPerChunk,
       this.config.reading.wpmBase
     );
-    this.activeChunkIndex = 0;
+    if (keepActiveIndexWhenPlaying && this.chunkPlaybackMode && !this.audio.paused) {
+      this.activeChunkIndex = previousActiveIndex;
+    } else if (typeof preserveFromChar === "number") {
+      this.activeChunkIndex = findChunkIndexAtOrAfterChar(this.timeline.chunks, preserveFromChar);
+    } else {
+      this.activeChunkIndex = 0;
+    }
+    loggers.playback.info("Timeline rebuilt", {
+      preserveFromChar: typeof preserveFromChar === "number" ? preserveFromChar : null,
+      previousActiveIndex,
+      nextActiveIndex: this.activeChunkIndex,
+      previousChunkCount,
+      nextChunkCount: this.timeline.chunks.length
+    });
     this.initializeChunkStates();
+    if (typeof preserveFromChar === "number" && previousActiveIndex < this.timeline.chunks.length && this.chunkPlaybackMode && !this.audio.paused) {
+      this.setChunkState(this.activeChunkIndex, "playing");
+    }
     this.lastSynthText = text;
     this.renderReadingPreview();
   }
@@ -1492,6 +1589,57 @@ export class WebApp {
   private getPlaybackText(): string {
     const raw = this.must<HTMLTextAreaElement>("raw-text").value;
     return this.config.reading.cleanTextBeforeTts ? cleanTextForTts(raw) : raw;
+  }
+
+  private reconcileCacheAfterSafeTextEdit(
+    previousTimeline: Array<{ index: number; endChar: number }>,
+    previousHashes: Map<number, string>,
+    preservedChars: number,
+    isPlaying: boolean
+  ): void {
+    const allowedOldHashes = new Set<string>();
+    previousTimeline.forEach((chunk) => {
+      if (chunk.endChar <= preservedChars) {
+        const oldHash = previousHashes.get(chunk.index);
+        if (oldHash) allowedOldHashes.add(oldHash);
+      }
+    });
+    const previousCacheCount = this.audioCacheByHash.size;
+    const previousInflightCount = this.chunkInFlightByHash.size;
+
+    for (const [hash, entry] of this.audioCacheByHash.entries()) {
+      if (allowedOldHashes.has(hash)) continue;
+      if (entry.url.startsWith("blob:")) {
+        URL.revokeObjectURL(entry.url);
+      }
+      this.audioCacheByHash.delete(hash);
+    }
+
+    for (const [hash, controller] of this.chunkAbortControllersByHash.entries()) {
+      if (allowedOldHashes.has(hash)) continue;
+      controller.abort();
+      this.chunkAbortControllersByHash.delete(hash);
+      this.chunkInFlightByHash.delete(hash);
+    }
+
+    this.timeline.chunks.forEach((chunk) => {
+      const hash = this.chunkHashByIndex.get(chunk.index);
+      if (!hash) return;
+      if (chunk.index === this.activeChunkIndex && isPlaying) {
+        this.setChunkState(chunk.index, "playing");
+        return;
+      }
+      this.setChunkState(chunk.index, this.audioCacheByHash.has(hash) ? "ready" : "not_started");
+    });
+    loggers.playback.info("Cache reconciled after safe text edit", {
+      preservedChars,
+      allowedHashCount: allowedOldHashes.size,
+      previousCacheCount,
+      nextCacheCount: this.audioCacheByHash.size,
+      previousInflightCount,
+      nextInflightCount: this.chunkInFlightByHash.size,
+      isPlaying
+    });
   }
 
   private async startOrResumePlayback(): Promise<void> {
@@ -1529,6 +1677,13 @@ export class WebApp {
     const chunk = this.timeline.chunks[index];
     if (!chunk) return;
     if (session !== this.chunkPlaybackSession) return;
+    loggers.playback.info("Play chunk requested", {
+      requestedIndex: index,
+      session,
+      activeSession: this.chunkPlaybackSession,
+      chunkRange: { startChar: chunk.startChar, endChar: chunk.endChar },
+      chunkTextPreview: chunk.text.slice(0, 80)
+    });
 
     this.activeChunkIndex = chunk.index;
     this.renderReadingPreview();
@@ -1592,6 +1747,7 @@ export class WebApp {
   private abortPlaybackAndSynthesis(): void {
     this.chunkPlaybackSession += 1;
     this.chunkPlaybackMode = false;
+    this.pendingNextChunkFromChar = null;
     this.audio.pause();
     this.audio.src = "";
     this.chunkAbortControllersByHash.forEach((controller) => controller.abort());
@@ -1616,12 +1772,15 @@ export class WebApp {
 
   private resetPlaybackForTextChange(): void {
     this.abortPlaybackAndSynthesis();
+    // Hard text reset should always restart chunk navigation from the beginning.
+    this.activeChunkIndex = 0;
     this.audioCacheByHash.forEach((entry) => {
       if (entry.url && entry.url.startsWith("blob:")) {
         URL.revokeObjectURL(entry.url);
       }
     });
     this.audioCacheByHash.clear();
+    this.renderReadingPreview();
     this.refreshChunkDiagnostics();
   }
 
