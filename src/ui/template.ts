@@ -248,7 +248,14 @@ export const APP_TEMPLATE = `
               <i data-lucide="image-plus" class="ui-icon"></i>
               <span>No capture yet</span>
             </div>
-            <img id="preview-img" class="snippet hidden" alt="Capture">
+            <div id="preview-viewer" class="preproc-viewer hidden">
+              <img id="preview-img" class="snippet" alt="Capture">
+              <canvas id="preview-selection-mask" class="preproc-selection-mask"></canvas>
+              <svg id="preview-overlay-svg" class="preproc-overlay-svg"></svg>
+              <div id="preview-overlay" class="preproc-overlay"></div>
+              <div id="preview-manual-layer" class="preproc-manual-layer"></div>
+              <div id="preview-draw-preview" class="preproc-draw-preview"></div>
+            </div>
           </div>
         </section>
 

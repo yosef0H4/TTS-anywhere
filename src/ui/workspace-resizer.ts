@@ -112,6 +112,7 @@ export class WorkspaceResizer {
   private apply(): void {
     this.options.shell.style.setProperty("--workspace-left", `${this.leftPercent}%`);
     this.options.shell.style.setProperty("--workspace-right-top", `${this.rightTopPercent}%`);
+    window.dispatchEvent(new CustomEvent("workspace:layout-change"));
   }
 
   private clamp(value: number, min: number, max: number): number {

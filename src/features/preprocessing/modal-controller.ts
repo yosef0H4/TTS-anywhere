@@ -1,13 +1,11 @@
 import { applyPreprocessToDataUrl, normalizeImageDataUrl, scaleDataUrlMaxDimension } from "./image";
 import { filterBySize, manualToRaw, mergeCloseBoxes, sanitizeRect, selectionKeepRatio, sortByReadingOrder } from "./logic";
 import { PREPROCESS_MODAL_TEMPLATE } from "./modal-template";
+import { PreprocPreviewRenderer, type FilterRule, type OverlayMode } from "./preview-renderer";
 import { checkRapidHealth, detectRapidRawBoxes } from "./rapid-client";
 import type { DrawRect, FilteredBox, RawBox, SelectionOp, ToolMode } from "./types";
 import type { AppConfig } from "../../core/models/types";
 import { createIcons, icons } from "lucide";
-
-type OverlayMode = "committed" | "filter-preview" | "merge-preview";
-type FilterRule = "width" | "height" | "median" | null;
 
 type ImageGeometry = {
   naturalWidth: number;
@@ -70,6 +68,7 @@ export class PreprocessModalController {
   private readonly manualLayer: HTMLDivElement;
   private readonly drawPreview: HTMLDivElement;
   private readonly qualityViz: HTMLCanvasElement;
+  private readonly previewRenderer: PreprocPreviewRenderer;
 
   private originalDataUrl: string | null = null;
   private processedDataUrl: string | null = null;
@@ -111,6 +110,31 @@ export class PreprocessModalController {
     this.manualLayer = this.mustById<HTMLDivElement>("preproc-manual-layer");
     this.drawPreview = this.mustById<HTMLDivElement>("preproc-draw-preview");
     this.qualityViz = this.mustById<HTMLCanvasElement>("preproc-quality-viz");
+    this.previewRenderer = new PreprocPreviewRenderer(
+      {
+        viewer: this.viewer,
+        preview: this.preview,
+        overlay: this.overlay,
+        overlaySvg: this.overlaySvg,
+        selectionMask: this.selectionMask,
+        manualLayer: this.manualLayer,
+        drawPreview: this.drawPreview
+      },
+      {
+        getThresholds: () => ({
+          minWidthRatio: this.getNum("preproc-min-width", 0),
+          minHeightRatio: this.getNum("preproc-min-height", 0),
+          medianHeightFraction: this.getNum("preproc-median", 0.45),
+          mergeVerticalRatio: this.getNum("preproc-merge-v", 0.07),
+          mergeHorizontalRatio: this.getNum("preproc-merge-h", 0.37),
+          mergeWidthRatioThreshold: this.getNum("preproc-merge-w", 0.75)
+        }),
+        onDeleteManual: (id) => {
+          this.manualBoxes = this.manualBoxes.filter((m) => m.id !== id);
+          this.recomputeLiveBoxes();
+        }
+      }
+    );
 
     this.backdrop.style.display = "none";
     this.backdrop.style.pointerEvents = "none";
@@ -159,6 +183,7 @@ export class PreprocessModalController {
     this.updateQualityViz();
 
     await this.runPreprocessAndDetect();
+    this.previewRenderer.startAutoSync();
 
     this.backdrop.hidden = false;
     this.backdrop.style.display = "flex";
@@ -166,6 +191,7 @@ export class PreprocessModalController {
   }
 
   close(): void {
+    this.previewRenderer.stopAutoSync();
     this.backdrop.hidden = true;
     this.backdrop.style.display = "none";
     this.backdrop.style.pointerEvents = "none";
@@ -440,28 +466,18 @@ export class PreprocessModalController {
   }
 
   private renderOverlay(): void {
-    this.overlay.innerHTML = "";
-    this.overlaySvg.innerHTML = "";
-    this.manualLayer.innerHTML = "";
-
-    const g = this.getImageGeometry();
-    if (!g) return;
-
-    this.placeLayer(this.overlay, g);
-    this.placeLayer(this.overlaySvg, g);
-    this.placeLayer(this.selectionMask, g);
-    this.placeLayer(this.manualLayer, g);
-    this.placeLayer(this.drawPreview, g);
-    this.overlaySvg.setAttribute("viewBox", `0 0 ${g.displayWidth} ${g.displayHeight}`);
-
-    this.renderSelectionMask(g);
-    this.renderManualLayer(g);
-
-    if (this.overlayMode === "filter-preview" && this.filterResults.length > 0) {
-      this.drawFilterPreview(g);
-    } else {
-      this.drawMergedView(g, this.overlayMode === "merge-preview");
-    }
+    this.previewRenderer.setState({
+      overlayMode: this.overlayMode,
+      activeFilterRule: this.activeFilterRule,
+      selectionBaseState: this.selectionBaseState,
+      selectionOps: this.selectionOps,
+      manualBoxes: this.manualBoxes,
+      rawBoxes: this.rawBoxes,
+      filterResults: this.filterResults,
+      mergedGroups: this.mergedGroups,
+      filterStats: this.filterStats
+    });
+    this.previewRenderer.render();
   }
 
   private renderSelectionMask(g: ImageGeometry): void {
@@ -913,13 +929,7 @@ export class PreprocessModalController {
   }
 
   private pointerToNormalized(clientX: number, clientY: number): { x: number; y: number } | null {
-    const g = this.getImageGeometry();
-    if (!g) return null;
-    const rect = this.preview.getBoundingClientRect();
-    return {
-      x: clamp((clientX - rect.left) / Math.max(1, rect.width), 0, 1),
-      y: clamp((clientY - rect.top) / Math.max(1, rect.height), 0, 1)
-    };
+    return this.previewRenderer.pointerToNormalized(clientX, clientY);
   }
 
   private getRapidUrl(): string {

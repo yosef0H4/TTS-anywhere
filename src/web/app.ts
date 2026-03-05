@@ -20,7 +20,9 @@ import { APP_TEMPLATE } from "../ui/template";
 import { PreprocessModalController, type DrawRect } from "../features/preprocessing";
 import { applyPreprocessToDataUrl, normalizeImageDataUrl, scaleDataUrlMaxDimension } from "../features/preprocessing/image";
 import { detectRapidRawBoxes } from "../features/preprocessing/rapid-client";
-import { finalizeOcrBoxes } from "../features/preprocessing/logic";
+import { filterBySize, finalizeOcrBoxes, manualToRaw, mergeCloseBoxes, selectionKeepRatio, sortByReadingOrder } from "../features/preprocessing/logic";
+import { PreprocPreviewRenderer } from "../features/preprocessing/preview-renderer";
+import type { FilteredBox, MergeGroup, RawBox } from "../features/preprocessing/types";
 import "../ui/styles.css";
 
 interface NamedOption {
@@ -74,9 +76,14 @@ export class WebApp {
   private pendingCopyPlayHotkey: string | null = null;
   private copyHotkeyKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
   private preprocessModal: PreprocessModalController | null = null;
+  private mainPreviewRenderer: PreprocPreviewRenderer | null = null;
   private lastOriginalImageDataUrl: string | null = null;
   private currentOcrImageDataUrl: string | null = null;
   private currentOcrRegions: DrawRect[] = [];
+  private currentRapidRawBoxes: RawBox[] = [];
+  private currentFilterResults: FilteredBox[] = [];
+  private currentMergedGroups: MergeGroup[] = [];
+  private currentFilterStats = { widthRemoved: 0, heightRemoved: 0, medianRemoved: 0, medianHeightPx: 0 };
 
   mount(root: HTMLElement): void {
     this.initializeLogging();
@@ -87,6 +94,7 @@ export class WebApp {
     this.bindModelSelectors();
     this.bindSettings();
     this.bindCapture();
+    this.bindMainPreviewRenderer();
     this.bindPreprocessModal();
     this.bindPlayback();
     this.bindWorkspaceResizer();
@@ -641,6 +649,7 @@ export class WebApp {
     this.applyOptions(this.ttsModelSelect, [{ value: this.config.tts.model, label: this.config.tts.model }], this.config.tts.model);
     this.applyOptions(this.ttsVoiceSelect, [{ value: this.config.tts.voice, label: this.config.tts.voice }], this.config.tts.voice);
     this.updateStatusChip("rapid-status-chip", this.config.textProcessing.rapidEnabled ? "Enabled" : "Disabled", "idle");
+    this.renderMainPreviewOverlay();
   }
 
   private applyUiState(): void {
@@ -840,6 +849,34 @@ export class WebApp {
     });
   }
 
+  private bindMainPreviewRenderer(): void {
+    this.mainPreviewRenderer = new PreprocPreviewRenderer(
+      {
+        viewer: this.must<HTMLDivElement>("preview-viewer"),
+        preview: this.must<HTMLImageElement>("preview-img"),
+        overlay: this.must<HTMLDivElement>("preview-overlay"),
+        overlaySvg: this.must<SVGSVGElement>("preview-overlay-svg"),
+        selectionMask: this.must<HTMLCanvasElement>("preview-selection-mask"),
+        manualLayer: this.must<HTMLDivElement>("preview-manual-layer"),
+        drawPreview: this.must<HTMLDivElement>("preview-draw-preview")
+      },
+      {
+        getThresholds: () => ({
+          minWidthRatio: this.config.preprocessing.detectionFilter.minWidthRatio,
+          minHeightRatio: this.config.preprocessing.detectionFilter.minHeightRatio,
+          medianHeightFraction: this.config.preprocessing.detectionFilter.medianHeightFraction,
+          mergeVerticalRatio: this.config.preprocessing.merge.mergeVerticalRatio,
+          mergeHorizontalRatio: this.config.preprocessing.merge.mergeHorizontalRatio,
+          mergeWidthRatioThreshold: this.config.preprocessing.merge.mergeWidthRatioThreshold
+        })
+      }
+    );
+    this.mainPreviewRenderer.startAutoSync();
+
+    window.addEventListener("resize", () => this.renderMainPreviewOverlay());
+    window.addEventListener("workspace:layout-change", () => this.mainPreviewRenderer?.requestRender());
+  }
+
   private bindPreprocessModal(): void {
     const root = this.must<HTMLElement>("app-shell");
     this.preprocessModal = new PreprocessModalController({
@@ -855,6 +892,7 @@ export class WebApp {
         this.currentOcrImageDataUrl = result.processedImageDataUrl;
         this.currentOcrRegions = result.finalBoxes;
         this.setPreviewImage(result.processedImageDataUrl);
+        this.recomputeMainPreviewFromCurrentState().catch(() => {});
         this.setStatus(`Preprocessing applied (${result.finalBoxes.length} boxes).`);
         void this.runPreparedOcr();
       },
@@ -1181,6 +1219,7 @@ export class WebApp {
     this.currentOcrImageDataUrl = ocrInput.imageDataUrl;
     this.currentOcrRegions = ocrInput.regions;
     this.setPreviewImage(ocrInput.imageDataUrl);
+    this.renderMainPreviewOverlay();
     this.setStatus("Running OCR + TTS...");
     const done = loggers.pipeline.time("pipeline.run");
 
@@ -1213,6 +1252,15 @@ export class WebApp {
     }
   }
 
+  private async recomputeMainPreviewFromCurrentState(): Promise<void> {
+    if (!this.lastOriginalImageDataUrl) return;
+    const ocrInput = await this.buildOcrInput(this.lastOriginalImageDataUrl);
+    this.currentOcrImageDataUrl = ocrInput.imageDataUrl;
+    this.currentOcrRegions = ocrInput.regions;
+    this.setPreviewImage(ocrInput.imageDataUrl);
+    this.renderMainPreviewOverlay();
+  }
+
   private async buildOcrInput(originalDataUrl: string): Promise<{ imageDataUrl: string; regions: DrawRect[] }> {
     const pre = this.config.preprocessing;
     const processed = await applyPreprocessToDataUrl(originalDataUrl, {
@@ -1238,6 +1286,14 @@ export class WebApp {
     }
 
     const dims = await this.readImageSize(scaled);
+    const selectedRapid = rapidBoxes.filter((box) => selectionKeepRatio(box, dims.width, dims.height, pre.selection.baseState, pre.selection.ops) > 0.1);
+    const filterResults = filterBySize(selectedRapid, dims.width, dims.height, pre.detectionFilter);
+    const keptRapid = filterResults.filter((f) => f.keep).map((f) => f.box);
+    const manualRaw = pre.selection.manualBoxes.map((m) => manualToRaw(m, dims.width, dims.height));
+    const ordered = sortByReadingOrder([...keptRapid, ...manualRaw], pre.sorting);
+    const mergedGroups = mergeCloseBoxes(ordered, pre.merge, dims.width, dims.height);
+    const mergedOrOrdered = mergedGroups.length ? mergedGroups.map((m) => m.rect) : ordered;
+
     const regions = finalizeOcrBoxes({
       rapidRawBoxes: rapidBoxes,
       manualBoxes: pre.selection.manualBoxes,
@@ -1249,6 +1305,20 @@ export class WebApp {
       sorting: pre.sorting,
       merge: pre.merge
     });
+
+    const heights = filterResults.map((f) => f.box.px.y2 - f.box.px.y1).filter((h) => h > 0).sort((a, b) => a - b);
+    const mid = Math.floor(heights.length / 2);
+    const med = heights.length % 2 === 0 ? ((heights[mid - 1] ?? 0) + (heights[mid] ?? 0)) / 2 : (heights[mid] ?? 0);
+    this.currentRapidRawBoxes = selectedRapid;
+    this.currentFilterResults = filterResults;
+    this.currentMergedGroups = mergedGroups.length ? mergedGroups : mergedOrOrdered.map((rect) => ({ rect, members: [rect] }));
+    this.currentFilterStats = {
+      widthRemoved: filterResults.filter((f) => f.removedBy.width).length,
+      heightRemoved: filterResults.filter((f) => f.removedBy.height).length,
+      medianRemoved: filterResults.filter((f) => f.removedBy.median).length,
+      medianHeightPx: Math.max(0, Math.round(med || 0))
+    };
+
     return { imageDataUrl: scaled, regions };
   }
 
@@ -1527,10 +1597,29 @@ export class WebApp {
 
   private setPreviewImage(dataUrl: string): void {
     const image = this.must<HTMLImageElement>("preview-img");
+    const viewer = this.must<HTMLDivElement>("preview-viewer");
     const emptyState = this.must<HTMLDivElement>("image-empty");
     image.src = dataUrl;
-    image.classList.remove("hidden");
+    viewer.classList.remove("hidden");
     emptyState.classList.add("hidden");
+    image.decode().then(() => this.renderMainPreviewOverlay()).catch(() => {});
+  }
+
+  private renderMainPreviewOverlay(): void {
+    if (!this.mainPreviewRenderer) return;
+    const pre = this.config.preprocessing;
+    this.mainPreviewRenderer.setState({
+      overlayMode: "committed",
+      activeFilterRule: null,
+      selectionBaseState: pre.selection.baseState,
+      selectionOps: pre.selection.ops,
+      manualBoxes: pre.selection.manualBoxes,
+      rawBoxes: this.currentRapidRawBoxes,
+      filterResults: this.currentFilterResults,
+      mergedGroups: this.currentMergedGroups,
+      filterStats: this.currentFilterStats
+    });
+    this.mainPreviewRenderer.render();
   }
 
   private fileToDataUrl(file: Blob): Promise<string> {
@@ -1684,12 +1773,12 @@ export class WebApp {
     });
   }
 
-  private must<T extends HTMLElement>(id: string): T {
+  private must<T extends Element>(id: string): T {
     const element = document.getElementById(id);
     if (!element) {
       throw new Error(`Missing element: ${id}`);
     }
-    return element as T;
+    return element as unknown as T;
   }
 }
 
