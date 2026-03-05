@@ -1,0 +1,14 @@
+# Python cache/artifact ignores for all local TTS adapters
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+
+# Local virtualenvs and tool caches
+.venv/
+.venv-win/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Common local outputs
+*.log
