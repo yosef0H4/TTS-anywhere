@@ -30,6 +30,9 @@ interface ModalControllerOptions {
   onApply: (result: PreprocessResult) => void;
   setStatus: (text: string) => void;
   registerAbortController?: (controller: AbortController | null) => void;
+  preemptLane?: () => void;
+  beginLane?: (parentSignal?: AbortSignal) => { signal: AbortSignal; token: number; done: () => void };
+  isLaneCurrent?: (token: number) => boolean;
   isCancelled?: () => boolean;
 }
 
@@ -371,7 +374,12 @@ export class PreprocessModalController {
     if (!this.originalDataUrl) return;
     this.abortRunningWork();
     const seq = ++this.detectSeq;
+    const lane = this.opts.beginLane?.();
     this.detectAbortController = new AbortController();
+    if (lane) {
+      if (lane.signal.aborted) this.detectAbortController.abort();
+      lane.signal.addEventListener("abort", () => this.detectAbortController?.abort(), { once: true });
+    }
     this.opts.registerAbortController?.(this.detectAbortController);
     this.pendingDetect = true;
 
@@ -386,6 +394,7 @@ export class PreprocessModalController {
         invert: this.mustById<HTMLInputElement>("preproc-invert").checked
       });
       if (seq !== this.detectSeq) return;
+      if (lane && this.opts.isLaneCurrent && !this.opts.isLaneCurrent(lane.token)) return;
       if (this.opts.isCancelled?.()) return;
 
       this.processedDataUrl = await scaleDataUrlMaxDimension(processed, this.getNum("preproc-max-dim", 1080));
@@ -404,6 +413,7 @@ export class PreprocessModalController {
             this.detectAbortController ? { signal: this.detectAbortController.signal } : undefined
           );
           if (seq !== this.detectSeq) return;
+          if (lane && this.opts.isLaneCurrent && !this.opts.isLaneCurrent(lane.token)) return;
           if (this.opts.isCancelled?.()) return;
           this.rawBoxes = detect.boxes ?? [];
           this.rapidHealthy = true;
@@ -423,6 +433,7 @@ export class PreprocessModalController {
       this.setOverlayMode("committed");
       this.recomputeLiveBoxes();
     } finally {
+      lane?.done();
       this.pendingDetect = false;
       this.detectAbortController = null;
       this.opts.registerAbortController?.(null);
@@ -430,6 +441,7 @@ export class PreprocessModalController {
   }
 
   abortRunningWork(): void {
+    this.opts.preemptLane?.();
     this.detectSeq += 1;
     this.detectAbortController?.abort();
     this.detectAbortController = null;

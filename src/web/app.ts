@@ -16,6 +16,7 @@ import { AppPipeline } from "../core/pipeline/app-pipeline";
 import { SettingsStore } from "../core/services/settings-store";
 import { WorkspaceResizer } from "../ui/workspace-resizer";
 import { buildReadingTimeline, cleanTextForTts, findChunkIndexByTime, normalizeText } from "../core/utils/chunking";
+import { RequestPreemptor } from "../core/utils/request-preemptor";
 import { APP_TEMPLATE } from "../ui/template";
 import { PreprocessModalController, type DrawRect } from "../features/preprocessing";
 import { applyPreprocessToDataUrl, normalizeImageDataUrl, scaleDataUrlMaxDimension } from "../features/preprocessing/image";
@@ -44,6 +45,8 @@ type ChunkSynthesisState =
 interface AudioCacheEntry {
   url: string;
 }
+
+type RequestLane = "ocr" | "rapid_main" | "rapid_modal";
 
 export class WebApp {
   private readonly store = new SettingsStore();
@@ -88,6 +91,7 @@ export class WebApp {
   private activeRunAbortController: AbortController | null = null;
   private modalAbortController: AbortController | null = null;
   private runInProgress = false;
+  private readonly requestPreemptor = new RequestPreemptor<RequestLane>();
 
   mount(root: HTMLElement): void {
     this.initializeLogging();
@@ -825,8 +829,13 @@ export class WebApp {
   }
 
   private startRun(): { runId: number; signal: AbortSignal } {
-    this.activeRunAbortController?.abort();
+    const lane = this.requestPreemptor.beginLane("ocr");
     this.activeRunAbortController = new AbortController();
+    if (lane.signal.aborted) {
+      this.activeRunAbortController.abort();
+    } else {
+      lane.signal.addEventListener("abort", () => this.activeRunAbortController?.abort(), { once: true });
+    }
     this.activeRunId += 1;
     this.runInProgress = true;
     this.updateBreakButtonState();
@@ -841,6 +850,7 @@ export class WebApp {
   }
 
   private async abortAllWork(reason: "user" | "superseded"): Promise<void> {
+    this.requestPreemptor.preemptAll();
     this.activeRunAbortController?.abort();
     this.modalAbortController?.abort();
     this.modalAbortController = null;
@@ -854,11 +864,25 @@ export class WebApp {
     this.updateBreakButtonState();
   }
 
+  private async abortVisionWork(reason: "new_image" | "superseded"): Promise<void> {
+    this.requestPreemptor.preemptLane("ocr");
+    this.requestPreemptor.preemptLane("rapid_main");
+    this.requestPreemptor.preemptLane("rapid_modal");
+    this.activeRunAbortController?.abort();
+    this.modalAbortController?.abort();
+    this.modalAbortController = null;
+    this.preprocessModal?.abortRunningWork();
+    this.activeRunId += 1;
+    this.runInProgress = false;
+    loggers.pipeline.info("Vision work preempted", { reason });
+    this.updateBreakButtonState();
+  }
+
   private bindCapture(): void {
     this.must<HTMLButtonElement>("btn-capture").addEventListener("click", async () => {
-      loggers.capture.info("Capture requested");
+        loggers.capture.info("Capture requested");
       try {
-        if (this.hasActiveWork()) await this.abortAllWork("superseded");
+        await this.abortVisionWork("new_image");
         const dataUrl = await this.pickImageFromClipboard();
         if (dataUrl) {
           await this.runPipeline(dataUrl);
@@ -876,7 +900,7 @@ export class WebApp {
       const file = input.files?.[0];
       if (!file) return;
       loggers.capture.info("Image uploaded", { fileName: file.name, type: file.type });
-      if (this.hasActiveWork()) await this.abortAllWork("superseded");
+      await this.abortVisionWork("new_image");
       const dataUrl = await this.fileToDataUrl(file);
       await this.runPipeline(dataUrl);
     });
@@ -888,7 +912,7 @@ export class WebApp {
           const file = item.getAsFile();
           if (file) {
             loggers.capture.info("Image pasted");
-            if (this.hasActiveWork()) await this.abortAllWork("superseded");
+            await this.abortVisionWork("new_image");
             await this.runPipeline(await this.fileToDataUrl(file));
           }
           return;
@@ -902,13 +926,13 @@ export class WebApp {
       const file = event.dataTransfer?.files?.[0];
       if (!file || !file.type.startsWith("image/")) return;
       loggers.capture.info("Image dropped", { fileName: file.name });
-      if (this.hasActiveWork()) await this.abortAllWork("superseded");
+      await this.abortVisionWork("new_image");
       await this.runPipeline(await this.fileToDataUrl(file));
     });
 
     window.electronAPI?.onCapturedImage(async (dataUrl: string) => {
       loggers.capture.info("Hotkey capture image received");
-      if (this.hasActiveWork()) await this.abortAllWork("superseded");
+      await this.abortVisionWork("new_image");
       await this.runPipeline(dataUrl);
     });
 
@@ -958,9 +982,7 @@ export class WebApp {
       },
       getCurrentImageDataUrl: () => this.lastOriginalImageDataUrl,
       onApply: (result) => {
-        if (this.hasActiveWork()) {
-          void this.abortAllWork("superseded");
-        }
+        void this.abortVisionWork("superseded");
         this.currentOcrImageDataUrl = result.processedImageDataUrl;
         this.currentOcrRegions = result.finalBoxes;
         this.setPreviewImage(result.processedImageDataUrl);
@@ -973,6 +995,9 @@ export class WebApp {
         this.modalAbortController = controller;
         this.updateBreakButtonState();
       },
+      preemptLane: () => this.requestPreemptor.preemptLane("rapid_modal"),
+      beginLane: (parentSignal?: AbortSignal) => this.requestPreemptor.beginLane("rapid_modal", parentSignal),
+      isLaneCurrent: (token: number) => this.requestPreemptor.isCurrent("rapid_modal", token),
       isCancelled: () => this.activeRunAbortController?.signal.aborted ?? false
     });
 
@@ -1387,12 +1412,12 @@ export class WebApp {
 
     let rapidBoxes: Array<{ id: string; norm: { x: number; y: number; w: number; h: number }; px: { x1: number; y1: number; x2: number; y2: number } }> = [];
     if (this.config.textProcessing.rapidEnabled) {
+      const rapidLane = this.requestPreemptor.beginLane("rapid_main", signal);
       try {
-        const detect = await detectRapidRawBoxes(
-          this.config.textProcessing.rapidBaseUrl,
-          scaled,
-          signal ? { signal } : undefined
-        );
+        const detect = await detectRapidRawBoxes(this.config.textProcessing.rapidBaseUrl, scaled, { signal: rapidLane.signal });
+        if (!this.requestPreemptor.isCurrent("rapid_main", rapidLane.token)) {
+          throw new Error("Cancelled");
+        }
         if (signal?.aborted) throw new Error("Cancelled");
         if (runId !== undefined) this.throwIfStale(runId);
         rapidBoxes = detect.boxes;
@@ -1401,6 +1426,8 @@ export class WebApp {
         if (this.isAbortError(error)) throw error;
         this.updateStatusChip("rapid-status-chip", "Detect failed", "error");
         loggers.pipeline.warn("Rapid detect failed, falling back to manual/full image", { error: String(error) });
+      } finally {
+        rapidLane.done();
       }
     }
 
@@ -1570,8 +1597,21 @@ export class WebApp {
     this.chunkAbortControllersByHash.forEach((controller) => controller.abort());
     this.chunkAbortControllersByHash.clear();
     this.chunkInFlightByHash.clear();
+    this.resetChunkVisualStateAfterAbort();
     this.renderPlayState();
     this.updateBreakButtonState();
+  }
+
+  private resetChunkVisualStateAfterAbort(): void {
+    this.activeChunkIndex = 0;
+    for (let i = 0; i < this.timeline.chunks.length; i += 1) {
+      const hash = this.chunkHashByIndex.get(i);
+      const hasCachedAudio = Boolean(hash && this.audioCacheByHash.get(hash)?.url);
+      this.chunkStateByIndex.set(i, hasCachedAudio ? "ready" : "not_started");
+      this.chunkErrorByIndex.delete(i);
+    }
+    this.renderReadingPreview();
+    this.refreshChunkDiagnostics();
   }
 
   private resetPlaybackForTextChange(): void {
@@ -1600,7 +1640,8 @@ export class WebApp {
       if (state === "failed") {
         span.title = this.chunkErrorByIndex.get(chunk.index) ?? "Synthesis failed";
       }
-      if (chunk.index === this.activeChunkIndex) {
+      const shouldHighlightActive = this.chunkPlaybackMode || !this.audio.paused;
+      if (shouldHighlightActive && chunk.index === this.activeChunkIndex) {
         span.classList.add("active-chunk");
       }
       span.addEventListener("click", () => this.seekChunk(chunk.index));

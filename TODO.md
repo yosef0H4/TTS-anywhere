@@ -13,3 +13,4 @@
 13. move to backend
 14. streaming ocr
 15. adding logic
+16. extract text button and remove auto apply
