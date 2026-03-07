@@ -3,6 +3,7 @@
 Windows-only Node/Electron helper for:
 - global hotkey registration
 - on-screen rectangle drawing primitives
+- monitor capture primitives backed by a native addon
 
 ## Usage
 
@@ -18,6 +19,31 @@ const session = new HotkeySession({
   }
 });
 session.start();
+```
+
+## Monitor capture
+
+```ts
+import {
+  beginFrozenMonitorCaptureAtPoint,
+  cropFrozenCapture,
+  disposeFrozenCapture
+} from "nodehotkey";
+
+const frozen = await beginFrozenMonitorCaptureAtPoint(120, 240);
+const png = await cropFrozenCapture(frozen.id, {
+  x: 0,
+  y: 0,
+  width: frozen.bounds.width,
+  height: frozen.bounds.height
+});
+disposeFrozenCapture(frozen.id);
+```
+
+The capture addon is Windows-only and must be built separately with:
+
+```bash
+npm run build:native
 ```
 
 ## Simulate hotkeys

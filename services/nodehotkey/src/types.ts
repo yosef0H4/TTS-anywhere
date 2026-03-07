@@ -18,6 +18,26 @@ export type HotkeySessionOptions = {
   events?: HotkeySessionEvents;
 };
 
+export type MonitorBounds = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
+export type FrozenCaptureHandle = {
+  id: number;
+  bounds: MonitorBounds;
+  capturedAt: number;
+};
+
+export type CaptureCropRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 export type SendSpec = {
   label: string;
   modifiers: number;
