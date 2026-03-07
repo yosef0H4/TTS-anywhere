@@ -1,6 +1,6 @@
 1. global abort logic x
 2. text follows mouse
-3. rapid the ocr support (gpu/cpu)
+3. rapid the ocr support (gpu/cpu) x
 4. paddleocr and their text processer (gpu/cpu)
 5. korko tts x
 6. kitten tts
@@ -13,3 +13,4 @@
 14. streaming ocr x
 15. adding logic x
 16. extract text button and remove auto apply x
+17. arabic

@@ -1379,6 +1379,8 @@ body {
     background: color-mix(in srgb, var(--line) 28%, #fff 72%);
     color: color-mix(in srgb, var(--fg) 82%, #fff 18%);
 }
+.reading-preview span.chunk-queued,
+.reading-preview span.chunk-fetching,
 .reading-preview span.chunk-synthesizing {
     background: color-mix(in srgb, #f59e0b 26%, #fff 74%);
     color: #92400e;

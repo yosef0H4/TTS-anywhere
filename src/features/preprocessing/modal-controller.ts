@@ -73,6 +73,7 @@ export class PreprocessModalController {
   private readonly drawPreview: HTMLDivElement;
   private readonly qualityViz: HTMLCanvasElement;
   private readonly previewRenderer: PreprocPreviewRenderer;
+  private readonly drawPreviewBox: HTMLDivElement;
 
   private originalDataUrl: string | null = null;
   private processedDataUrl: string | null = null;
@@ -115,6 +116,9 @@ export class PreprocessModalController {
     this.manualLayer = this.mustById<HTMLDivElement>("preproc-manual-layer");
     this.drawPreview = this.mustById<HTMLDivElement>("preproc-draw-preview");
     this.qualityViz = this.mustById<HTMLCanvasElement>("preproc-quality-viz");
+    this.drawPreviewBox = document.createElement("div");
+    this.drawPreviewBox.className = "box-preview";
+    this.drawPreview.append(this.drawPreviewBox);
     this.previewRenderer = new PreprocPreviewRenderer(
       {
         viewer: this.viewer,
@@ -310,7 +314,7 @@ export class PreprocessModalController {
       const point = this.pointerToNormalized(event.clientX, event.clientY);
       if (!point) return;
       this.draggingStart = point;
-      this.drawPreview.innerHTML = "";
+      this.drawPreviewBox.hidden = true;
       event.preventDefault();
     });
 
@@ -319,13 +323,17 @@ export class PreprocessModalController {
       const point = this.pointerToNormalized(event.clientX, event.clientY);
       if (!point) return;
       const r = this.normalizeRect(this.draggingStart.x, this.draggingStart.y, point.x, point.y);
-      this.drawPreview.innerHTML = `<div class="box-preview" style="left:${r.nx * 100}%;top:${r.ny * 100}%;width:${r.nw * 100}%;height:${r.nh * 100}%"></div>`;
+      this.drawPreviewBox.hidden = false;
+      this.drawPreviewBox.style.left = `${r.nx * 100}%`;
+      this.drawPreviewBox.style.top = `${r.ny * 100}%`;
+      this.drawPreviewBox.style.width = `${r.nw * 100}%`;
+      this.drawPreviewBox.style.height = `${r.nh * 100}%`;
     });
 
     window.addEventListener("pointerup", (event) => {
       if (!this.draggingStart) return;
       const point = this.pointerToNormalized(event.clientX, event.clientY);
-      this.drawPreview.innerHTML = "";
+      this.drawPreviewBox.hidden = true;
       if (!point) {
         this.draggingStart = null;
         return;

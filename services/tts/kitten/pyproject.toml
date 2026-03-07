@@ -1,0 +1,30 @@
+[project]
+name = "tts-kitten-adapter"
+version = "0.1.0"
+description = "OpenAI-compatible adapter for KittenTTS"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.116.1",
+  "uvicorn[standard]>=0.35.0",
+  "pydantic>=2.11.0",
+  "pydantic-settings>=2.10.1",
+  "soundfile>=0.13.1",
+  "kittentts"
+]
+
+[project.scripts]
+tts-kitten = "tts_kitten_adapter.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+kittentts = { path = "../../../KittenTTS" }
+
+[dependency-groups]
+dev = [
+  "pytest>=8.4.0",
+  "httpx>=0.28.0"
+]

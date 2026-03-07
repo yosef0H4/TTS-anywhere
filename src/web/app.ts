@@ -33,6 +33,7 @@ import { filterBySize, finalizeOcrBoxes, manualToRaw, mergeCloseBoxes, selection
 import { PreprocPreviewRenderer } from "../features/preprocessing/preview-renderer";
 import type { FilteredBox, MergeGroup, RawBox } from "../features/preprocessing/types";
 import { APP_ICONS } from "../ui/lucide-icons";
+import { joinApiPath, makeOptionCacheKey, resolveVoiceSelection, type VoiceListQuery } from "./tts-option-utils";
 import "../ui/styles.css";
 
 interface NamedOption {
@@ -113,6 +114,7 @@ export class WebApp {
   private isUserTyping = false;
   private userTypingLastAt = 0;
   private userTypingIdleTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingFullDocumentReplace = false;
   private playbackStartInFlight = false;
   private readonly playbackMetrics: PlaybackMetrics = {
     sessionStarts: 0,
@@ -272,9 +274,17 @@ export class WebApp {
     this.syncActiveChunkIndex();
   }
 
-  private reconcileText(nextText: string, options?: { finalizeTail?: boolean; source?: "user" | "llm" }): void {
+  private reconcileText(nextText: string, options?: { finalizeTail?: boolean; source?: "user" | "llm"; treatAsNewDocument?: boolean }): void {
     const previousChunks = this.getChunkRecords();
     const previousText = this.lastPlaybackText;
+    const treatAsNewDocument = this.shouldTreatAsNewDocument(previousText, nextText, options);
+    if (treatAsNewDocument) {
+      this.abortPlaybackAndSynthesis();
+      this.activeChunkId = null;
+      this.activeChunkIndex = 0;
+      this.speakingChunkId = null;
+      this.speakingRevision = null;
+    }
     const nextState = previousChunks.length === 0
       ? {
           chunks: createChunkRecords(nextText, this.buildChunkOptions(options?.finalizeTail)),
@@ -285,7 +295,7 @@ export class WebApp {
           nextText,
           previousChunks,
           ...this.buildChunkOptions(options?.finalizeTail),
-          ...(this.activeChunkId ? { activeChunkId: this.activeChunkId } : {}),
+          ...(this.activeChunkId && !treatAsNewDocument ? { activeChunkId: this.activeChunkId } : {}),
           ...(this.speakingChunkId ? { speakingChunkId: this.speakingChunkId } : {}),
           ...(typeof this.speakingRevision === "number" ? { speakingRevision: this.speakingRevision } : {})
         });
@@ -312,8 +322,75 @@ export class WebApp {
     this.maybeStartPlaybackFromStream();
 
     if (previousText !== nextText && !speakingInvalidated && options?.source === "user") {
-      this.setStatus("Text updated.");
+      this.setStatus(treatAsNewDocument ? "Text replaced. Restarting from the beginning." : "Text updated.");
     }
+  }
+
+  private shouldTreatAsNewDocument(
+    previousText: string,
+    nextText: string,
+    options?: { source?: "user" | "llm"; treatAsNewDocument?: boolean }
+  ): boolean {
+    if (options?.treatAsNewDocument) return true;
+    const previousNormalized = this.normalizePlaybackText(previousText);
+    const nextNormalized = this.normalizePlaybackText(nextText);
+    if (!previousNormalized || !nextNormalized) {
+      return false;
+    }
+    if (previousNormalized === nextNormalized) {
+      return false;
+    }
+
+    if (options?.source === "user" && this.pendingFullDocumentReplace) {
+      return true;
+    }
+
+    const commonPrefixLength = this.countCommonPrefix(previousNormalized, nextNormalized);
+    const commonSuffixLength = this.countCommonSuffix(previousNormalized, nextNormalized, commonPrefixLength);
+    const retainedRatio = (commonPrefixLength + commonSuffixLength) / Math.max(previousNormalized.length, nextNormalized.length);
+    if (retainedRatio <= 0.1) {
+      return true;
+    }
+
+    const overlapRatio = this.calculateWordOverlapRatio(previousNormalized, nextNormalized);
+    return overlapRatio < 0.2;
+  }
+
+  private normalizePlaybackText(text: string): string {
+    return text.replace(/\s+/g, " ").trim().toLowerCase();
+  }
+
+  private countCommonPrefix(left: string, right: string): number {
+    const limit = Math.min(left.length, right.length);
+    let index = 0;
+    while (index < limit && left[index] === right[index]) {
+      index += 1;
+    }
+    return index;
+  }
+
+  private countCommonSuffix(left: string, right: string, consumedPrefix: number): number {
+    const limit = Math.min(left.length, right.length) - consumedPrefix;
+    let index = 0;
+    while (index < limit && left[left.length - 1 - index] === right[right.length - 1 - index]) {
+      index += 1;
+    }
+    return index;
+  }
+
+  private calculateWordOverlapRatio(previousText: string, nextText: string): number {
+    const previousWords = new Set(previousText.split(/\s+/).filter(Boolean));
+    const nextWords = new Set(nextText.split(/\s+/).filter(Boolean));
+    if (previousWords.size === 0 || nextWords.size === 0) {
+      return 0;
+    }
+    let overlap = 0;
+    for (const word of previousWords) {
+      if (nextWords.has(word)) {
+        overlap += 1;
+      }
+    }
+    return overlap / Math.max(previousWords.size, nextWords.size);
   }
 
   private cleanupRemovedChunks(previousChunks: ChunkRecord[], nextChunks: ChunkRecord[]): void {
@@ -456,6 +533,7 @@ export class WebApp {
     this.ttsModelSelect.on("change", (value: string) => {
       this.config.tts.model = value;
       this.store.save(this.config);
+      void this.handleTtsModelChange(value);
     });
 
     this.ttsVoiceSelect.on("change", (value: string) => {
@@ -486,16 +564,33 @@ export class WebApp {
   private async fetchTtsVoices(force: boolean): Promise<void> {
     const base = this.config.tts.baseUrl;
     const key = this.config.tts.apiKey;
-    const cacheKey = this.makeCacheKey("tts-voices", base, key);
+    const model = this.config.tts.model;
+    const cacheKey = this.makeCacheKey("tts-voices", base, key, model);
 
     if (!force && this.optionCache.has(cacheKey)) {
       this.applyOptions(this.ttsVoiceSelect, this.optionCache.get(cacheKey) ?? [], this.config.tts.voice);
       return;
     }
 
-    const voices = await this.tryFetchVoiceOptions(base, key);
+    const voices = await this.tryFetchVoiceOptions(base, key, { model });
     this.optionCache.set(cacheKey, voices);
     this.applyOptions(this.ttsVoiceSelect, voices, this.config.tts.voice);
+  }
+
+  private async handleTtsModelChange(value: string): Promise<void> {
+    const currentVoice = this.config.tts.voice;
+    await this.fetchTtsVoices(true);
+
+    const selectedVoice = this.resolveVoiceSelectionForModel(value, currentVoice);
+    if (selectedVoice !== this.config.tts.voice) {
+      this.config.tts.voice = selectedVoice;
+      this.store.save(this.config);
+    }
+    this.applyOptions(
+      this.ttsVoiceSelect,
+      this.currentCachedTtsVoices(),
+      this.config.tts.voice
+    );
   }
 
   private async checkRapidHealth(): Promise<void> {
@@ -521,11 +616,11 @@ export class WebApp {
     }
   }
 
-  private async tryFetchVoiceOptions(baseUrl: string, apiKey: string): Promise<NamedOption[]> {
+  private async tryFetchVoiceOptions(baseUrl: string, apiKey: string, query: VoiceListQuery = {}): Promise<NamedOption[]> {
     const candidates = ["/voices", "/audio/voices", "/models"];
     for (const path of candidates) {
       try {
-        const response = await fetch(this.joinApiPath(baseUrl, path), {
+        const response = await fetch(this.joinApiPath(baseUrl, path, query), {
           headers: this.authHeaders(apiKey)
         });
         if (!response.ok) continue;
@@ -646,17 +741,21 @@ export class WebApp {
     return { Authorization: `Bearer ${apiKey}` };
   }
 
-  private makeCacheKey(namespace: string, baseUrl: string, apiKey: string): string {
-    return `${namespace}|${baseUrl.trim()}|${apiKey.trim()}`;
+  private resolveVoiceSelectionForModel(model: string, preferredVoice: string): string {
+    const voices = this.currentCachedTtsVoices(model);
+    return resolveVoiceSelection(preferredVoice, voices);
   }
 
-  private joinApiPath(baseUrl: string, path: string): string {
-    const normalized = baseUrl.replace(/\/+$/, "");
-    const safePath = path.startsWith("/") ? path : `/${path}`;
-    if (normalized.endsWith("/v1") || normalized.endsWith("/v1/")) {
-      return `${normalized}${safePath}`;
-    }
-    return `${normalized}/v1${safePath}`;
+  private currentCachedTtsVoices(model: string = this.config.tts.model): NamedOption[] {
+    return this.optionCache.get(this.makeCacheKey("tts-voices", this.config.tts.baseUrl, this.config.tts.apiKey, model)) ?? [];
+  }
+
+  private makeCacheKey(namespace: string, baseUrl: string, apiKey: string, discriminator = ""): string {
+    return makeOptionCacheKey(namespace, baseUrl, apiKey, discriminator);
+  }
+
+  private joinApiPath(baseUrl: string, path: string, query: Record<string, string | undefined> = {}): string {
+    return joinApiPath(baseUrl, path, query);
   }
 
   private setStatus(text: string): void {
@@ -782,9 +881,18 @@ export class WebApp {
     });
 
     const rawTextEl = this.must<HTMLTextAreaElement>("raw-text");
+    rawTextEl.addEventListener("beforeinput", (event) => {
+      const inputEvent = event as InputEvent;
+      const inputType = inputEvent.inputType ?? "";
+      const fullSelection = rawTextEl.selectionStart === 0 && rawTextEl.selectionEnd === rawTextEl.value.length;
+      const isReplacementInput = inputType.startsWith("insert") || inputType.startsWith("delete");
+      this.pendingFullDocumentReplace = fullSelection && rawTextEl.value.length > 0 && isReplacementInput;
+    });
     rawTextEl.addEventListener("input", () => {
       this.markUserTyping();
-      this.reconcileText(this.getPlaybackText(), { source: "user" });
+      const treatAsNewDocument = this.pendingFullDocumentReplace;
+      this.pendingFullDocumentReplace = false;
+      this.reconcileText(this.getPlaybackText(), { source: "user", treatAsNewDocument });
     });
     rawTextEl.addEventListener("click", () => this.handleUserCaretMovement());
     rawTextEl.addEventListener("keyup", () => this.handleUserCaretMovement());
@@ -1908,9 +2016,7 @@ export class WebApp {
       loggers.playback.info("Playback resumed");
       return;
     }
-    if (this.lastPlaybackText !== text) {
-      this.reconcileText(text, { source: "user", finalizeTail: !this.ocrStreaming });
-    }
+    this.reconcileText(text, { source: "user", finalizeTail: true });
 
     if (this.timeline.chunks.length === 0) {
       this.setStatus("Nothing to read.");
@@ -2111,6 +2217,7 @@ export class WebApp {
   }
 
   private seekChunk(index: number): void {
+    this.reconcileText(this.getPlaybackText(), { source: "user", finalizeTail: true });
     const chunk = this.getChunkRecords()[index];
     if (!chunk) return;
     if (!this.isChunkPlayable(index)) {
@@ -2135,14 +2242,19 @@ export class WebApp {
   private prefetchFromIndex(activeChunkId: string, session: number): void {
     if (session !== this.chunkPlaybackSession) return;
     const targets = getPrefetchTargets(this.getChunkRecords(), activeChunkId, Math.max(1, this.config.reading.streamWindowSize));
+    let queuedAny = false;
     for (const chunk of targets) {
       if (!chunk.finalized || chunk.audioUrl || this.chunkInFlightById.has(chunk.id) || chunk.status === "playing") {
         continue;
       }
       chunk.status = "queued";
+      queuedAny = true;
       void this.getChunkAudioUrl(chunk.id, session).catch(() => {
         // Best effort prefetch.
       });
+    }
+    if (queuedAny) {
+      this.renderReadingPreview();
     }
   }
 
@@ -2179,9 +2291,11 @@ export class WebApp {
 
   private renderPlayState(): void {
     const playBtn = this.must<HTMLButtonElement>("btn-play");
-    playBtn.innerHTML = this.audio.paused
-      ? '<i data-lucide="play" class="ui-icon"></i>'
-      : '<i data-lucide="pause" class="ui-icon"></i>';
+    const icon = playBtn.querySelector<HTMLElement>("[data-lucide]");
+    if (!icon) {
+      throw new Error("Missing play button icon");
+    }
+    icon.setAttribute("data-lucide", this.audio.paused ? "play" : "pause");
     playBtn.classList.toggle("programmatic-paused", this.programmaticPauseActive);
     playBtn.title = this.programmaticPauseActive ? this.programmaticPauseReason : (this.audio.paused ? "Play" : "Pause");
     this.renderIcons();
