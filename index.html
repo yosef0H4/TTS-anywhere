@@ -5,15 +5,126 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self' http://localhost:5173 ws://localhost:5173 data: blob:; script-src 'self' http://localhost:5173; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; font-src 'self' https://fonts.gstatic.com; connect-src *;"
+      content="default-src 'self' http://localhost:5173 ws://localhost:5173 data: blob:; script-src 'self' http://localhost:5173; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src *;"
     />
     <title>TTS Snipper</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+    <style>
+      :root {
+        color-scheme: light;
+        --boot-bg: #efeee4;
+        --boot-panel: rgba(255, 255, 255, 0.76);
+        --boot-line: #d8d3c3;
+        --boot-fg: #34363a;
+        --boot-muted: #65686d;
+        --boot-accent: #ef6b57;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        background: var(--boot-bg);
+      }
+
+      body {
+        overflow: hidden;
+        font-family: "DM Sans", "Segoe UI", sans-serif;
+      }
+
+      #boot-screen {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background:
+          radial-gradient(circle at top right, rgba(239, 107, 87, 0.12), transparent 28%),
+          radial-gradient(circle at bottom left, rgba(52, 54, 58, 0.08), transparent 24%),
+          var(--boot-bg);
+        z-index: 9999;
+        transition: opacity 160ms ease, visibility 160ms ease;
+      }
+
+      #boot-screen[data-hidden="true"] {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      .boot-card {
+        width: min(420px, calc(100vw - 32px));
+        padding: 24px 24px 20px;
+        border: 1px solid var(--boot-line);
+        border-radius: 18px;
+        background: var(--boot-panel);
+        backdrop-filter: blur(12px);
+        box-shadow: 0 18px 48px rgba(52, 54, 58, 0.08);
+      }
+
+      .boot-title {
+        margin: 0 0 6px;
+        color: var(--boot-fg);
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+      }
+
+      .boot-copy {
+        margin: 0 0 16px;
+        color: var(--boot-muted);
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      .boot-progress {
+        position: relative;
+        overflow: hidden;
+        height: 10px;
+        border-radius: 999px;
+        background: rgba(216, 211, 195, 0.65);
+      }
+
+      .boot-progress::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        width: 38%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, rgba(239, 107, 87, 0.32), var(--boot-accent), rgba(52, 54, 58, 0.9));
+        animation: boot-slide 1.15s ease-in-out infinite;
+      }
+
+      .boot-status {
+        margin-top: 12px;
+        color: var(--boot-muted);
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+      }
+
+      @keyframes boot-slide {
+        0% {
+          transform: translateX(-115%);
+        }
+        55% {
+          transform: translateX(160%);
+        }
+        100% {
+          transform: translateX(160%);
+        }
+      }
+    </style>
     <script type="module" src="/src/web/main.ts"></script>
   </head>
   <body>
+    <div id="boot-screen" aria-live="polite">
+      <div class="boot-card">
+        <h1 class="boot-title">Launching TTS Snipper</h1>
+        <p class="boot-copy">Preparing the desktop shell and loading the renderer.</p>
+        <div class="boot-progress" aria-hidden="true"></div>
+        <div class="boot-status">Starting up</div>
+      </div>
+    </div>
     <div id="app"></div>
   </body>
 </html>

@@ -5,7 +5,8 @@ import { PreprocPreviewRenderer, type FilterRule, type OverlayMode } from "./pre
 import { checkRapidHealth, detectRapidRawBoxes } from "./rapid-client";
 import type { DrawRect, FilteredBox, RawBox, SelectionOp, ToolMode } from "./types";
 import type { AppConfig } from "../../core/models/types";
-import { createIcons, icons } from "lucide";
+import { createIcons } from "lucide";
+import { APP_ICONS } from "../../ui/lucide-icons";
 
 type ImageGeometry = {
   naturalWidth: number;
@@ -104,7 +105,7 @@ export class PreprocessModalController {
     this.opts = opts;
     this.root = opts.root;
     this.root.insertAdjacentHTML("beforeend", PREPROCESS_MODAL_TEMPLATE);
-    createIcons({ icons, attrs: { "stroke-width": 2 } });
+    createIcons({ icons: APP_ICONS, attrs: { "stroke-width": 2 } });
     this.backdrop = this.mustQuery<HTMLElement>("[data-preproc-modal]");
     this.viewer = this.mustById<HTMLDivElement>("preproc-viewer");
     this.preview = this.mustById<HTMLImageElement>("preproc-preview");

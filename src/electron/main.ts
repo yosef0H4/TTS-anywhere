@@ -44,6 +44,13 @@ let selectionStart: { x: number; y: number } | null = null;
 let lastCursor: { x: number; y: number } | null = null;
 let lastRect: { left: number; top: number; right: number; bottom: number } | null = null;
 let copyPlayInFlight = false;
+let appCloseInFlight = false;
+let shutdownWatchdog: NodeJS.Timeout | null = null;
+const processStartAt = Date.now();
+
+function processUptimeMs(): number {
+  return Date.now() - processStartAt;
+}
 
 function prefsPath(): string {
   return path.join(app.getPath("userData"), "window-prefs.json");
@@ -119,9 +126,15 @@ function writeBackendLog(level: LogLevel, category: string, message: string, con
 }
 
 function diag(event: string, data?: Record<string, unknown>): void {
-  writeBackendLog("info", "electron", event, data);
+  writeBackendLog("info", "electron", event, {
+    uptimeMs: processUptimeMs(),
+    ...data
+  });
   try {
-    const payload = data ? ` ${JSON.stringify(data)}` : "";
+    const payload = JSON.stringify({
+      uptimeMs: processUptimeMs(),
+      ...(data ?? {})
+    });
     fs.appendFileSync(diagnosticsPath(), `[${new Date().toISOString()}] ${event}${payload}\n`, "utf-8");
   } catch {
     // no-op
@@ -141,19 +154,74 @@ function clearLogs(): void {
   }
 }
 
+function clearShutdownWatchdog(): void {
+  if (!shutdownWatchdog) return;
+  clearTimeout(shutdownWatchdog);
+  shutdownWatchdog = null;
+}
+
+function disposeNativeResources(): void {
+  if (selectionTicker) {
+    clearInterval(selectionTicker);
+    selectionTicker = null;
+  }
+  captureHotkeySession?.stop();
+  captureHotkeySession = null;
+  copyHotkeySession?.stop();
+  copyHotkeySession = null;
+  overlay?.destroy();
+  overlay = null;
+}
+
+function requestAppClose(): void {
+  if (appCloseInFlight) {
+    diag("app.close.request.ignored");
+    return;
+  }
+  appCloseInFlight = true;
+  diag("app.close.requested");
+
+  const win = mainWindow;
+  if (win && !win.isDestroyed()) {
+    win.setSkipTaskbar(true);
+    win.hide();
+    diag("window.hide.for-close");
+  }
+
+  clearShutdownWatchdog();
+  shutdownWatchdog = setTimeout(() => {
+    diag("app.close.watchdog", {
+      hasWindow: Boolean(mainWindow && !mainWindow.isDestroyed())
+    });
+  }, 2000);
+
+  setTimeout(() => {
+    try {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        diag("window.destroy.for-close.begin");
+        mainWindow.destroy();
+      }
+    } finally {
+      diag("app.quit.requested");
+      app.quit();
+    }
+  }, 0);
+}
+
 function createMainWindow(): BrowserWindow {
+  diag("window.create.begin");
   const win = new BrowserWindow({
     width: 1040,
     height: 720,
     minWidth: 860,
     minHeight: 560,
     resizable: true,
-    frame: false,
-    titleBarStyle: "hidden",
+    frame: true,
     backgroundColor: "#fff0f5",
-    show: false,
+    show: isDevMode(),
     alwaysOnTop: isPinned,
     skipTaskbar: false,
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -163,19 +231,83 @@ function createMainWindow(): BrowserWindow {
   });
 
   win.setResizable(true);
+  win.setMenuBarVisibility(false);
   win.setAlwaysOnTop(isPinned, "floating");
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
+  const webContents = win.webContents;
+  webContents.on("did-start-loading", () => {
+    diag("window.web.did-start-loading");
+    if (isDevMode() && !win.isDestroyed() && !win.isVisible()) {
+      diag("window.show.dev-did-start-loading");
+      win.show();
+    }
+  });
+  webContents.on("dom-ready", () => {
+    diag("window.web.dom-ready");
+  });
+  webContents.on("did-frame-finish-load", (_event, isMainFrame) => {
+    diag("window.web.did-frame-finish-load", { isMainFrame });
+  });
+  webContents.on("did-finish-load", () => {
+    diag("window.web.did-finish-load");
+  });
+  webContents.on("did-stop-loading", () => {
+    diag("window.web.did-stop-loading");
+  });
+  webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    diag("window.web.did-fail-load", { errorCode, errorDescription, validatedURL, isMainFrame });
+  });
+  webContents.on("render-process-gone", (_event, details) => {
+    diag("window.web.render-process-gone", {
+      reason: details.reason,
+      exitCode: details.exitCode
+    });
+  });
+  webContents.on("unresponsive", () => {
+    diag("window.web.unresponsive");
+  });
+  webContents.on("responsive", () => {
+    diag("window.web.responsive");
+  });
+
+  win.on("show", () => {
+    diag("window.show");
+  });
+  win.on("hide", () => {
+    diag("window.hide");
+  });
+  win.on("close", () => {
+    diag("window.close");
+  });
+  win.on("closed", () => {
+    diag("window.closed");
+    clearShutdownWatchdog();
+    mainWindow = null;
+  });
+
+  if (isDevMode()) {
+    if (!win.isVisible()) {
+      diag("window.show.dev-immediate");
+      win.show();
+    }
+  } else {
+    win.once("ready-to-show", () => {
+      diag("window.ready-to-show");
+      win.show();
+    });
+  }
+
   const devUrl = process.env.VITE_DEV_SERVER_URL;
+  diag("window.load.begin", {
+    target: devUrl ? "dev-server" : "dist-file",
+    url: devUrl ?? path.join(__dirname, "../dist/index.html")
+  });
   if (devUrl) {
     void win.loadURL(devUrl);
   } else {
     void win.loadFile(path.join(__dirname, "../dist/index.html"));
   }
-
-  win.once("ready-to-show", () => {
-    win.show();
-  });
 
   return win;
 }
@@ -338,10 +470,18 @@ app.whenReady().then(() => {
   startSelectionTicker();
 
   app.on("activate", () => {
+    if (appCloseInFlight) {
+      diag("app.activate.ignored", { reason: "close-in-flight" });
+      return;
+    }
     if (BrowserWindow.getAllWindows().length === 0) {
       mainWindow = createMainWindow();
     }
   });
+});
+
+app.on("before-quit", (_event) => {
+  diag("app.before-quit");
 });
 
 ipcMain.handle("capture:begin-hotkey-edit", () => {
@@ -431,40 +571,6 @@ ipcMain.handle("capture:set-draw-rectangle", (_event, enabled: boolean) => {
 
 ipcMain.handle("capture:get-draw-rectangle", () => drawSelectionRectangle);
 
-ipcMain.on("window:minimize", () => {
-  mainWindow?.minimize();
-});
-
-ipcMain.handle("window:toggle-maximize", () => {
-  if (!mainWindow) {
-    return false;
-  }
-  if (mainWindow.isMaximized()) {
-    mainWindow.unmaximize();
-    return false;
-  }
-  mainWindow.maximize();
-  return true;
-});
-
-ipcMain.on("window:close", () => {
-  mainWindow?.close();
-});
-
-ipcMain.handle("window:get-pin", () => {
-  return isPinned;
-});
-
-ipcMain.handle("window:toggle-pin", () => {
-  if (!mainWindow) {
-    return isPinned;
-  }
-  isPinned = !isPinned;
-  mainWindow.setAlwaysOnTop(isPinned, "floating");
-  savePinnedPref(isPinned);
-  return isPinned;
-});
-
 ipcMain.on("log:write", (_event, entries: unknown[]) => {
   if (!Array.isArray(entries)) return;
   for (const raw of entries) {
@@ -500,22 +606,17 @@ process.on("unhandledRejection", (reason) => {
 });
 
 app.on("window-all-closed", () => {
+  diag("app.window-all-closed");
   if (process.platform !== "darwin") {
     app.quit();
   }
 });
 
 app.on("will-quit", () => {
-  if (selectionTicker) {
-    clearInterval(selectionTicker);
-    selectionTicker = null;
-  }
-  captureHotkeySession?.stop();
-  captureHotkeySession = null;
-  copyHotkeySession?.stop();
-  copyHotkeySession = null;
-  overlay?.destroy();
-  overlay = null;
+  diag("app.will-quit.begin");
+  clearShutdownWatchdog();
+  disposeNativeResources();
+  diag("app.will-quit.end");
 });
 
 ipcMain.handle("ping", () => "pong");

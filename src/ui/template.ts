@@ -1,16 +1,6 @@
 export const APP_TEMPLATE = `
 <div id="desktop">
   <div id="app-shell">
-    <div class="window-header" id="window-header">
-      <div class="window-title">TTS Snipper</div>
-      <div class="window-actions">
-        <button id="btn-pin" class="window-btn" title="Toggle always-on-top"><i data-lucide="pin" class="ui-icon"></i></button>
-        <button id="btn-minimize" class="window-btn" title="Minimize"><i data-lucide="minus" class="ui-icon"></i></button>
-        <button id="btn-maximize" class="window-btn" title="Maximize"><i data-lucide="square" class="ui-icon"></i></button>
-        <button id="btn-close" class="window-btn close" title="Close"><i data-lucide="x" class="ui-icon"></i></button>
-      </div>
-    </div>
-
     <div class="bg-layer"></div>
 
     <div class="sidebar" id="sidebar">

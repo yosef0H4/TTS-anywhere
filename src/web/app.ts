@@ -1,6 +1,6 @@
 import TomSelect from "tom-select";
 import "tom-select/dist/css/tom-select.css";
-import { createIcons, icons } from "lucide";
+import { createIcons } from "lucide";
 import {
   addTransport,
   ConsoleTransport,
@@ -32,6 +32,7 @@ import { detectRapidRawBoxes } from "../features/preprocessing/rapid-client";
 import { filterBySize, finalizeOcrBoxes, manualToRaw, mergeCloseBoxes, selectionKeepRatio, sortByReadingOrder } from "../features/preprocessing/logic";
 import { PreprocPreviewRenderer } from "../features/preprocessing/preview-renderer";
 import type { FilteredBox, MergeGroup, RawBox } from "../features/preprocessing/types";
+import { APP_ICONS } from "../ui/lucide-icons";
 import "../ui/styles.css";
 
 interface NamedOption {
@@ -49,6 +50,15 @@ interface PlaybackMetrics {
   sessionStarts: number;
   playChunkRequests: number;
   ttsStartsBySessionAndHash: Record<string, number>;
+}
+
+const rendererBootAt = performance.now();
+
+function dismissBootScreen(): void {
+  const boot = document.getElementById("boot-screen");
+  if (!boot) return;
+  boot.setAttribute("data-hidden", "true");
+  window.setTimeout(() => boot.remove(), 220);
 }
 
 export class WebApp {
@@ -111,27 +121,51 @@ export class WebApp {
   };
 
   mount(root: HTMLElement): void {
+    this.logBootstrapStep("mount.begin");
     this.initializeLogging();
+    this.logBootstrapStep("logging.initialized");
     root.innerHTML = APP_TEMPLATE;
+    this.logBootstrapStep("template.rendered");
     this.applyUiState();
+    this.logBootstrapStep("ui.state.applied");
     this.renderIcons();
-    this.bindWindowControls();
+    this.logBootstrapStep("icons.rendered");
     this.bindModelSelectors();
+    this.logBootstrapStep("model.selectors.bound");
     this.bindSettings();
+    this.logBootstrapStep("settings.bound");
     this.bindCapture();
+    this.logBootstrapStep("capture.bound");
     this.bindBreak();
+    this.logBootstrapStep("break.bound");
     this.bindMainPreviewRenderer();
+    this.logBootstrapStep("main.preview.bound");
     this.bindPreprocessModal();
+    this.logBootstrapStep("preprocess.modal.bound");
     this.bindPlayback();
+    this.logBootstrapStep("playback.bound");
     this.bindWorkspaceResizer();
+    this.logBootstrapStep("workspace.resizer.bound");
     this.bindMobilePaneToggles();
+    this.logBootstrapStep("mobile.toggles.bound");
     this.bindLoggingSettings();
+    this.logBootstrapStep("logging.settings.bound");
     this.renderConfig();
+    this.logBootstrapStep("config.rendered");
     void this.syncElectronCaptureHotkeyFromSettings();
     void this.syncElectronCopyHotkeyFromSettings();
     void this.syncElectronCaptureRectangleSetting();
+    this.logBootstrapStep("electron.settings.sync.started");
     this.installE2eHooks();
+    this.logBootstrapStep("e2e.hooks.installed");
+    window.addEventListener("beforeunload", () => {
+      this.logLifecycle("window.beforeunload");
+    });
+    window.addEventListener("unload", () => {
+      this.logLifecycle("window.unload");
+    });
     loggers.app.info("App mounted");
+    this.logBootstrapStep("mount.end");
   }
 
   private installE2eHooks(): void {
@@ -363,6 +397,17 @@ export class WebApp {
       addTransport(this.ipcTransport);
     }
     setLogLevel(cfg.level);
+  }
+
+  private logBootstrapStep(step: string, context?: Record<string, unknown>): void {
+    this.logLifecycle(`bootstrap.${step}`, context);
+  }
+
+  private logLifecycle(step: string, context?: Record<string, unknown>): void {
+    loggers.app.info(step, {
+      sinceRendererBootMs: Number((performance.now() - rendererBootAt).toFixed(2)),
+      ...context
+    });
   }
 
   private bindModelSelectors(): void {
@@ -612,58 +657,6 @@ export class WebApp {
       return `${normalized}${safePath}`;
     }
     return `${normalized}/v1${safePath}`;
-  }
-
-  private bindWindowControls(): void {
-    const pinButton = this.must<HTMLButtonElement>("btn-pin");
-    const minimizeButton = this.must<HTMLButtonElement>("btn-minimize");
-    const maximizeButton = this.must<HTMLButtonElement>("btn-maximize");
-    const closeButton = this.must<HTMLButtonElement>("btn-close");
-
-    if (!window.electronAPI) {
-      pinButton.disabled = true;
-      minimizeButton.disabled = true;
-      maximizeButton.disabled = true;
-      closeButton.disabled = true;
-      this.setStatus("Desktop window controls unavailable (running in browser mode).");
-      return;
-    }
-
-    minimizeButton.addEventListener("click", () => {
-      window.electronAPI?.minimizeWindow();
-    });
-
-    maximizeButton.addEventListener("click", async () => {
-      const isMaximized = await window.electronAPI?.toggleMaximizeWindow();
-      maximizeButton.innerHTML = isMaximized
-        ? '<i data-lucide="copy" class="ui-icon"></i>'
-        : '<i data-lucide="square" class="ui-icon"></i>';
-      this.renderIcons();
-      maximizeButton.title = isMaximized ? "Restore" : "Maximize";
-    });
-
-    closeButton.addEventListener("click", () => {
-      window.electronAPI?.closeWindow();
-    });
-
-    void window.electronAPI?.getPinState().then((pinned) => {
-      if (pinned) {
-        pinButton.classList.add("active-pin");
-      } else {
-        pinButton.classList.remove("active-pin");
-      }
-    });
-
-    pinButton.addEventListener("click", async () => {
-      const pinned = await window.electronAPI?.togglePinWindow();
-      if (pinned) {
-        pinButton.classList.add("active-pin");
-        this.setStatus("Always on top: On");
-      } else {
-        pinButton.classList.remove("active-pin");
-        this.setStatus("Always on top: Off");
-      }
-    });
   }
 
   private setStatus(text: string): void {
@@ -2183,7 +2176,7 @@ export class WebApp {
   }
 
   private renderIcons(): void {
-    createIcons({ icons });
+    createIcons({ icons: APP_ICONS });
   }
 
   private async pickImageFromClipboard(): Promise<string | null> {
@@ -2388,6 +2381,15 @@ export class WebApp {
 }
 
 export function startWebApp(): void {
+  loggers.app.info("renderer.entry.start", {
+    readyState: document.readyState,
+    sinceRendererBootMs: Number((performance.now() - rendererBootAt).toFixed(2))
+  });
+  window.addEventListener("DOMContentLoaded", () => {
+    loggers.app.info("renderer.dom-content-loaded", {
+      sinceRendererBootMs: Number((performance.now() - rendererBootAt).toFixed(2))
+    });
+  }, { once: true });
   const root = document.getElementById("app");
   if (!root) {
     throw new Error("Missing #app");
@@ -2398,4 +2400,5 @@ export function startWebApp(): void {
   }
 
   new WebApp().mount(root);
+  dismissBootScreen();
 }

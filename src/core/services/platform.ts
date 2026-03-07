@@ -16,11 +16,6 @@ export interface ElectronApi {
   getCopyHotkey: () => Promise<string>;
   setCaptureDrawRectangle: (enabled: boolean) => Promise<boolean>;
   getCaptureDrawRectangle: () => Promise<boolean>;
-  minimizeWindow: () => void;
-  toggleMaximizeWindow: () => Promise<boolean>;
-  closeWindow: () => void;
-  getPinState: () => Promise<boolean>;
-  togglePinWindow: () => Promise<boolean>;
   sendLogEntries: (entries: unknown[]) => void;
   getLogLevel: () => Promise<string>;
   setLogLevel: (level: string) => Promise<void>;
