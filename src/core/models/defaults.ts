@@ -6,7 +6,10 @@ export const DEFAULT_CONFIG: AppConfig = {
     apiKey: "",
     model: "gpt-4.1-mini",
     promptTemplate: "Extract text exactly as shown.",
-    imageDetail: "low"
+    imageDetail: "low",
+    ocrStreamingEnabled: true,
+    ocrStreamingFallbackToNonStream: true,
+    maxTokens: 4096
   },
   tts: {
     baseUrl: "https://api.openai.com/v1",
@@ -18,6 +21,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   },
   reading: {
     cleanTextBeforeTts: false,
+    typingIdleMs: 600,
     minWordsPerChunk: 6,
     maxWordsPerChunk: 25,
     wpmBase: 180,

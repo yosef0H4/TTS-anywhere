@@ -20,11 +20,15 @@ describe("openai compatible clients", () => {
       apiKey: "k",
       model: "m",
       promptTemplate: "Extract",
-      imageDetail: "low"
+      imageDetail: "low",
+      ocrStreamingEnabled: true,
+      ocrStreamingFallbackToNonStream: true,
+      maxTokens: 4096
     });
 
     expect(create).toHaveBeenCalledOnce();
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+    const [firstCallParams] = create.mock.calls[0] ?? [];
+    expect(firstCallParams).toEqual(expect.objectContaining({
       messages: expect.arrayContaining([
         expect.objectContaining({
           content: expect.arrayContaining([
@@ -63,5 +67,29 @@ describe("openai compatible clients", () => {
 
     expect(create).toHaveBeenCalledOnce();
     expect(result.audioBlob.size).toBeGreaterThan(0);
+  });
+
+  it("maps OCR stream abort errors to Cancelled", async () => {
+    const create = vi.fn().mockRejectedValue(new Error("request was aborted"));
+    const service = new OpenAiCompatibleLlmService(() => ({
+      chat: {
+        completions: {
+          create
+        }
+      }
+    }));
+
+    await expect(
+      service.extractTextFromImageStream("data:image/png;base64,abc", {
+        baseUrl: "https://example.com/v1",
+        apiKey: "k",
+        model: "m",
+        promptTemplate: "Extract",
+        maxTokens: 256,
+        imageDetail: "low",
+        ocrStreamingEnabled: true,
+        ocrStreamingFallbackToNonStream: true
+      })
+    ).rejects.toThrow("Cancelled");
   });
 });

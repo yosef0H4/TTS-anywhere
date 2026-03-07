@@ -12,18 +12,19 @@ import {
 } from "../core/logging";
 import { DEFAULT_CONFIG } from "../core/models/defaults";
 import type { AppConfig, ReadingTimeline } from "../core/models/types";
+import {
+  createChunkRecords,
+  getPrefetchTargets,
+  reconcileChunks,
+  toReadingTimeline,
+  type ChunkRecord,
+  type ChunkStatus
+} from "../core/playback/chunking";
 import { AppPipeline } from "../core/pipeline/app-pipeline";
 import { SettingsStore } from "../core/services/settings-store";
 import { WorkspaceResizer } from "../ui/workspace-resizer";
-import { buildReadingTimeline, cleanTextForTts, findChunkIndexByTime, normalizeText } from "../core/utils/chunking";
+import { cleanTextForTts, findChunkIndexByTime } from "../core/utils/chunking";
 import { RequestPreemptor } from "../core/utils/request-preemptor";
-import {
-  classifyEffectiveTextEdit,
-  findChunkIndexAtOrAfterChar,
-  shouldHardResetTailSubtract,
-  stripNonEffectiveTrailing,
-  type TextEditKind
-} from "../core/utils/live-text-edit";
 import { APP_TEMPLATE } from "../ui/template";
 import { PreprocessModalController, type DrawRect } from "../features/preprocessing";
 import { applyPreprocessToDataUrl, normalizeImageDataUrl, scaleDataUrlMaxDimension } from "../features/preprocessing/image";
@@ -42,28 +43,25 @@ interface ModelListResponse {
   data?: Array<{ id?: string }>;
 }
 
-type ChunkSynthesisState =
-  | "not_started"
-  | "synthesizing"
-  | "ready"
-  | "playing"
-  | "failed";
-
-interface AudioCacheEntry {
-  url: string;
-}
-
 type RequestLane = "ocr" | "rapid_main" | "rapid_modal";
+
+interface PlaybackMetrics {
+  sessionStarts: number;
+  playChunkRequests: number;
+  ttsStartsBySessionAndHash: Record<string, number>;
+}
 
 export class WebApp {
   private readonly store = new SettingsStore();
   private readonly pipeline = new AppPipeline();
   private readonly config: AppConfig = this.store.load();
   private readonly audio = new Audio();
-  private lastSynthText = "";
+  private lastPlaybackText = "";
   private timeline: ReadingTimeline = { chunks: [], durationMs: 0 };
+  private activeChunkId: string | null = null;
   private activeChunkIndex = 0;
-  private pendingNextChunkFromChar: number | null = null;
+  private speakingChunkId: string | null = null;
+  private speakingRevision: number | null = null;
   private readonly optionCache = new Map<string, NamedOption[]>();
   private llmModelSelect: TomSelect | null = null;
   private ttsModelSelect: TomSelect | null = null;
@@ -71,12 +69,8 @@ export class WebApp {
   private settingsPeekOpen = false;
   private chunkPlaybackMode = false;
   private chunkPlaybackSession = 0;
-  private readonly chunkHashByIndex = new Map<number, string>();
-  private readonly audioCacheByHash = new Map<string, AudioCacheEntry>();
-  private readonly chunkInFlightByHash = new Map<string, Promise<string>>();
-  private readonly chunkAbortControllersByHash = new Map<string, AbortController>();
-  private readonly chunkStateByIndex = new Map<number, ChunkSynthesisState>();
-  private readonly chunkErrorByIndex = new Map<number, string>();
+  private readonly chunkInFlightById = new Map<string, Promise<string>>();
+  private readonly chunkAbortControllersById = new Map<string, AbortController>();
   private workspaceResizer: WorkspaceResizer | null = null;
   private ipcTransport: IpcTransport | null = null;
   private consoleTransport: ConsoleTransport | null = null;
@@ -100,6 +94,21 @@ export class WebApp {
   private modalAbortController: AbortController | null = null;
   private runInProgress = false;
   private readonly requestPreemptor = new RequestPreemptor<RequestLane>();
+  private ocrStreaming = false;
+  private ocrStreamDone = false;
+  private ocrStreamSession = 0;
+  private activeOcrRequests = 0;
+  private programmaticPauseActive = false;
+  private programmaticPauseReason = "";
+  private isUserTyping = false;
+  private userTypingLastAt = 0;
+  private userTypingIdleTimer: ReturnType<typeof setTimeout> | null = null;
+  private playbackStartInFlight = false;
+  private readonly playbackMetrics: PlaybackMetrics = {
+    sessionStarts: 0,
+    playChunkRequests: 0,
+    ttsStartsBySessionAndHash: {}
+  };
 
   mount(root: HTMLElement): void {
     this.initializeLogging();
@@ -121,7 +130,225 @@ export class WebApp {
     void this.syncElectronCaptureHotkeyFromSettings();
     void this.syncElectronCopyHotkeyFromSettings();
     void this.syncElectronCaptureRectangleSetting();
+    this.installE2eHooks();
     loggers.app.info("App mounted");
+  }
+
+  private installE2eHooks(): void {
+    const host = window as unknown as {
+      __e2e?: {
+        getState: () => unknown;
+        setRawText: (text: string) => void;
+        dispatchEngine: (event: unknown) => void;
+        startPlayback: () => Promise<void>;
+        setTypingState: (typing: { userTyping?: boolean; ocrStreaming?: boolean; activeOcrRequests?: number }) => void;
+        getPlaybackMetrics: () => PlaybackMetrics;
+        clearPlaybackMetrics: () => void;
+      };
+    };
+    host.__e2e = {
+      getState: () => ({
+        activeChunkIndex: this.activeChunkIndex,
+        chunkCount: this.timeline.chunks.length,
+        chunkPlaybackMode: this.chunkPlaybackMode,
+        isTypingActive: this.isTypingActive(),
+        ocrStreaming: this.ocrStreaming,
+        ocrStreamDone: this.ocrStreamDone,
+        activeOcrRequests: this.activeOcrRequests,
+        chunks: this.timeline.chunks.map((c) => ({
+          index: c.index,
+          text: c.text,
+          startChar: c.startChar,
+          endChar: c.endChar,
+          isCompleted: c.isCompleted ?? true
+        }))
+      }),
+      setRawText: (text: string) => {
+        const raw = this.must<HTMLTextAreaElement>("raw-text");
+        raw.value = text;
+        raw.dispatchEvent(new Event("input", { bubbles: true }));
+      },
+      dispatchEngine: (event: unknown) => {
+        this.dispatchPlaybackEvent(event as { type: string; [key: string]: unknown });
+      },
+      startPlayback: async () => {
+        await this.startOrResumePlayback();
+      },
+      setTypingState: (typing) => {
+        if (typeof typing.userTyping === "boolean") {
+          this.isUserTyping = typing.userTyping;
+        }
+        if (typeof typing.ocrStreaming === "boolean") {
+          this.ocrStreaming = typing.ocrStreaming;
+          if (!typing.ocrStreaming) {
+            this.ocrStreamDone = true;
+          }
+        }
+        if (typeof typing.activeOcrRequests === "number") {
+          this.activeOcrRequests = Math.max(0, Math.floor(typing.activeOcrRequests));
+        }
+        this.renderReadingPreview();
+      },
+      getPlaybackMetrics: () => ({
+        sessionStarts: this.playbackMetrics.sessionStarts,
+        playChunkRequests: this.playbackMetrics.playChunkRequests,
+        ttsStartsBySessionAndHash: { ...this.playbackMetrics.ttsStartsBySessionAndHash }
+      }),
+      clearPlaybackMetrics: () => {
+        this.playbackMetrics.sessionStarts = 0;
+        this.playbackMetrics.playChunkRequests = 0;
+        this.playbackMetrics.ttsStartsBySessionAndHash = {};
+      }
+    };
+  }
+
+  private getChunkRecords(): ChunkRecord[] {
+    return this.timeline.chunks as ChunkRecord[];
+  }
+
+  private getChunkById(chunkId: string | null | undefined): ChunkRecord | undefined {
+    if (!chunkId) return undefined;
+    return this.getChunkRecords().find((chunk) => chunk.id === chunkId);
+  }
+
+  private syncActiveChunkIndex(): void {
+    const chunks = this.getChunkRecords();
+    if (!chunks.length) {
+      this.activeChunkId = null;
+      this.activeChunkIndex = 0;
+      return;
+    }
+    const active = this.getChunkById(this.activeChunkId) ?? chunks.find((chunk) => chunk.finalized) ?? chunks[0];
+    this.activeChunkId = active?.id ?? null;
+    this.activeChunkIndex = active?.index ?? 0;
+  }
+
+  private buildChunkOptions(finalizeTail = false): { minWordsPerChunk: number; maxWordsPerChunk: number; wpmBase: number; finalizeTail?: boolean } {
+    return {
+      minWordsPerChunk: this.config.reading.minWordsPerChunk,
+      maxWordsPerChunk: this.config.reading.maxWordsPerChunk,
+      wpmBase: this.config.reading.wpmBase,
+      finalizeTail
+    };
+  }
+
+  private replaceTimelineWithChunks(chunks: ChunkRecord[], activeChunkId?: string): void {
+    this.timeline = toReadingTimeline(chunks);
+    this.activeChunkId = activeChunkId ?? this.activeChunkId;
+    this.syncActiveChunkIndex();
+  }
+
+  private reconcileText(nextText: string, options?: { finalizeTail?: boolean; source?: "user" | "llm" }): void {
+    const previousChunks = this.getChunkRecords();
+    const previousText = this.lastPlaybackText;
+    const nextState = previousChunks.length === 0
+      ? {
+          chunks: createChunkRecords(nextText, this.buildChunkOptions(options?.finalizeTail)),
+          activeChunkId: undefined,
+          dirtyChunkIds: [] as string[]
+        }
+      : reconcileChunks({
+          nextText,
+          previousChunks,
+          ...this.buildChunkOptions(options?.finalizeTail),
+          ...(this.activeChunkId ? { activeChunkId: this.activeChunkId } : {}),
+          ...(this.speakingChunkId ? { speakingChunkId: this.speakingChunkId } : {}),
+          ...(typeof this.speakingRevision === "number" ? { speakingRevision: this.speakingRevision } : {})
+        });
+
+    const nextChunks = nextState.chunks;
+    const speakingChunk = this.getChunkById(this.speakingChunkId);
+    const nextSpeakingChunk = nextChunks.find((chunk) => chunk.id === this.speakingChunkId);
+    const speakingInvalidated = Boolean(
+      speakingChunk &&
+      (!nextSpeakingChunk || nextSpeakingChunk.revision !== speakingChunk.revision || nextSpeakingChunk.status === "stale")
+    );
+
+    this.cleanupRemovedChunks(previousChunks, nextChunks);
+    this.cancelStaleInflight(previousChunks, nextChunks);
+    this.replaceTimelineWithChunks(nextChunks, nextState.activeChunkId);
+    this.lastPlaybackText = nextText;
+
+    if (speakingInvalidated) {
+      this.abortPlaybackAndSynthesis();
+      this.setStatus(options?.source === "llm" ? "Streaming updated the spoken chunk. Playback stopped." : "Edited spoken chunk. Playback stopped.");
+    }
+
+    this.renderReadingPreview();
+    this.maybeStartPlaybackFromStream();
+
+    if (previousText !== nextText && !speakingInvalidated && options?.source === "user") {
+      this.setStatus("Text updated.");
+    }
+  }
+
+  private cleanupRemovedChunks(previousChunks: ChunkRecord[], nextChunks: ChunkRecord[]): void {
+    const nextIds = new Set(nextChunks.map((chunk) => chunk.id));
+    for (const chunk of previousChunks) {
+      const nextChunk = nextChunks.find((candidate) => candidate.id === chunk.id);
+      if ((!nextChunk || nextChunk.revision !== chunk.revision) && chunk.audioUrl?.startsWith("blob:")) {
+        URL.revokeObjectURL(chunk.audioUrl);
+      }
+      if (!nextIds.has(chunk.id)) {
+        const controller = this.chunkAbortControllersById.get(chunk.id);
+        controller?.abort();
+        this.chunkAbortControllersById.delete(chunk.id);
+        this.chunkInFlightById.delete(chunk.id);
+      }
+    }
+  }
+
+  private cancelStaleInflight(previousChunks: ChunkRecord[], nextChunks: ChunkRecord[]): void {
+    for (const previousChunk of previousChunks) {
+      const nextChunk = nextChunks.find((candidate) => candidate.id === previousChunk.id);
+      if (nextChunk && nextChunk.revision !== previousChunk.revision) {
+        const controller = this.chunkAbortControllersById.get(previousChunk.id);
+        controller?.abort();
+        this.chunkAbortControllersById.delete(previousChunk.id);
+        this.chunkInFlightById.delete(previousChunk.id);
+      }
+    }
+  }
+
+  private dispatchPlaybackEvent(event: { type: string; [key: string]: unknown }): void {
+    const raw = this.must<HTMLTextAreaElement>("raw-text");
+    switch (event.type) {
+      case "STREAM_START":
+        raw.value = "";
+        this.lastPlaybackText = "";
+        this.activeChunkId = null;
+        this.replaceTimelineWithChunks([]);
+        this.ocrStreaming = true;
+        this.ocrStreamDone = false;
+        this.renderReadingPreview();
+        break;
+      case "OCR_DELTA":
+        if (typeof event.token === "string" && event.token.length > 0) {
+          raw.value = `${raw.value}${event.token}`;
+          this.reconcileText(this.getPlaybackText(), { source: "llm" });
+        }
+        break;
+      case "STREAM_DONE":
+        this.ocrStreaming = false;
+        this.ocrStreamDone = true;
+        this.reconcileText(this.getPlaybackText(), { finalizeTail: true, source: "llm" });
+        break;
+      case "TEXT_SYNC":
+        if (typeof event.text === "string") {
+          raw.value = event.text;
+          this.reconcileText(this.getPlaybackText(), { source: event.source === "llm" ? "llm" : "user" });
+        }
+        break;
+      case "RESET":
+        raw.value = "";
+        this.lastPlaybackText = "";
+        this.activeChunkId = null;
+        this.replaceTimelineWithChunks([]);
+        this.renderReadingPreview();
+        break;
+      default:
+        break;
+    }
   }
 
   private initializeLogging(): void {
@@ -489,6 +716,7 @@ export class WebApp {
       "llm-key",
       "llm-prompt",
       "llm-image-detail",
+      "llm-max-tokens",
       "rapid-url",
       "tts-url",
       "tts-key",
@@ -560,72 +788,14 @@ export class WebApp {
       void this.cancelCopyHotkeyRecording();
     });
 
-    this.must<HTMLTextAreaElement>("raw-text").addEventListener("input", () => {
-      const previousText = this.lastSynthText;
-      const nextText = this.getPlaybackText();
-      const editKind = classifyEffectiveTextEdit(previousText, nextText);
-      loggers.playback.info("Text edit detected", {
-        editKind,
-        previousLength: previousText.length,
-        nextLength: nextText.length,
-        activeChunkIndex: this.activeChunkIndex,
-        activeChunkEndChar: this.timeline.chunks[this.activeChunkIndex]?.endChar ?? null,
-        isPlaying: this.chunkPlaybackMode && !this.audio.paused
-      });
-      if (editKind === "no_effect") {
-        this.setStatus("Text formatting updated.");
-        return;
-      }
-
-      if (editKind === "append_only" || editKind === "tail_subtract_only") {
-        const previousTrimmed = stripNonEffectiveTrailing(previousText);
-        const nextTrimmed = stripNonEffectiveTrailing(nextText);
-        const preservedChars = editKind === "append_only" ? previousTrimmed.length : nextTrimmed.length;
-        const activeEndChar = this.timeline.chunks[this.activeChunkIndex]?.endChar ?? previousText.length;
-        const isPlayingNow = this.chunkPlaybackMode && !this.audio.paused;
-        if (editKind === "tail_subtract_only" && shouldHardResetTailSubtract(activeEndChar, preservedChars)) {
-          loggers.playback.info("Tail subtraction crossed active chunk boundary; forcing hard reset", {
-            activeEndChar,
-            preservedChars,
-            activeChunkIndex: this.activeChunkIndex
-          });
-          this.updateTimelineFromRawText();
-          this.resetPlaybackForTextChange();
-          this.setStatus("Text removed from current chunk. Playback stopped.");
-          return;
-        }
-
-        const previousTimeline = this.timeline.chunks.map((chunk) => ({ ...chunk }));
-        const previousHashes = new Map(this.chunkHashByIndex);
-        if (isPlayingNow) {
-          this.pendingNextChunkFromChar = activeEndChar;
-        }
-        this.updateTimelineFromRawText(activeEndChar, isPlayingNow);
-        this.reconcileCacheAfterSafeTextEdit(previousTimeline, previousHashes, preservedChars, isPlayingNow);
-        loggers.playback.info("Safe text edit applied", {
-          editKind,
-          preservedChars,
-          remappedActiveChunkIndex: this.activeChunkIndex,
-          remappedActiveChunkRange: this.timeline.chunks[this.activeChunkIndex]
-            ? {
-                startChar: this.timeline.chunks[this.activeChunkIndex]?.startChar,
-                endChar: this.timeline.chunks[this.activeChunkIndex]?.endChar
-              }
-            : null,
-          chunkCount: this.timeline.chunks.length
-        });
-        if (this.chunkPlaybackMode && !this.audio.paused) {
-          this.setStatus(editKind === "append_only" ? "Text appended. Continuing playback..." : "Tail removed. Continuing playback...");
-        } else {
-          this.setStatus(editKind === "append_only" ? "Text appended." : "Tail removed.");
-        }
-        return;
-      }
-
-      this.updateTimelineFromRawText();
-      this.resetPlaybackForTextChange();
-      this.setStatus("Text changed. Press play.");
+    const rawTextEl = this.must<HTMLTextAreaElement>("raw-text");
+    rawTextEl.addEventListener("input", () => {
+      this.markUserTyping();
+      this.reconcileText(this.getPlaybackText(), { source: "user" });
     });
+    rawTextEl.addEventListener("click", () => this.handleUserCaretMovement());
+    rawTextEl.addEventListener("keyup", () => this.handleUserCaretMovement());
+    rawTextEl.addEventListener("select", () => this.handleUserCaretMovement());
   }
 
   private syncConfigFromInputs(): void {
@@ -633,6 +803,8 @@ export class WebApp {
     this.config.llm.apiKey = this.must<HTMLInputElement>("llm-key").value;
     this.config.llm.promptTemplate = this.must<HTMLInputElement>("llm-prompt").value;
     this.config.llm.imageDetail = this.must<HTMLSelectElement>("llm-image-detail").value as AppConfig["llm"]["imageDetail"];
+    const maxTokens = Number(this.must<HTMLInputElement>("llm-max-tokens").value);
+    this.config.llm.maxTokens = Number.isFinite(maxTokens) && maxTokens > 0 ? Math.floor(maxTokens) : 4096;
     this.config.textProcessing.rapidEnabled = this.must<HTMLInputElement>("rapid-enabled").checked;
     this.config.textProcessing.rapidBaseUrl = this.must<HTMLInputElement>("rapid-url").value;
     this.config.tts.baseUrl = this.must<HTMLInputElement>("tts-url").value;
@@ -682,6 +854,7 @@ export class WebApp {
     this.must<HTMLInputElement>("llm-key").value = this.config.llm.apiKey;
     this.must<HTMLInputElement>("llm-prompt").value = this.config.llm.promptTemplate;
     this.must<HTMLSelectElement>("llm-image-detail").value = this.config.llm.imageDetail;
+    this.must<HTMLInputElement>("llm-max-tokens").value = String(this.config.llm.maxTokens);
     this.must<HTMLInputElement>("rapid-enabled").checked = this.config.textProcessing.rapidEnabled;
     this.must<HTMLInputElement>("rapid-url").value = this.config.textProcessing.rapidBaseUrl;
     this.must<HTMLInputElement>("tts-url").value = this.config.tts.baseUrl;
@@ -841,30 +1014,6 @@ export class WebApp {
     }
   }
 
-  private initializeChunkStates(): void {
-    this.chunkHashByIndex.clear();
-    this.chunkStateByIndex.clear();
-    this.chunkErrorByIndex.clear();
-    for (let i = 0; i < this.timeline.chunks.length; i += 1) {
-      const hash = this.chunkHash(this.timeline.chunks[i]?.text ?? "");
-      this.chunkHashByIndex.set(i, hash);
-      this.chunkStateByIndex.set(i, "not_started");
-    }
-    this.refreshChunkDiagnostics();
-  }
-
-  private setChunkState(index: number, state: ChunkSynthesisState, errorMessage?: string): void {
-    if (!this.timeline.chunks[index]) return;
-    this.chunkStateByIndex.set(index, state);
-    if (errorMessage) {
-      this.chunkErrorByIndex.set(index, errorMessage);
-    } else if (state !== "failed") {
-      this.chunkErrorByIndex.delete(index);
-    }
-    this.renderReadingPreview();
-    this.refreshChunkDiagnostics();
-  }
-
   private refreshChunkDiagnostics(): void {
     // Diagnostics were intentionally simplified out of the playback flow.
   }
@@ -883,7 +1032,7 @@ export class WebApp {
   }
 
   private hasActiveWork(): boolean {
-    return this.runInProgress || this.chunkPlaybackMode || !this.audio.paused || this.chunkInFlightByHash.size > 0 || this.modalAbortController !== null;
+    return this.runInProgress || this.chunkPlaybackMode || !this.audio.paused || this.chunkInFlightById.size > 0 || this.modalAbortController !== null || this.ocrStreaming;
   }
 
   private isAbortError(error: unknown): boolean {
@@ -920,10 +1069,13 @@ export class WebApp {
 
   private async abortAllWork(reason: "user" | "superseded"): Promise<void> {
     this.requestPreemptor.preemptAll();
-    this.activeRunAbortController?.abort();
-    this.modalAbortController?.abort();
-    this.modalAbortController = null;
+    this.cancelVisionControllers();
     this.preprocessModal?.abortRunningWork();
+    this.setRawTextLock(false);
+    this.ocrStreaming = false;
+    this.ocrStreamDone = false;
+    this.activeOcrRequests = 0;
+    this.ocrStreamSession += 1;
     this.activeRunId += 1;
     this.runInProgress = false;
     this.abortPlaybackAndSynthesis();
@@ -937,14 +1089,24 @@ export class WebApp {
     this.requestPreemptor.preemptLane("ocr");
     this.requestPreemptor.preemptLane("rapid_main");
     this.requestPreemptor.preemptLane("rapid_modal");
-    this.activeRunAbortController?.abort();
-    this.modalAbortController?.abort();
-    this.modalAbortController = null;
+    this.cancelVisionControllers();
     this.preprocessModal?.abortRunningWork();
+    this.setRawTextLock(false);
+    this.ocrStreaming = false;
+    this.ocrStreamDone = false;
+    this.activeOcrRequests = 0;
+    this.ocrStreamSession += 1;
     this.activeRunId += 1;
     this.runInProgress = false;
     loggers.pipeline.info("Vision work preempted", { reason });
     this.updateBreakButtonState();
+  }
+
+  private cancelVisionControllers(): void {
+    this.activeRunAbortController?.abort();
+    this.activeRunAbortController = null;
+    this.modalAbortController?.abort();
+    this.modalAbortController = null;
   }
 
   private bindCapture(): void {
@@ -972,6 +1134,24 @@ export class WebApp {
       await this.abortVisionWork("new_image");
       const dataUrl = await this.fileToDataUrl(file);
       await this.runPipeline(dataUrl);
+    });
+
+    this.must<HTMLButtonElement>("btn-extract").addEventListener("click", async () => {
+      if (!this.lastOriginalImageDataUrl) {
+        this.setStatus("Load an image first.");
+        return;
+      }
+      try {
+        await this.abortVisionWork("superseded");
+        const ocrInput = await this.buildOcrInput(this.lastOriginalImageDataUrl);
+        this.currentOcrImageDataUrl = ocrInput.imageDataUrl;
+        this.currentOcrRegions = ocrInput.regions;
+        this.setPreviewImage(ocrInput.imageDataUrl);
+        this.renderMainPreviewOverlay();
+        await this.runPreparedOcr();
+      } catch (error) {
+        this.setStatus(`Extract failed: ${String(error)}`);
+      }
     });
 
     document.addEventListener("paste", async (event) => {
@@ -1050,15 +1230,6 @@ export class WebApp {
         this.renderConfig();
       },
       getCurrentImageDataUrl: () => this.lastOriginalImageDataUrl,
-      onApply: (result) => {
-        void this.abortVisionWork("superseded");
-        this.currentOcrImageDataUrl = result.processedImageDataUrl;
-        this.currentOcrRegions = result.finalBoxes;
-        this.setPreviewImage(result.processedImageDataUrl);
-        this.recomputeMainPreviewFromCurrentState().catch(() => {});
-        this.setStatus(`Preprocessing applied (${result.finalBoxes.length} boxes).`);
-        void this.runPreparedOcr();
-      },
       setStatus: (text) => this.setStatus(text),
       registerAbortController: (controller) => {
         this.modalAbortController = controller;
@@ -1066,8 +1237,7 @@ export class WebApp {
       },
       preemptLane: () => this.requestPreemptor.preemptLane("rapid_modal"),
       beginLane: (parentSignal?: AbortSignal) => this.requestPreemptor.beginLane("rapid_modal", parentSignal),
-      isLaneCurrent: (token: number) => this.requestPreemptor.isCurrent("rapid_modal", token),
-      isCancelled: () => this.activeRunAbortController?.signal.aborted ?? false
+      isLaneCurrent: (token: number) => this.requestPreemptor.isCurrent("rapid_modal", token)
     });
 
     this.must<HTMLDivElement>("preview-viewer").addEventListener("click", async () => {
@@ -1369,15 +1539,16 @@ export class WebApp {
     this.audio.addEventListener("ended", () => {
       loggers.playback.info("Audio ended", { chunkPlaybackMode: this.chunkPlaybackMode, chunkIndex: this.activeChunkIndex });
       if (!this.chunkPlaybackMode) return;
-      this.setChunkState(this.activeChunkIndex, "ready");
-      const remapFromChar = this.pendingNextChunkFromChar;
-      const nextIndex = remapFromChar !== null
-        ? findChunkIndexAtOrAfterChar(this.timeline.chunks, remapFromChar)
-        : this.activeChunkIndex + 1;
-      this.pendingNextChunkFromChar = null;
+      const current = this.getChunkById(this.speakingChunkId);
+      if (current && current.status === "playing") {
+        current.status = current.audioUrl ? "ready" : "dirty";
+      }
+      this.speakingChunkId = null;
+      this.speakingRevision = null;
+      const nextChunk = this.getChunkRecords().slice(this.activeChunkIndex + 1).find((chunk) => chunk.finalized);
+      const nextIndex = nextChunk?.index ?? this.timeline.chunks.length;
       loggers.playback.info("Selecting next chunk after ended", {
         previousChunkIndex: this.activeChunkIndex,
-        remapFromChar,
         nextIndex,
         totalChunks: this.timeline.chunks.length
       });
@@ -1416,14 +1587,22 @@ export class WebApp {
       this.currentOcrRegions = ocrInput.regions;
       this.setPreviewImage(ocrInput.imageDataUrl);
       this.renderMainPreviewOverlay();
-      const result = await this.pipeline.run(ocrInput.imageDataUrl, this.config, { regions: ocrInput.regions, signal });
+      const streamingEnabled = this.config.llm.ocrStreamingEnabled;
+      let result: { text: string };
+      if (streamingEnabled) {
+        result = await this.runStreamingOcr(ocrInput.imageDataUrl, ocrInput.regions, signal);
+      } else {
+        result = await this.pipeline.run(ocrInput.imageDataUrl, this.config, { regions: ocrInput.regions, signal });
+      }
       this.throwIfStale(runId);
       done();
       loggers.pipeline.info("Pipeline completed", { textLength: result.text.length });
-      this.must<HTMLTextAreaElement>("raw-text").value = result.text;
-      this.updateTimelineFromRawText();
-      this.resetPlaybackForTextChange();
-      await this.startOrResumePlayback();
+      if (!streamingEnabled) {
+        this.must<HTMLTextAreaElement>("raw-text").value = result.text;
+        this.updateTimelineFromRawText();
+        this.resetPlaybackForTextChange();
+        await this.startOrResumePlayback();
+      }
     } catch (error) {
       if (this.isAbortError(error)) {
         loggers.pipeline.info("Pipeline cancelled", { runId });
@@ -1436,18 +1615,166 @@ export class WebApp {
     }
   }
 
+  private async runStreamingOcr(
+    imageDataUrl: string,
+    regions: DrawRect[],
+    signal: AbortSignal
+  ): Promise<{ text: string }> {
+    const streamSession = ++this.ocrStreamSession;
+    this.ocrStreaming = true;
+    this.ocrStreamDone = false;
+    this.activeOcrRequests = 0;
+    this.setRawTextLock(true);
+    this.must<HTMLTextAreaElement>("raw-text").value = "";
+    this.lastPlaybackText = "";
+    this.replaceTimelineWithChunks([]);
+    this.renderReadingPreview();
+    this.setStatus("Streaming OCR text...");
+
+    let streamText = "";
+    const applyStreamToken = (token: string): void => {
+      if (streamSession !== this.ocrStreamSession || signal.aborted) return;
+      streamText += token;
+      this.must<HTMLTextAreaElement>("raw-text").value = streamText;
+      this.reconcileText(this.getPlaybackText(), { source: "llm" });
+    };
+
+    try {
+      const result = await this.pipeline.streamOcrText(imageDataUrl, this.config, {
+        regions: regions.map((r) => ({ id: r.id, nx: r.nx, ny: r.ny, nw: r.nw, nh: r.nh })),
+        signal,
+        onToken: applyStreamToken,
+        onOcrRequestStart: () => {
+          if (streamSession !== this.ocrStreamSession) return;
+          this.activeOcrRequests += 1;
+          loggers.api.info("OCR stream request started", { active: this.activeOcrRequests });
+        },
+        onOcrRequestEnd: () => {
+          if (streamSession !== this.ocrStreamSession) return;
+          this.activeOcrRequests = Math.max(0, this.activeOcrRequests - 1);
+          loggers.api.info("OCR stream request ended", { active: this.activeOcrRequests });
+          this.maybeStartPlaybackFromStream();
+        }
+      });
+      if (streamSession !== this.ocrStreamSession || signal.aborted) {
+        throw new Error("Cancelled");
+      }
+      this.ocrStreamDone = true;
+      this.ocrStreaming = false;
+      this.setRawTextLock(false);
+      this.must<HTMLTextAreaElement>("raw-text").value = result.text;
+      this.reconcileText(this.getPlaybackText(), { source: "llm", finalizeTail: true });
+      void this.startOrResumePlayback();
+      return { text: result.text };
+    } catch (error) {
+      this.ocrStreaming = false;
+      this.setRawTextLock(false);
+      this.activeOcrRequests = 0;
+      if (this.isAbortError(error)) {
+        throw error;
+      }
+      this.setStatus(`OCR stream error (partial kept): ${String(error)}`);
+      return { text: this.getPlaybackText() };
+    } finally {
+      if (streamSession === this.ocrStreamSession) {
+        this.ocrStreaming = false;
+        this.ocrStreamDone = true;
+        this.activeOcrRequests = 0;
+        this.setRawTextLock(false);
+      }
+    }
+  }
+
+  private handleUserCaretMovement(): void {
+    this.renderPlayState();
+  }
+
+  private maybeStartPlaybackFromStream(): void {
+    this.logStreamingPlaybackGate("maybe_start");
+    if (this.programmaticPauseActive) return;
+    if (this.playbackStartInFlight) return;
+    if (this.chunkPlaybackMode || !this.audio.paused) return;
+    if (this.maxPlayableChunkIndex() < 0) return;
+    this.playbackStartInFlight = true;
+    void this.startOrResumePlayback().catch((error) => {
+      this.setStatus(`Playback failed: ${String(error)}`);
+    }).finally(() => {
+      this.playbackStartInFlight = false;
+    });
+  }
+
+  private maxPlayableChunkIndex(): number {
+    if (!this.timeline.chunks.length) return -1;
+    const chunks = this.getChunkRecords();
+    for (let i = chunks.length - 1; i >= 0; i -= 1) {
+      if (chunks[i]?.finalized) return i;
+    }
+    return -1;
+  }
+
+  private logStreamingPlaybackGate(event: string): void {
+    const maxPlayable = this.maxPlayableChunkIndex();
+    const activeChunk = this.timeline.chunks[this.activeChunkIndex] ?? null;
+    loggers.playback.debug("Streaming playback gate", {
+      event,
+      activeChunkIndex: this.activeChunkIndex,
+      activeChunkRange: activeChunk ? { startChar: activeChunk.startChar, endChar: activeChunk.endChar } : null,
+      chunkCount: this.timeline.chunks.length,
+      maxPlayable,
+      chunkPlaybackMode: this.chunkPlaybackMode,
+      audioPaused: this.audio.paused,
+      activeOcrRequests: this.activeOcrRequests,
+      ocrStreaming: this.ocrStreaming,
+      ocrStreamDone: this.ocrStreamDone,
+      isTyping: this.isTypingActive(),
+      isUserTyping: this.isUserTyping,
+      programmaticPauseActive: this.programmaticPauseActive
+    });
+  }
+
+  private isTypingActive(): boolean {
+    const streamTyping = this.ocrStreaming || this.activeOcrRequests > 0;
+    return this.isUserTyping || streamTyping;
+  }
+
+  private markUserTyping(): void {
+    this.isUserTyping = true;
+    this.userTypingLastAt = Date.now();
+    if (this.userTypingIdleTimer) {
+      clearTimeout(this.userTypingIdleTimer);
+      this.userTypingIdleTimer = null;
+    }
+    const idleMs = Math.max(100, this.config.reading.typingIdleMs);
+    this.userTypingIdleTimer = setTimeout(() => {
+      const sinceLast = Date.now() - this.userTypingLastAt;
+      if (sinceLast < idleMs) return;
+      this.isUserTyping = false;
+      this.renderReadingPreview();
+      this.maybeStartPlaybackFromStream();
+    }, idleMs);
+  }
+
+  private setRawTextLock(locked: boolean): void {
+    this.must<HTMLTextAreaElement>("raw-text").readOnly = locked;
+  }
+
   private async runPreparedOcr(): Promise<void> {
     if (!this.currentOcrImageDataUrl) return;
     const { runId, signal } = this.startRun();
     const done = loggers.pipeline.time("pipeline.run.prepared");
     try {
-      const result = await this.pipeline.run(this.currentOcrImageDataUrl, this.config, { regions: this.currentOcrRegions, signal });
+      const streamingEnabled = this.config.llm.ocrStreamingEnabled;
+      const result = streamingEnabled
+        ? await this.runStreamingOcr(this.currentOcrImageDataUrl, this.currentOcrRegions, signal)
+        : await this.pipeline.run(this.currentOcrImageDataUrl, this.config, { regions: this.currentOcrRegions, signal });
       this.throwIfStale(runId);
       done();
-      this.must<HTMLTextAreaElement>("raw-text").value = result.text;
-      this.updateTimelineFromRawText();
-      this.resetPlaybackForTextChange();
-      await this.startOrResumePlayback();
+      if (!streamingEnabled) {
+        this.must<HTMLTextAreaElement>("raw-text").value = result.text;
+        this.updateTimelineFromRawText();
+        this.resetPlaybackForTextChange();
+        await this.startOrResumePlayback();
+      }
     } catch (error) {
       if (this.isAbortError(error)) {
         loggers.pipeline.info("Prepared OCR cancelled", { runId });
@@ -1554,92 +1881,13 @@ export class WebApp {
     return { width: image.naturalWidth, height: image.naturalHeight };
   }
 
-  private updateTimelineFromRawText(preserveFromChar?: number, keepActiveIndexWhenPlaying = false): void {
-    const text = this.getPlaybackText();
-    const previousActiveIndex = this.activeChunkIndex;
-    const previousChunkCount = this.timeline.chunks.length;
-    this.timeline = buildReadingTimeline(
-      text,
-      this.config.reading.minWordsPerChunk,
-      this.config.reading.maxWordsPerChunk,
-      this.config.reading.wpmBase
-    );
-    if (keepActiveIndexWhenPlaying && this.chunkPlaybackMode && !this.audio.paused) {
-      this.activeChunkIndex = previousActiveIndex;
-    } else if (typeof preserveFromChar === "number") {
-      this.activeChunkIndex = findChunkIndexAtOrAfterChar(this.timeline.chunks, preserveFromChar);
-    } else {
-      this.activeChunkIndex = 0;
-    }
-    loggers.playback.info("Timeline rebuilt", {
-      preserveFromChar: typeof preserveFromChar === "number" ? preserveFromChar : null,
-      previousActiveIndex,
-      nextActiveIndex: this.activeChunkIndex,
-      previousChunkCount,
-      nextChunkCount: this.timeline.chunks.length
-    });
-    this.initializeChunkStates();
-    if (typeof preserveFromChar === "number" && previousActiveIndex < this.timeline.chunks.length && this.chunkPlaybackMode && !this.audio.paused) {
-      this.setChunkState(this.activeChunkIndex, "playing");
-    }
-    this.lastSynthText = text;
-    this.renderReadingPreview();
+  private updateTimelineFromRawText(): void {
+    this.reconcileText(this.getPlaybackText(), { source: "user", finalizeTail: !this.ocrStreaming });
   }
 
   private getPlaybackText(): string {
     const raw = this.must<HTMLTextAreaElement>("raw-text").value;
     return this.config.reading.cleanTextBeforeTts ? cleanTextForTts(raw) : raw;
-  }
-
-  private reconcileCacheAfterSafeTextEdit(
-    previousTimeline: Array<{ index: number; endChar: number }>,
-    previousHashes: Map<number, string>,
-    preservedChars: number,
-    isPlaying: boolean
-  ): void {
-    const allowedOldHashes = new Set<string>();
-    previousTimeline.forEach((chunk) => {
-      if (chunk.endChar <= preservedChars) {
-        const oldHash = previousHashes.get(chunk.index);
-        if (oldHash) allowedOldHashes.add(oldHash);
-      }
-    });
-    const previousCacheCount = this.audioCacheByHash.size;
-    const previousInflightCount = this.chunkInFlightByHash.size;
-
-    for (const [hash, entry] of this.audioCacheByHash.entries()) {
-      if (allowedOldHashes.has(hash)) continue;
-      if (entry.url.startsWith("blob:")) {
-        URL.revokeObjectURL(entry.url);
-      }
-      this.audioCacheByHash.delete(hash);
-    }
-
-    for (const [hash, controller] of this.chunkAbortControllersByHash.entries()) {
-      if (allowedOldHashes.has(hash)) continue;
-      controller.abort();
-      this.chunkAbortControllersByHash.delete(hash);
-      this.chunkInFlightByHash.delete(hash);
-    }
-
-    this.timeline.chunks.forEach((chunk) => {
-      const hash = this.chunkHashByIndex.get(chunk.index);
-      if (!hash) return;
-      if (chunk.index === this.activeChunkIndex && isPlaying) {
-        this.setChunkState(chunk.index, "playing");
-        return;
-      }
-      this.setChunkState(chunk.index, this.audioCacheByHash.has(hash) ? "ready" : "not_started");
-    });
-    loggers.playback.info("Cache reconciled after safe text edit", {
-      preservedChars,
-      allowedHashCount: allowedOldHashes.size,
-      previousCacheCount,
-      nextCacheCount: this.audioCacheByHash.size,
-      previousInflightCount,
-      nextInflightCount: this.chunkInFlightByHash.size,
-      isPlaying
-    });
   }
 
   private async startOrResumePlayback(): Promise<void> {
@@ -1654,27 +1902,51 @@ export class WebApp {
       loggers.playback.info("Playback resumed");
       return;
     }
-
-    if (this.lastSynthText !== text) {
-      this.updateTimelineFromRawText();
-      this.resetPlaybackForTextChange();
+    if (this.lastPlaybackText !== text) {
+      this.reconcileText(text, { source: "user", finalizeTail: !this.ocrStreaming });
     }
 
     if (this.timeline.chunks.length === 0) {
       this.setStatus("Nothing to read.");
       return;
     }
+    if (this.programmaticPauseActive) {
+      this.setStatus(this.programmaticPauseReason || "Paused by cursor gate.");
+      this.renderPlayState();
+      return;
+    }
 
     if (!this.chunkPlaybackMode) {
       this.chunkPlaybackMode = true;
       this.chunkPlaybackSession += 1;
+      this.playbackMetrics.sessionStarts += 1;
       loggers.playback.info("Playback started", { session: this.chunkPlaybackSession, chunks: this.timeline.chunks.length });
     }
-    await this.playChunkAtIndex(this.activeChunkIndex, this.chunkPlaybackSession);
+    this.logStreamingPlaybackGate("start_or_resume");
+    const active = this.getChunkById(this.activeChunkId) ?? this.getChunkRecords().find((chunk) => chunk.finalized);
+    if (!active) return;
+    this.activeChunkId = active.id;
+    this.activeChunkIndex = active.index;
+    await this.playChunkAtIndex(active.index, this.chunkPlaybackSession);
   }
 
   private async playChunkAtIndex(index: number, session: number): Promise<void> {
-    const chunk = this.timeline.chunks[index];
+    this.logStreamingPlaybackGate("play_chunk_request");
+    if (!this.isChunkPlayable(index)) {
+      this.chunkPlaybackMode = false;
+      this.renderPlayState();
+      this.setStatus("Waiting for typing to settle before this chunk is playable...");
+      return;
+    }
+    if (index > this.maxPlayableChunkIndex()) {
+      this.chunkPlaybackMode = false;
+      this.renderPlayState();
+      if (this.ocrStreaming && !this.ocrStreamDone) {
+        this.setStatus("Waiting for OCR stream to finalize next chunk...");
+      }
+      return;
+    }
+    const chunk = this.getChunkRecords()[index];
     if (!chunk) return;
     if (session !== this.chunkPlaybackSession) return;
     loggers.playback.info("Play chunk requested", {
@@ -1684,62 +1956,76 @@ export class WebApp {
       chunkRange: { startChar: chunk.startChar, endChar: chunk.endChar },
       chunkTextPreview: chunk.text.slice(0, 80)
     });
+    this.playbackMetrics.playChunkRequests += 1;
 
+    this.activeChunkId = chunk.id;
     this.activeChunkIndex = chunk.index;
     this.renderReadingPreview();
-    this.prefetchFromIndex(chunk.index, session);
+    this.prefetchFromIndex(chunk.id, session);
     this.setStatus(`Buffering chunk ${chunk.index + 1}/${this.timeline.chunks.length}...`);
 
     try {
-      const audioUrl = await this.getChunkAudioUrl(chunk.index, session);
+      const audioUrl = await this.getChunkAudioUrl(chunk.id, session);
       if (session !== this.chunkPlaybackSession) return;
       this.audio.src = audioUrl;
       this.audio.currentTime = 0;
-      this.setChunkState(chunk.index, "playing");
+      chunk.status = "playing";
+      this.speakingChunkId = chunk.id;
+      this.speakingRevision = chunk.revision;
+      this.renderReadingPreview();
       await this.audio.play();
       this.setStatus(`Playing chunk ${chunk.index + 1}/${this.timeline.chunks.length}`);
-      this.prefetchFromIndex(chunk.index, session);
+      this.prefetchFromIndex(chunk.id, session);
     } catch (error) {
       if (session !== this.chunkPlaybackSession) return;
-      this.setChunkState(chunk.index, "failed", String(error));
+      chunk.status = "failed";
       this.chunkPlaybackMode = false;
+      this.speakingChunkId = null;
+      this.speakingRevision = null;
+      this.renderReadingPreview();
       this.renderPlayState();
       this.setStatus(`Stopped: failed to synthesize chunk ${chunk.index + 1}/${this.timeline.chunks.length}. ${String(error)}`);
     }
   }
 
-  private async getChunkAudioUrl(index: number, session: number): Promise<string> {
-    const hash = this.chunkHashByIndex.get(index);
-    if (!hash) throw new Error("Invalid chunk hash");
-    const cacheEntry = this.audioCacheByHash.get(hash);
-    if (cacheEntry?.url) {
-      return cacheEntry.url;
+  private async getChunkAudioUrl(chunkId: string, session: number): Promise<string> {
+    const chunk = this.getChunkById(chunkId);
+    if (!chunk) throw new Error("Invalid chunk id");
+    if (chunk.audioUrl) {
+      return chunk.audioUrl;
     }
-    const inflight = this.chunkInFlightByHash.get(hash);
+    const inflight = this.chunkInFlightById.get(chunkId);
     if (inflight) return inflight;
-    const chunk = this.timeline.chunks[index];
-    if (!chunk) throw new Error("Invalid chunk index");
-    this.setChunkState(index, "synthesizing");
+    const metricKey = `${session}:${chunkId}:r${chunk.revision}`;
+    this.playbackMetrics.ttsStartsBySessionAndHash[metricKey] =
+      (this.playbackMetrics.ttsStartsBySessionAndHash[metricKey] ?? 0) + 1;
+    chunk.status = "fetching";
+    this.renderReadingPreview();
     const controller = new AbortController();
-    this.chunkAbortControllersByHash.set(hash, controller);
-    const requestPromise = this.synthesizeChunk(index, chunk.text, session, controller.signal)
+    this.chunkAbortControllersById.set(chunkId, controller);
+    const revision = chunk.revision;
+    const requestPromise = this.synthesizeChunk(chunk.index, chunk.text, session, controller.signal)
       .then((audioBlob) => {
         if (session !== this.chunkPlaybackSession) {
           throw new Error("Cancelled");
         }
         const url = URL.createObjectURL(audioBlob);
-        this.audioCacheByHash.set(hash, {
-          url
-        });
-        this.updateStatesForHash(hash, "ready");
+        const current = this.getChunkById(chunkId);
+        if (!current || current.revision !== revision) {
+          URL.revokeObjectURL(url);
+          throw new Error("Cancelled");
+        }
+        current.audioUrl = url;
+        current.status = "ready";
+        this.renderReadingPreview();
         return url;
       })
       .finally(() => {
-        this.chunkInFlightByHash.delete(hash);
-        this.chunkAbortControllersByHash.delete(hash);
+        this.chunkInFlightById.delete(chunkId);
+        this.chunkAbortControllersById.delete(chunkId);
         this.refreshChunkDiagnostics();
       });
-    this.chunkInFlightByHash.set(hash, requestPromise);
+    this.chunkInFlightById.set(chunkId, requestPromise);
     this.refreshChunkDiagnostics();
     return requestPromise;
   }
@@ -1747,39 +2033,29 @@ export class WebApp {
   private abortPlaybackAndSynthesis(): void {
     this.chunkPlaybackSession += 1;
     this.chunkPlaybackMode = false;
-    this.pendingNextChunkFromChar = null;
+    this.speakingChunkId = null;
+    this.speakingRevision = null;
     this.audio.pause();
     this.audio.src = "";
-    this.chunkAbortControllersByHash.forEach((controller) => controller.abort());
-    this.chunkAbortControllersByHash.clear();
-    this.chunkInFlightByHash.clear();
+    this.chunkAbortControllersById.forEach((controller) => controller.abort());
+    this.chunkAbortControllersById.clear();
+    this.chunkInFlightById.clear();
     this.resetChunkVisualStateAfterAbort();
     this.renderPlayState();
     this.updateBreakButtonState();
   }
 
   private resetChunkVisualStateAfterAbort(): void {
-    this.activeChunkIndex = 0;
-    for (let i = 0; i < this.timeline.chunks.length; i += 1) {
-      const hash = this.chunkHashByIndex.get(i);
-      const hasCachedAudio = Boolean(hash && this.audioCacheByHash.get(hash)?.url);
-      this.chunkStateByIndex.set(i, hasCachedAudio ? "ready" : "not_started");
-      this.chunkErrorByIndex.delete(i);
+    for (const chunk of this.getChunkRecords()) {
+      chunk.status = chunk.audioUrl ? "ready" : "dirty";
     }
+    this.syncActiveChunkIndex();
     this.renderReadingPreview();
     this.refreshChunkDiagnostics();
   }
 
   private resetPlaybackForTextChange(): void {
     this.abortPlaybackAndSynthesis();
-    // Hard text reset should always restart chunk navigation from the beginning.
-    this.activeChunkIndex = 0;
-    this.audioCacheByHash.forEach((entry) => {
-      if (entry.url && entry.url.startsWith("blob:")) {
-        URL.revokeObjectURL(entry.url);
-      }
-    });
-    this.audioCacheByHash.clear();
     this.renderReadingPreview();
     this.refreshChunkDiagnostics();
   }
@@ -1788,22 +2064,36 @@ export class WebApp {
     const preview = this.must<HTMLDivElement>("reading-preview");
     preview.innerHTML = "";
 
-    this.timeline.chunks.forEach((chunk) => {
+    this.getChunkRecords().forEach((chunk) => {
       const span = document.createElement("span");
       span.textContent = chunk.text;
-      const state = this.chunkStateByIndex.get(chunk.index) ?? "not_started";
+      const state = chunk.status === "dirty" ? "not_started" : chunk.status;
       span.classList.add(`chunk-${state}`);
+      const isDraft = !chunk.finalized;
+      if (isDraft) {
+        span.classList.add("chunk-draft");
+      }
       if (state === "ready") {
         span.title = "Synthesized and ready";
       }
       if (state === "failed") {
-        span.title = this.chunkErrorByIndex.get(chunk.index) ?? "Synthesis failed";
+        span.title = "Synthesis failed";
+      }
+      const playable = this.isChunkPlayable(chunk.index);
+      if (!playable) {
+        span.classList.add("chunk-unplayable");
+        if (!span.title) {
+          span.title = "Waiting for typing to settle";
+        }
       }
       const shouldHighlightActive = this.chunkPlaybackMode || !this.audio.paused;
-      if (shouldHighlightActive && chunk.index === this.activeChunkIndex) {
+      if (shouldHighlightActive && chunk.id === this.activeChunkId) {
         span.classList.add("active-chunk");
       }
-      span.addEventListener("click", () => this.seekChunk(chunk.index));
+      span.addEventListener("click", () => {
+        if (!this.isChunkPlayable(chunk.index)) return;
+        this.seekChunk(chunk.index);
+      });
       preview.appendChild(span);
       preview.appendChild(document.createTextNode(" "));
     });
@@ -1815,27 +2105,36 @@ export class WebApp {
   }
 
   private seekChunk(index: number): void {
-    const chunk = this.timeline.chunks[index];
+    const chunk = this.getChunkRecords()[index];
     if (!chunk) return;
+    if (!this.isChunkPlayable(index)) {
+      this.setStatus("Chunk is still drafting while typing is active.");
+      return;
+    }
     this.abortPlaybackAndSynthesis();
+    this.activeChunkId = chunk.id;
     this.activeChunkIndex = chunk.index;
     this.renderReadingPreview();
     this.chunkPlaybackMode = true;
     void this.playChunkAtIndex(chunk.index, this.chunkPlaybackSession);
   }
 
-  private prefetchFromIndex(start: number, session: number): void {
-    if (session !== this.chunkPlaybackSession) return;
-    const end = Math.min(this.timeline.chunks.length - 1, start + 2);
+  private isChunkPlayable(index: number): boolean {
+    const chunk = this.getChunkRecords()[index];
+    if (!chunk) return false;
+    if (!this.isTypingActive()) return true;
+    return chunk.finalized;
+  }
 
-    for (let idx = Math.max(0, start); idx <= end; idx += 1) {
-      const hash = this.chunkHashByIndex.get(idx);
-      if (!hash) continue;
-      const cacheEntry = this.audioCacheByHash.get(hash);
-      if ((cacheEntry?.url ?? false) || this.chunkInFlightByHash.has(hash)) {
+  private prefetchFromIndex(activeChunkId: string, session: number): void {
+    if (session !== this.chunkPlaybackSession) return;
+    const targets = getPrefetchTargets(this.getChunkRecords(), activeChunkId, Math.max(1, this.config.reading.streamWindowSize));
+    for (const chunk of targets) {
+      if (!chunk.finalized || chunk.audioUrl || this.chunkInFlightById.has(chunk.id) || chunk.status === "playing") {
         continue;
       }
-      void this.getChunkAudioUrl(idx, session).catch(() => {
+      chunk.status = "queued";
+      void this.getChunkAudioUrl(chunk.id, session).catch(() => {
         // Best effort prefetch.
       });
     }
@@ -1872,28 +2171,13 @@ export class WebApp {
     throw lastError;
   }
 
-  private chunkHash(text: string): string {
-    const input = normalizeText(text);
-    let hash = 2166136261;
-    for (let i = 0; i < input.length; i += 1) {
-      hash ^= input.charCodeAt(i);
-      hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
-    }
-    return `h${(hash >>> 0).toString(16)}`;
-  }
-
-  private updateStatesForHash(hash: string, state: ChunkSynthesisState): void {
-    this.chunkHashByIndex.forEach((value, index) => {
-      if (value === hash) {
-        this.setChunkState(index, state);
-      }
-    });
-  }
-
   private renderPlayState(): void {
-    this.must<HTMLButtonElement>("btn-play").innerHTML = this.audio.paused
+    const playBtn = this.must<HTMLButtonElement>("btn-play");
+    playBtn.innerHTML = this.audio.paused
       ? '<i data-lucide="play" class="ui-icon"></i>'
       : '<i data-lucide="pause" class="ui-icon"></i>';
+    playBtn.classList.toggle("programmatic-paused", this.programmaticPauseActive);
+    playBtn.title = this.programmaticPauseActive ? this.programmaticPauseReason : (this.audio.paused ? "Play" : "Pause");
     this.renderIcons();
     this.updateBreakButtonState();
   }

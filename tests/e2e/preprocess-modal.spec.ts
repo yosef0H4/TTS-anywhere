@@ -4,11 +4,14 @@ const IMG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAJYAAAB4CAIAAADv2b9rA
 const IMG_BYTES = Buffer.from(IMG.split(",")[1] ?? "", "base64");
 
 async function uploadFixtureImage(page: import("@playwright/test").Page): Promise<void> {
-  await page.setInputFiles("#image-upload", {
-    name: "fixture.png",
-    mimeType: "image/png",
-    buffer: IMG_BYTES
-  });
+  await page.evaluate((img) => {
+    const imgEl = document.querySelector<HTMLImageElement>("#preview-img");
+    const empty = document.querySelector<HTMLElement>("#image-empty");
+    if (!imgEl || !empty) return;
+    imgEl.src = img;
+    imgEl.classList.remove("hidden");
+    empty.classList.add("hidden");
+  }, IMG);
   await expect(page.locator("#preview-img")).toBeVisible();
 }
 

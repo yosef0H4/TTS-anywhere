@@ -27,13 +27,11 @@ interface ModalControllerOptions {
   getConfig: () => AppConfig;
   saveConfig: (cfg: AppConfig) => void;
   getCurrentImageDataUrl: () => string | null;
-  onApply: (result: PreprocessResult) => void;
   setStatus: (text: string) => void;
   registerAbortController?: (controller: AbortController | null) => void;
   preemptLane?: () => void;
   beginLane?: (parentSignal?: AbortSignal) => { signal: AbortSignal; token: number; done: () => void };
   isLaneCurrent?: (token: number) => boolean;
-  isCancelled?: () => boolean;
 }
 
 const CONTROL_DEFAULTS: Record<string, number | string | boolean> = {
@@ -206,20 +204,14 @@ export class PreprocessModalController {
 
   private bind(): void {
     this.mustById<HTMLButtonElement>("preproc-close").addEventListener("click", () => {
-      try {
-        this.applyAndClose();
-      } catch {
-        this.close();
-      }
+      this.persistConfigFromControls();
+      this.close();
     });
 
     this.backdrop.addEventListener("click", (e) => {
       if (e.target !== this.backdrop) return;
-      try {
-        this.applyAndClose();
-      } catch {
-        this.close();
-      }
+      this.persistConfigFromControls();
+      this.close();
     });
 
     this.mustById<HTMLButtonElement>("preproc-rapid-health").addEventListener("click", async () => {
@@ -384,7 +376,6 @@ export class PreprocessModalController {
     this.pendingDetect = true;
 
     try {
-      if (this.opts.isCancelled?.()) return;
       const processed = await applyPreprocessToDataUrl(this.originalDataUrl, {
         maxImageDimension: this.getNum("preproc-max-dim", 1080),
         binaryThreshold: this.getNum("preproc-threshold", 0),
@@ -395,7 +386,7 @@ export class PreprocessModalController {
       });
       if (seq !== this.detectSeq) return;
       if (lane && this.opts.isLaneCurrent && !this.opts.isLaneCurrent(lane.token)) return;
-      if (this.opts.isCancelled?.()) return;
+      if (this.detectAbortController?.signal.aborted) return;
 
       this.processedDataUrl = await scaleDataUrlMaxDimension(processed, this.getNum("preproc-max-dim", 1080));
       this.preview.src = this.processedDataUrl;
@@ -414,14 +405,18 @@ export class PreprocessModalController {
           );
           if (seq !== this.detectSeq) return;
           if (lane && this.opts.isLaneCurrent && !this.opts.isLaneCurrent(lane.token)) return;
-          if (this.opts.isCancelled?.()) return;
+          if (this.detectAbortController?.signal.aborted) return;
           this.rawBoxes = detect.boxes ?? [];
           this.rapidHealthy = true;
           this.mustById<HTMLDivElement>("preproc-health-status").textContent = "Healthy";
         } catch (error) {
-          this.rawBoxes = [];
-          this.rapidHealthy = false;
-          this.mustById<HTMLDivElement>("preproc-health-status").textContent = `Rapid error: ${String(error)}`;
+          if (this.isAbortError(error)) {
+            this.mustById<HTMLDivElement>("preproc-health-status").textContent = "Detection cancelled";
+          } else {
+            this.rawBoxes = [];
+            this.rapidHealthy = false;
+            this.mustById<HTMLDivElement>("preproc-health-status").textContent = `Rapid error: ${String(error)}`;
+          }
         }
       } else {
         this.rawBoxes = [];
@@ -446,6 +441,11 @@ export class PreprocessModalController {
     this.detectAbortController?.abort();
     this.detectAbortController = null;
     this.opts.registerAbortController?.(null);
+  }
+
+  private isAbortError(error: unknown): boolean {
+    const text = String((error as { message?: unknown })?.message ?? error).toLowerCase();
+    return text.includes("abort") || text.includes("cancel");
   }
 
   private recomputeLiveBoxes(): void {
@@ -883,7 +883,7 @@ export class PreprocessModalController {
     this.setText("preproc-stat-median", `Removed by median rule: ${this.filterStats.medianRemoved}`);
   }
 
-  private applyAndClose(): void {
+  private persistConfigFromControls(): void {
     const cfg = this.opts.getConfig();
     cfg.textProcessing.rapidEnabled = this.mustById<HTMLInputElement>("preproc-rapid-enabled").checked;
     cfg.textProcessing.rapidBaseUrl = this.getRapidUrl();
@@ -911,16 +911,6 @@ export class PreprocessModalController {
     cfg.preprocessing.selection.manualBoxes = this.manualBoxes;
 
     this.opts.saveConfig(cfg);
-
-    if (this.processedDataUrl) {
-      this.opts.onApply({
-        processedImageDataUrl: this.processedDataUrl,
-        finalBoxes: this.finalBoxes,
-        rapidRawCount: this.rawBoxes.length
-      });
-    }
-
-    this.close();
   }
 
   private getImageGeometry(): ImageGeometry | null {

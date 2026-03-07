@@ -1,12 +1,10 @@
-import type { AppConfig, ReadingTimeline } from "../models/types";
+import type { AppConfig } from "../models/types";
 import { loggers } from "../logging";
-import { buildReadingTimeline } from "../utils/chunking";
 import { dataUrlToBlob } from "../utils/data-url";
 import { OpenAiCompatibleLlmService, OpenAiCompatibleTtsService } from "../services/openai-compatible-client";
 
 export interface PipelineResult {
   text: string;
-  timeline: ReadingTimeline;
 }
 
 export interface OcrRegion {
@@ -30,15 +28,106 @@ export class AppPipeline {
   ): Promise<PipelineResult> {
     const done = loggers.pipeline.time("pipeline.ocr.chunking");
     const text = await this.extractText(imageDataUrl, config, options?.regions ?? [], options?.signal);
-    const timeline = buildReadingTimeline(
-      text,
-      config.reading.minWordsPerChunk,
-      config.reading.maxWordsPerChunk,
-      config.reading.wpmBase
-    );
     done();
-    loggers.pipeline.info("Pipeline run result", { chunkCount: timeline.chunks.length, textLength: text.length });
-    return { text, timeline };
+    loggers.pipeline.info("Pipeline run result", { textLength: text.length });
+    return { text };
+  }
+
+  async streamOcrText(
+    imageDataUrl: string,
+    config: AppConfig,
+    options: {
+      regions?: OcrRegion[];
+      signal?: AbortSignal;
+      onToken: (token: string) => void;
+      onRegionStart?: (index: number, total: number) => void;
+      onOcrRequestStart?: () => void;
+      onOcrRequestEnd?: () => void;
+    }
+  ): Promise<PipelineResult> {
+    const regions = options.regions ?? [];
+    const done = loggers.pipeline.time("pipeline.ocr.stream.chunking");
+    let text = "";
+
+    if (!regions.length) {
+      options.onOcrRequestStart?.();
+      const streamed = await this.llm.extractTextFromImageStream(
+        imageDataUrl,
+        config.llm,
+        {
+          ...(options.signal ? { signal: options.signal } : {}),
+          onToken: (token) => {
+            text += token;
+            options.onToken(token);
+          }
+        }
+      ).finally(() => {
+        options.onOcrRequestEnd?.();
+      });
+      text = streamed.text;
+    } else {
+      const parts: string[] = [];
+      for (let i = 0; i < regions.length; i += 1) {
+        const region = regions[i];
+        if (!region) continue;
+        this.throwIfAborted(options.signal);
+        options.onRegionStart?.(i, regions.length);
+        try {
+          if (i > 0) {
+            text += "\n";
+            options.onToken("\n");
+          }
+          const cropped = await this.cropDataUrl(imageDataUrl, region);
+          this.throwIfAborted(options.signal);
+          const startLen = text.length;
+          options.onOcrRequestStart?.();
+          const streamed = await this.llm.extractTextFromImageStream(
+            cropped,
+            config.llm,
+            {
+              ...(options.signal ? { signal: options.signal } : {}),
+              onToken: (token) => {
+                text += token;
+                options.onToken(token);
+              }
+            }
+          ).finally(() => {
+            options.onOcrRequestEnd?.();
+          });
+          if (streamed.text.trim()) {
+            parts.push(streamed.text.trim());
+          } else {
+            // Revert separator if this region produced no text.
+            text = text.slice(0, startLen);
+          }
+        } catch (error) {
+          if (this.isAbortError(error)) throw error;
+          loggers.pipeline.warn("Per-box OCR stream failed", { regionId: region.id, error: String(error) });
+        }
+      }
+      if (!parts.length) {
+        text = "";
+        options.onOcrRequestStart?.();
+        const streamed = await this.llm.extractTextFromImageStream(
+          imageDataUrl,
+          config.llm,
+          {
+            ...(options.signal ? { signal: options.signal } : {}),
+            onToken: (token) => {
+              text += token;
+              options.onToken(token);
+            }
+          }
+        ).finally(() => {
+          options.onOcrRequestEnd?.();
+        });
+        text = streamed.text;
+      }
+    }
+
+    done();
+    loggers.pipeline.info("Pipeline OCR stream result", { textLength: text.length });
+    return { text };
   }
 
   async synthesizeText(text: string, config: AppConfig, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<Blob> {

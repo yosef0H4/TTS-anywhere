@@ -6,7 +6,7 @@ export const PREPROCESS_MODAL_TEMPLATE = `
         <i data-lucide="scan" class="ui-icon"></i>
         <h3>Preprocessing Lab</h3>
       </div>
-      <button id="preproc-close" class="window-btn" title="Apply and close"><i data-lucide="check" class="ui-icon"></i></button>
+      <button id="preproc-close" class="window-btn" title="Close"><i data-lucide="x" class="ui-icon"></i></button>
     </div>
     <div class="preproc-modal-body">
       <aside class="preproc-sidebar">

@@ -33,5 +33,17 @@ describe("request preemptor", () => {
     parent.abort();
     expect(lane.signal.aborted).toBe(true);
   });
-});
 
+  it("invalidates stale handles across repeated begin/done cycles", () => {
+    const preemptor = new RequestPreemptor<"ocr">();
+    const first = preemptor.beginLane("ocr");
+    const firstToken = first.token;
+    first.done();
+    expect(preemptor.isCurrent("ocr", firstToken)).toBe(true);
+
+    const second = preemptor.beginLane("ocr");
+    expect(first.signal.aborted).toBe(true);
+    expect(preemptor.isCurrent("ocr", firstToken)).toBe(false);
+    expect(preemptor.isCurrent("ocr", second.token)).toBe(true);
+  });
+});

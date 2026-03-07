@@ -20,7 +20,13 @@
     "test:settings": "vitest run src/tests/settings-store.test.ts --pool=threads --maxWorkers=1",
     "test:nodehotkey": "npm --prefix services/nodehotkey run build && node scripts/nodehotkey-manual-test.mjs",
     "test:nodehotkey:electron": "npm --prefix services/nodehotkey run build && electron scripts/electron-nodehotkey-test.mjs",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "cross-env PLAYWRIGHT_BROWSERS_PATH=.cache/ms-playwright playwright test --project=web",
+    "test:e2e:electron": "npm run build:electron:main && cross-env PLAYWRIGHT_BROWSERS_PATH=.cache/ms-playwright playwright test --project=electron",
+    "test:e2e:all": "npm run build:electron:main && cross-env PLAYWRIGHT_BROWSERS_PATH=.cache/ms-playwright playwright test --project=web --project=electron",
+    "test:e2e:loop": "node scripts/e2e-loop.mjs",
+    "test:e2e:loop:edge": "cross-env E2E_USE_EDGE_TTS=1 node scripts/e2e-loop.mjs",
+    "test:e2e:core": "cross-env PLAYWRIGHT_BROWSERS_PATH=.cache/ms-playwright playwright test -c playwright.core.config.ts --project=core-web"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",

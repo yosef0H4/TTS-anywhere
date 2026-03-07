@@ -4,6 +4,9 @@ export interface LlmConfig {
   model: string;
   promptTemplate: string;
   imageDetail: "low" | "high";
+  ocrStreamingEnabled: boolean;
+  ocrStreamingFallbackToNonStream: boolean;
+  maxTokens: number;
 }
 
 export interface TtsConfig {
@@ -17,6 +20,7 @@ export interface TtsConfig {
 
 export interface ReadingConfig {
   cleanTextBeforeTts: boolean;
+  typingIdleMs: number;
   minWordsPerChunk: number;
   maxWordsPerChunk: number;
   wpmBase: number;
@@ -122,10 +126,12 @@ export interface AppConfig {
 }
 
 export interface Chunk {
+  id?: string;
   index: number;
   text: string;
   startChar: number;
   endChar: number;
+  isCompleted?: boolean;
   startMs: number;
   endMs: number;
 }

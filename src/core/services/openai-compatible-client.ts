@@ -6,10 +6,7 @@ import type { LlmConfig, OcrResult, TtsAudioResult, TtsConfig } from "../models/
 interface LlmClient {
   chat: {
     completions: {
-      create: (params: {
-        model: string;
-        messages: ChatCompletionMessageParam[];
-      }, requestOptions?: { signal?: AbortSignal }) => Promise<{ choices?: Array<{ message?: { content?: string | null } }> }>;
+      create: (params: unknown, requestOptions?: { signal?: AbortSignal }) => unknown;
     };
   };
 }
@@ -64,10 +61,10 @@ function isAbortError(error: unknown): boolean {
 }
 
 export class OpenAiCompatibleLlmService {
-  constructor(private readonly clientFactory: (config: LlmConfig) => LlmClient = (config) => createClient(config.baseUrl, config.apiKey)) {}
+  constructor(private readonly clientFactory: (config: LlmConfig) => LlmClient = (config) => createClient(config.baseUrl, config.apiKey) as unknown as LlmClient) {}
 
-  async extractTextFromImage(dataUrl: string, config: LlmConfig, options?: { signal?: AbortSignal }): Promise<OcrResult> {
-    const messages: ChatCompletionMessageParam[] = [
+  private buildMessages(dataUrl: string, config: LlmConfig): ChatCompletionMessageParam[] {
+    return [
       {
         role: "user",
         content: [
@@ -76,6 +73,10 @@ export class OpenAiCompatibleLlmService {
         ]
       }
     ];
+  }
+
+  async extractTextFromImage(dataUrl: string, config: LlmConfig, options?: { signal?: AbortSignal }): Promise<OcrResult> {
+    const messages = this.buildMessages(dataUrl, config);
 
     const endpoint = normalizeOpenAiBaseUrl(config.baseUrl);
     const done = loggers.api.time("ocr.request");
@@ -83,10 +84,11 @@ export class OpenAiCompatibleLlmService {
       loggers.api.info("OCR request started", { endpoint, model: config.model, imageBytes: dataUrl.length });
       const response = await this.clientFactory(config).chat.completions.create({
         model: config.model,
-        messages
+        messages,
+        max_tokens: config.maxTokens
       }, options?.signal ? { signal: options.signal } : undefined);
 
-      const text = response.choices?.[0]?.message?.content?.trim() ?? "";
+      const text = (response as { choices?: Array<{ message?: { content?: string | null } }> }).choices?.[0]?.message?.content?.trim() ?? "";
       if (!text) {
         throw new Error("OCR produced empty text");
       }
@@ -102,6 +104,51 @@ export class OpenAiCompatibleLlmService {
       }
       loggers.api.error("OCR request failed", { error: message, endpoint, model: config.model });
       throw new Error(`OCR request failed (${endpoint}/chat/completions): ${message}`);
+    }
+  }
+
+  async extractTextFromImageStream(
+    dataUrl: string,
+    config: LlmConfig,
+    options?: { signal?: AbortSignal; onToken?: (token: string) => void }
+  ): Promise<OcrResult> {
+    const messages = this.buildMessages(dataUrl, config);
+    const endpoint = normalizeOpenAiBaseUrl(config.baseUrl);
+    const done = loggers.api.time("ocr.request.stream");
+    let fullText = "";
+
+    try {
+      loggers.api.info("OCR stream started", { endpoint, model: config.model, imageBytes: dataUrl.length });
+      const stream = await this.clientFactory(config).chat.completions.create({
+        model: config.model,
+        messages,
+        stream: true,
+        max_tokens: config.maxTokens
+      }, options?.signal ? { signal: options.signal } : undefined);
+
+      for await (const chunk of stream as AsyncIterable<{ choices?: Array<{ delta?: { content?: string | null } }> }>) {
+        const token = chunk.choices?.[0]?.delta?.content;
+        if (typeof token === "string" && token.length > 0) {
+          fullText += token;
+          options?.onToken?.(token);
+        }
+      }
+
+      const text = fullText.trim();
+      if (!text) {
+        throw new Error("OCR produced empty text");
+      }
+      done();
+      loggers.api.info("OCR stream completed", { textLength: text.length });
+      return { text };
+    } catch (error) {
+      const message = extractErrorMessage(error);
+      if (isAbortError(error)) {
+        loggers.api.info("OCR stream cancelled", { endpoint, model: config.model });
+        throw new Error("Cancelled");
+      }
+      loggers.api.error("OCR stream failed", { error: message, endpoint, model: config.model });
+      throw new Error(`OCR stream failed (${endpoint}/chat/completions): ${message}`);
     }
   }
 }

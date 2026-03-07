@@ -18,6 +18,10 @@ services/text-processing/rapidocr-preprocess/**/__pycache__/
 services/text-processing/rapidocr-preprocess/**/*.pyc
 .cache/
 .mitm-logs/
+playwright-report/
+test-results/
+logs/
+codex/
 services/text_processing/openai_mitm/.venv/
 services/text_processing/openai_mitm/.mypy_cache/
 services/text_processing/openai_mitm/.pytest_cache/

@@ -1379,6 +1379,13 @@ body {
     color: #991b1b;
     background: color-mix(in srgb, #dc2626 18%, #fff 82%);
 }
+.reading-preview span.chunk-draft {
+    opacity: 0.78;
+    font-style: italic;
+}
+.reading-preview span.chunk-unplayable {
+    cursor: not-allowed;
+}
 
 @keyframes chunk-synth-pulse {
     0%,
@@ -1476,6 +1483,12 @@ body {
 
 .play-btn.is-playing {
     animation: play-pulse 2s infinite;
+}
+
+.play-btn.programmatic-paused {
+    background: #e0b63f !important;
+    border-color: #e0b63f !important;
+    box-shadow: 0 2px 0 #b98f25 !important;
 }
 
 @keyframes play-pulse {
