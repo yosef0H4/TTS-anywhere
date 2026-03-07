@@ -1,9 +1,8 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, desktopCapturer, ipcMain, nativeImage, screen } from "electron";
 import { BorderOverlay, HotkeySession, captureCopyToText } from "nodehotkey";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import screenshot from "screenshot-desktop";
 import sharp from "sharp";
 
 type LogLevel = "debug" | "info" | "warn" | "error";
@@ -43,10 +42,17 @@ let selectionActive = false;
 let selectionStart: { x: number; y: number } | null = null;
 let lastCursor: { x: number; y: number } | null = null;
 let lastRect: { left: number; top: number; right: number; bottom: number } | null = null;
+let frozenCaptureSession: Promise<FrozenDesktopCapture> | null = null;
 let copyPlayInFlight = false;
 let appCloseInFlight = false;
 let shutdownWatchdog: NodeJS.Timeout | null = null;
 const processStartAt = Date.now();
+
+interface FrozenDesktopCapture {
+  image: Electron.NativeImage;
+  bounds: { left: number; top: number; width: number; height: number };
+  capturedAt: number;
+}
 
 function processUptimeMs(): number {
   return Date.now() - processStartAt;
@@ -329,11 +335,124 @@ function sameRect(
   return a.left === b.left && a.top === b.top && a.right === b.right && a.bottom === b.bottom;
 }
 
+function toPhysicalBounds(display: Electron.Display): { left: number; top: number; width: number; height: number } {
+  const scale = Number.isFinite(display.scaleFactor) && display.scaleFactor > 0 ? display.scaleFactor : 1;
+  return {
+    left: Math.round(display.bounds.x * scale),
+    top: Math.round(display.bounds.y * scale),
+    width: Math.max(1, Math.round(display.bounds.width * scale)),
+    height: Math.max(1, Math.round(display.bounds.height * scale))
+  };
+}
+
+async function captureFrozenDesktop(): Promise<FrozenDesktopCapture> {
+  const displays = screen.getAllDisplays();
+  if (!displays.length) throw new Error("No displays available for capture");
+
+  const physicalDisplays = displays.map((display) => ({
+    display,
+    bounds: toPhysicalBounds(display)
+  }));
+  const firstDisplay = physicalDisplays[0];
+  if (!firstDisplay) throw new Error("No displays available for capture");
+  const union = physicalDisplays.reduce(
+    (acc, item) => ({
+      left: Math.min(acc.left, item.bounds.left),
+      top: Math.min(acc.top, item.bounds.top),
+      right: Math.max(acc.right, item.bounds.left + item.bounds.width),
+      bottom: Math.max(acc.bottom, item.bounds.top + item.bounds.height)
+    }),
+    {
+      left: firstDisplay.bounds.left,
+      top: firstDisplay.bounds.top,
+      right: firstDisplay.bounds.left + firstDisplay.bounds.width,
+      bottom: firstDisplay.bounds.top + firstDisplay.bounds.height
+    }
+  );
+
+  const maxWidth = Math.max(...physicalDisplays.map((item) => item.bounds.width));
+  const maxHeight = Math.max(...physicalDisplays.map((item) => item.bounds.height));
+  const sources = await desktopCapturer.getSources({
+    types: ["screen"],
+    thumbnailSize: { width: maxWidth, height: maxHeight },
+    fetchWindowIcons: false
+  });
+
+  const composites: sharp.OverlayOptions[] = [];
+  for (const item of physicalDisplays) {
+    const source = sources.find((candidate) => candidate.display_id === String(item.display.id));
+    if (!source) {
+      throw new Error(`No desktop source for display ${item.display.id}`);
+    }
+    const sourceSize = source.thumbnail.getSize();
+    if (sourceSize.width < 1 || sourceSize.height < 1) {
+      throw new Error(`Empty thumbnail for display ${item.display.id}`);
+    }
+
+    const pngBuffer = source.thumbnail
+      .resize({
+        width: item.bounds.width,
+        height: item.bounds.height,
+        quality: "best"
+      })
+      .toPNG();
+
+    composites.push({
+      input: pngBuffer,
+      left: item.bounds.left - union.left,
+      top: item.bounds.top - union.top
+    });
+  }
+
+  const stitched = await sharp({
+    create: {
+      width: Math.max(1, union.right - union.left),
+      height: Math.max(1, union.bottom - union.top),
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 1 }
+    }
+  })
+    .composite(composites)
+    .png()
+    .toBuffer();
+
+  return {
+    image: nativeImage.createFromBuffer(stitched),
+    bounds: {
+      left: union.left,
+      top: union.top,
+      width: Math.max(1, union.right - union.left),
+      height: Math.max(1, union.bottom - union.top)
+    },
+    capturedAt: Date.now()
+  };
+}
+
+function beginFrozenCaptureSession(): void {
+  frozenCaptureSession = captureFrozenDesktop()
+    .then((capture) => {
+      diag("capture.frame.frozen", {
+        left: capture.bounds.left,
+        top: capture.bounds.top,
+        width: capture.bounds.width,
+        height: capture.bounds.height,
+        ageMs: Date.now() - capture.capturedAt
+      });
+      return capture;
+    })
+    .catch((error: unknown) => {
+      frozenCaptureSession = null;
+      diag("capture.frame.error", { error: String(error) });
+      throw error;
+    });
+}
+
 function startSelection(point: { x: number; y: number }): void {
   selectionStart = { x: point.x, y: point.y };
   lastCursor = { x: point.x, y: point.y };
   lastRect = null;
   selectionActive = true;
+  beginFrozenCaptureSession();
   if (drawSelectionRectangle) overlay?.hide();
   diag("capture.start", { x: point.x, y: point.y, hotkey: captureHotkeySession?.getHotkey() });
 }
@@ -370,20 +489,34 @@ async function finalizeSelection(point: { x: number; y: number }): Promise<void>
   }
 
   try {
-    const desktopPng = await screenshot({ format: "png" });
-    const pngBuffer = await sharp(desktopPng)
-      .extract({
-        left: payload.x,
-        top: payload.y,
+    const sessionPromise = frozenCaptureSession ?? captureFrozenDesktop();
+    const frozen = await sessionPromise;
+    frozenCaptureSession = null;
+
+    const cropLeft = payload.x - frozen.bounds.left;
+    const cropTop = payload.y - frozen.bounds.top;
+    if (cropLeft < 0 || cropTop < 0 || cropLeft + payload.width > frozen.bounds.width || cropTop + payload.height > frozen.bounds.height) {
+      throw new Error("Selection is outside frozen desktop bounds");
+    }
+
+    const pngBuffer = frozen.image
+      .crop({
+        x: cropLeft,
+        y: cropTop,
         width: payload.width,
         height: payload.height
       })
-      .png()
-      .toBuffer();
+      .toPNG();
 
     const dataUrl = `data:image/png;base64,${pngBuffer.toString("base64")}`;
     mainWindow?.webContents.send("capture-image", { dataUrl });
+    diag("capture.image.sent", {
+      width: payload.width,
+      height: payload.height,
+      frozenAgeMs: Date.now() - frozen.capturedAt
+    });
   } catch (error) {
+    frozenCaptureSession = null;
     diag("capture.error", { error: String(error) });
   }
 }

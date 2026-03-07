@@ -10,7 +10,6 @@
 10. strict types no any
 11. no css/html in .ts
 12. abort before generations x
-13. move to backend
 14. streaming ocr x
 15. adding logic x
 16. extract text button and remove auto apply x
