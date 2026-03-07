@@ -2,7 +2,7 @@
 2. text follows mouse
 3. rapid the ocr support (gpu/cpu)
 4. paddleocr and their text processer (gpu/cpu)
-5. korko tts
+5. korko tts x
 6. kitten tts
 7. H2OVL-Mississippi support
 8. fix screenshot hotkey x
