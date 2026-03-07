@@ -1322,9 +1322,22 @@ export class WebApp {
     if (event.shiftKey) parts.push("shift");
     if (event.altKey) parts.push("alt");
     if (event.metaKey) parts.push("win");
-    const key = event.key.toLowerCase();
-    if (["control", "shift", "alt", "meta"].includes(key)) return null;
-    parts.push(key.length === 1 ? key : key);
+    let baseKey: string | null = null;
+    const code = event.code;
+    if (/^Key[A-Z]$/.test(code)) {
+      baseKey = code.slice(3).toLowerCase();
+    } else if (/^Digit[0-9]$/.test(code)) {
+      baseKey = code.slice(5);
+    } else if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) {
+      baseKey = code.toLowerCase();
+    } else {
+      const key = event.key.toLowerCase();
+      if (["control", "shift", "alt", "meta"].includes(key)) return null;
+      if (!key) return null;
+      baseKey = key;
+    }
+    if (!baseKey) return null;
+    parts.push(baseKey);
     return parts.join("+");
   }
 

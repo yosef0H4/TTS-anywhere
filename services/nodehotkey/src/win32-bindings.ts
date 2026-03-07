@@ -12,7 +12,13 @@ export const WS_EX_TRANSPARENT = 0x00000020;
 export const WS_EX_NOACTIVATE = 0x08000000;
 export const SS_BLACKRECT = 0x0004;
 export const WM_HOTKEY = 0x0312;
+export const WM_KEYDOWN = 0x0100;
+export const WM_KEYUP = 0x0101;
+export const WM_SYSKEYDOWN = 0x0104;
+export const WM_SYSKEYUP = 0x0105;
 export const PM_REMOVE = 0x0001;
+export const HC_ACTION = 0;
+export const WH_KEYBOARD_LL = 13;
 export const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4;
 export const INPUT_KEYBOARD = 1;
 export const KEYEVENTF_EXTENDEDKEY = 0x0001;
@@ -21,6 +27,7 @@ export const GMEM_MOVEABLE = 0x0002;
 export const GMEM_ZEROINIT = 0x0040;
 export const CF_UNICODETEXT = 13;
 export const CF_HDROP = 15;
+export const LLKHF_INJECTED = 0x00000010;
 
 export const VK_CONTROL = 0x11;
 export const VK_SHIFT = 0x10;
@@ -30,6 +37,8 @@ export const VK_RWIN = 0x5c;
 
 export type WinMsg = { message?: number; wParam?: number | bigint };
 export type Point = { x: number; y: number };
+export type KbdLlHookStruct = { vkCode: number; scanCode: number; flags: number; time: number; dwExtraInfo: number };
+export type RegisteredCallback = ReturnType<typeof koffi.register>;
 
 const POINT = koffi.struct("POINT", { x: "long", y: "long" });
 const MSG = koffi.struct("MSG", {
@@ -40,6 +49,13 @@ const MSG = koffi.struct("MSG", {
   time: "uint32",
   pt_x: "long",
   pt_y: "long"
+});
+const KBDLLHOOKSTRUCT = koffi.struct("KBDLLHOOKSTRUCT", {
+  vkCode: "uint32",
+  scanCode: "uint32",
+  flags: "uint32",
+  time: "uint32",
+  dwExtraInfo: "uintptr"
 });
 const KEYBDINPUT = koffi.struct("KEYBDINPUT", {
   wVk: "uint16",
@@ -57,6 +73,7 @@ const INPUT = koffi.struct("INPUT", {
 
 const user32 = koffi.load("user32.dll");
 const kernel32 = koffi.load("kernel32.dll");
+const LowLevelKeyboardProc = koffi.proto("intptr __stdcall LowLevelKeyboardProc(int nCode, uintptr wParam, KBDLLHOOKSTRUCT *lParam)");
 
 const SetProcessDpiAwarenessContext = user32.func("bool __stdcall SetProcessDpiAwarenessContext(intptr value)") as (
   value: number
@@ -75,10 +92,20 @@ export const UnregisterHotKey = user32.func("bool __stdcall UnregisterHotKey(voi
 export const PeekMessageW = user32.func(
   "bool __stdcall PeekMessageW(_Out_ MSG *lpMsg, void *hWnd, uint32 wMsgFilterMin, uint32 wMsgFilterMax, uint32 wRemoveMsg)"
 ) as (msg: WinMsg, hWnd: null, min: number, max: number, remove: number) => boolean;
+export const SetWindowsHookExW = user32.func(
+  "void * __stdcall SetWindowsHookExW(int idHook, LowLevelKeyboardProc *lpfn, void *hmod, uint32 dwThreadId)"
+) as (idHook: number, hookProc: RegisteredCallback, module: unknown, threadId: number) => unknown;
+export const UnhookWindowsHookEx = user32.func("bool __stdcall UnhookWindowsHookEx(void *hhk)") as (hook: unknown) => boolean;
+export const CallNextHookEx = user32.func(
+  "intptr __stdcall CallNextHookEx(void *hhk, int nCode, uintptr wParam, KBDLLHOOKSTRUCT *lParam)"
+) as (hook: unknown, nCode: number, wParam: number, info: KbdLlHookStruct) => number;
 
 export const GetAsyncKeyState = user32.func("short __stdcall GetAsyncKeyState(int vKey)") as (vKey: number) => number;
 
 export const GetCursorPos = user32.func("bool __stdcall GetCursorPos(_Out_ POINT *lpPoint)") as (pt: Point) => boolean;
+export const GetModuleHandleW = kernel32.func("void * __stdcall GetModuleHandleW(const char16_t *lpModuleName)") as (
+  moduleName: string | null
+) => unknown;
 
 export const CreateWindowExW = user32.func(
   "void * __stdcall CreateWindowExW(uint32 exStyle, const char16_t *className, const char16_t *windowName, uint32 style, int x, int y, int w, int h, void *parent, void *menu, void *instance, void *param)"
@@ -143,6 +170,11 @@ export const RtlMoveMemory = kernel32.func("void __stdcall RtlMoveMemory(void *D
 ) => void;
 
 export const INPUT_SIZE = koffi.sizeof(INPUT);
+export const registerLowLevelKeyboardProc = (cb: (nCode: number, wParam: number, info: KbdLlHookStruct) => number): RegisteredCallback =>
+  koffi.register(cb, koffi.pointer(LowLevelKeyboardProc));
+export const unregisterCallback = (cb: RegisteredCallback): void => {
+  koffi.unregister(cb);
+};
 
 let dpiInitialized = false;
 

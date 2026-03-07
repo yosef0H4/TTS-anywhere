@@ -5,9 +5,9 @@
 5. korko tts
 6. kitten tts
 7. H2OVL-Mississippi support
-8. fix screenshot hotkey
-9. full screenshot support
-10. strict types no any
+8. fix screenshot hotkey x
+9. full screenshot support x
+10. strict types no any x
 11. no css/html in .ts
 12. abort before generations x
 14. streaming ocr x

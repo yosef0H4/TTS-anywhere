@@ -67,6 +67,13 @@ function prefsPath(): string {
   return path.join(app.getPath("userData"), "window-prefs.json");
 }
 
+interface NativePrefs {
+  alwaysOnTop?: boolean;
+  captureHotkey?: string;
+  copyPlayHotkey?: string;
+  captureDrawRectangle?: boolean;
+}
+
 function isDevMode(): boolean {
   return !app.isPackaged || Boolean(process.env.VITE_DEV_SERVER_URL);
 }
@@ -89,19 +96,37 @@ function diagnosticsPath(): string {
 function loadPinnedPref(): boolean {
   try {
     const raw = fs.readFileSync(prefsPath(), "utf-8");
-    const parsed = JSON.parse(raw) as { alwaysOnTop?: boolean };
+    const parsed = JSON.parse(raw) as NativePrefs;
     return parsed.alwaysOnTop ?? true;
   } catch {
     return true;
   }
 }
 
-function savePinnedPref(value: boolean): void {
+function loadNativePrefs(): NativePrefs {
   try {
-    fs.writeFileSync(prefsPath(), JSON.stringify({ alwaysOnTop: value }, null, 2), "utf-8");
+    const raw = fs.readFileSync(prefsPath(), "utf-8");
+    return JSON.parse(raw) as NativePrefs;
+  } catch {
+    return {};
+  }
+}
+
+function saveNativePrefs(next: NativePrefs): void {
+  const current = loadNativePrefs();
+  const merged: NativePrefs = {
+    ...current,
+    ...next
+  };
+  try {
+    fs.writeFileSync(prefsPath(), JSON.stringify(merged, null, 2), "utf-8");
   } catch {
     // ignore persistence failures
   }
+}
+
+function savePinnedPref(value: boolean): void {
+  saveNativePrefs({ alwaysOnTop: value });
 }
 
 function shouldWrite(level: LogLevel): boolean {
@@ -513,9 +538,23 @@ async function runCopyPlayCapture(): Promise<void> {
 
 app.whenReady().then(() => {
   diag("app.ready");
-  isPinned = loadPinnedPref();
+  const nativePrefs = loadNativePrefs();
+  isPinned = nativePrefs.alwaysOnTop ?? true;
+  activeCaptureHotkey = nativePrefs.captureHotkey ?? activeCaptureHotkey;
+  activeCopyHotkey = nativePrefs.copyPlayHotkey ?? activeCopyHotkey;
+  drawSelectionRectangle = nativePrefs.captureDrawRectangle ?? drawSelectionRectangle;
+  diag("app.native-prefs.loaded", {
+    isPinned,
+    activeCaptureHotkey,
+    activeCopyHotkey,
+    drawSelectionRectangle
+  });
+  diag("app.main-window.create.begin");
   mainWindow = createMainWindow();
+  diag("app.main-window.create.end", { hasWindow: Boolean(mainWindow) });
   overlay = new BorderOverlay(2);
+  diag("app.overlay.created");
+  diag("app.capture-session.create.begin", { hotkey: activeCaptureHotkey });
   captureHotkeySession = new HotkeySession({
     initialHotkey: activeCaptureHotkey,
     events: {
@@ -527,6 +566,8 @@ app.whenReady().then(() => {
       }
     }
   });
+  diag("app.capture-session.create.end");
+  diag("app.copy-session.create.begin", { hotkey: activeCopyHotkey });
   copyHotkeySession = new HotkeySession({
     initialHotkey: activeCopyHotkey,
     events: {
@@ -537,9 +578,16 @@ app.whenReady().then(() => {
       }
     }
   });
+  diag("app.copy-session.create.end");
+  diag("app.capture-session.start.begin");
   captureHotkeySession.start();
+  diag("app.capture-session.start.end");
+  diag("app.copy-session.start.begin");
   copyHotkeySession.start();
+  diag("app.copy-session.start.end");
+  diag("app.selection-ticker.start.begin");
   startSelectionTicker();
+  diag("app.selection-ticker.start.end");
 
   app.on("activate", () => {
     if (appCloseInFlight) {
@@ -571,6 +619,7 @@ ipcMain.handle("capture:apply-hotkey", (_event, hotkey: string) => {
   activeCaptureHotkey = captureHotkeySession.getHotkey();
   captureHotkeyBeforeEdit = null;
   captureHotkeySession.start();
+  saveNativePrefs({ captureHotkey: activeCaptureHotkey });
   diag("capture.hotkey.edit.applied", { activeHotkey: activeCaptureHotkey });
   return activeCaptureHotkey;
 });
@@ -609,6 +658,7 @@ ipcMain.handle("copy:apply-hotkey", (_event, hotkey: string) => {
   activeCopyHotkey = copyHotkeySession.getHotkey();
   copyHotkeyBeforeEdit = null;
   copyHotkeySession.start();
+  saveNativePrefs({ copyPlayHotkey: activeCopyHotkey });
   diag("copy.hotkey.edit.applied", { activeHotkey: activeCopyHotkey });
   return activeCopyHotkey;
 });
@@ -637,6 +687,7 @@ ipcMain.handle("capture:set-draw-rectangle", (_event, enabled: boolean) => {
   if (!drawSelectionRectangle) {
     overlay?.hide();
   }
+  saveNativePrefs({ captureDrawRectangle: drawSelectionRectangle });
   diag("capture.draw-rectangle.changed", { enabled: drawSelectionRectangle });
   return drawSelectionRectangle;
 });
