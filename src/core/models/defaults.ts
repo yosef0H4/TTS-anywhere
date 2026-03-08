@@ -65,6 +65,13 @@ export const DEFAULT_CONFIG: AppConfig = {
     lastImportAt: "",
     captureHotkey: "ctrl+shift+alt+s",
     copyPlayHotkey: "ctrl+shift+alt+x",
+    abortHotkey: "ctrl+shift+alt+z",
+    playPauseHotkey: "ctrl+shift+alt+space",
+    nextChunkHotkey: "ctrl+shift+alt+right",
+    previousChunkHotkey: "ctrl+shift+alt+left",
+    volumeUpHotkey: "ctrl+shift+alt+up",
+    volumeDownHotkey: "ctrl+shift+alt+down",
+    replayCaptureHotkey: "ctrl+shift+alt+d",
     captureDrawRectangle: true
   },
   logging: {
@@ -74,11 +81,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   },
   textProcessing: {
     detectionMode: "fullscreen_only",
-    detectorProvider: "rapid",
-    detectorBaseUrls: {
-      rapid: "http://127.0.0.1:8091",
-      paddle: "http://127.0.0.1:8093"
-    }
+    detectorBaseUrl: "http://127.0.0.1:8091"
   },
   preprocessing: {
     maxImageDimension: 1080,

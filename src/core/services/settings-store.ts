@@ -112,9 +112,18 @@ export class SettingsStore {
     const legacyRapidEnabled = value.rapidEnabled;
     const detectorProvider = value.detectorProvider;
     const detectorBaseUrls = (value.detectorBaseUrls as Record<string, unknown> | undefined) ?? {};
+    const explicitBaseUrl = typeof value.detectorBaseUrl === "string" && value.detectorBaseUrl.trim()
+      ? value.detectorBaseUrl
+      : null;
     const legacyRapidBaseUrl = typeof value.rapidBaseUrl === "string" && value.rapidBaseUrl.trim()
       ? value.rapidBaseUrl
-      : defaults.detectorBaseUrls.rapid;
+      : defaults.detectorBaseUrl;
+    const migratedProvider = detectorProvider === "rapid" || detectorProvider === "paddle"
+      ? detectorProvider
+      : "rapid";
+    const migratedProviderUrl = typeof detectorBaseUrls[migratedProvider] === "string" && String(detectorBaseUrls[migratedProvider]).trim()
+      ? String(detectorBaseUrls[migratedProvider]).trim()
+      : null;
 
     return {
       detectionMode: detectionMode === "off" || detectionMode === "fullscreen_only" || detectionMode === "all"
@@ -122,17 +131,7 @@ export class SettingsStore {
         : (rapidMode === "off" || rapidMode === "fullscreen_only" || rapidMode === "all"
             ? rapidMode
             : (legacyRapidEnabled === true ? "all" : defaults.detectionMode)),
-      detectorProvider: detectorProvider === "rapid" || detectorProvider === "paddle"
-        ? detectorProvider
-        : defaults.detectorProvider,
-      detectorBaseUrls: {
-        rapid: typeof detectorBaseUrls.rapid === "string" && detectorBaseUrls.rapid.trim()
-          ? detectorBaseUrls.rapid
-          : legacyRapidBaseUrl,
-        paddle: typeof detectorBaseUrls.paddle === "string" && detectorBaseUrls.paddle.trim()
-          ? detectorBaseUrls.paddle
-          : defaults.detectorBaseUrls.paddle
-      }
+      detectorBaseUrl: explicitBaseUrl ?? migratedProviderUrl ?? legacyRapidBaseUrl
     };
   }
 }

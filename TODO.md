@@ -15,6 +15,6 @@
 16. extract text button and remove auto apply x
 17. arabic x
 18. auto mode
-19. abort hotkey
+19. abort hotkey x
 20. installer
-21. fix rapid and paddle selection
+21. fix rapid and paddle selection x

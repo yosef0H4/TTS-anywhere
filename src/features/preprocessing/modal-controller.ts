@@ -173,8 +173,7 @@ export class PreprocessModalController {
     this.manualBoxes = [...cfg.preprocessing.selection.manualBoxes];
 
     this.setValue("preproc-detect-mode", cfg.textProcessing.detectionMode);
-    this.setValue("preproc-detector-provider", cfg.textProcessing.detectorProvider);
-    this.setValue("preproc-detector-url", this.getConfigDetectorUrl(cfg));
+    this.setValue("preproc-detector-url", cfg.textProcessing.detectorBaseUrl);
 
     this.setValue("preproc-max-dim", cfg.preprocessing.maxImageDimension);
     this.setValue("preproc-threshold", cfg.preprocessing.binaryThreshold);
@@ -240,15 +239,6 @@ export class PreprocessModalController {
       }
       this.applyHealthGate();
       await this.runPreprocessAndDetect();
-    });
-
-    this.mustById<HTMLSelectElement>("preproc-detector-provider").addEventListener("change", () => {
-      const cfg = this.opts.getConfig();
-      const provider = this.getDetectorProvider();
-      this.setValue("preproc-detector-url", this.getConfigDetectorUrl(cfg, provider));
-      this.detectorHealthy = false;
-      this.applyHealthGate();
-      this.mustById<HTMLDivElement>("preproc-health-status").textContent = this.t("common.idle");
     });
 
     this.mustById<HTMLInputElement>("preproc-detector-url").addEventListener("change", () => {
@@ -427,22 +417,22 @@ export class PreprocessModalController {
             this.getDetectorUrl(),
             this.processedDataUrl,
             this.detectAbortController
-              ? { signal: this.detectAbortController.signal, provider: this.getDetectorProvider() }
-              : { provider: this.getDetectorProvider() }
+              ? { signal: this.detectAbortController.signal }
+              : undefined
           );
           if (seq !== this.detectSeq) return;
           if (lane && this.opts.isLaneCurrent && !this.opts.isLaneCurrent(lane.token)) return;
           if (this.detectAbortController?.signal.aborted) return;
           this.rawBoxes = detect.boxes ?? [];
           this.detectorHealthy = true;
-          this.mustById<HTMLDivElement>("preproc-health-status").textContent = this.t("preproc.health.healthy", { provider: this.getDetectorProviderLabel() });
+          this.mustById<HTMLDivElement>("preproc-health-status").textContent = this.t("preproc.health.healthy");
         } catch (error) {
           if (this.isAbortError(error)) {
             this.mustById<HTMLDivElement>("preproc-health-status").textContent = this.t("preproc.health.cancelled");
           } else {
             this.rawBoxes = [];
             this.detectorHealthy = false;
-            this.mustById<HTMLDivElement>("preproc-health-status").textContent = this.t("preproc.health.error", { provider: this.getDetectorProviderLabel(), error: String(error) });
+            this.mustById<HTMLDivElement>("preproc-health-status").textContent = this.t("preproc.health.error", { error: String(error) });
           }
         }
       } else {
@@ -518,7 +508,7 @@ export class PreprocessModalController {
     const keepCount = this.filterResults.filter((f) => f.keep).length;
     const dropCount = this.filterResults.length - keepCount;
     this.mustById<HTMLDivElement>("preproc-metrics").textContent = this.t("preproc.metrics.summary", {
-      provider: this.getDetectorProviderLabel(),
+      provider: "Detector",
       raw: this.rawBoxes.length,
       keep: keepCount,
       drop: dropCount,
@@ -783,10 +773,13 @@ export class PreprocessModalController {
   private async healthCheck(): Promise<void> {
     try {
       const h = await checkTextProcessingHealth(this.getDetectorUrl());
-      this.detectorHealthy = h.ok;
-      this.mustById<HTMLDivElement>("preproc-health-status").textContent = h.ok
-        ? this.t("preproc.health.healthy", { provider: h.detector ?? this.getDetectorProviderLabel() })
-        : this.t("statuschip.unhealthy");
+      const detectAvailable = h.ok && h.features?.detect !== false;
+      this.detectorHealthy = detectAvailable;
+      this.mustById<HTMLDivElement>("preproc-health-status").textContent = detectAvailable
+        ? this.t("preproc.health.healthy", h.detector ? { provider: h.detector } : undefined)
+        : h.ok
+          ? this.t("preproc.health.detectUnavailable")
+          : this.t("statuschip.unhealthy");
     } catch {
       this.detectorHealthy = false;
       this.mustById<HTMLDivElement>("preproc-health-status").textContent = this.t("statuschip.unreachable");
@@ -929,8 +922,7 @@ export class PreprocessModalController {
   private persistConfigFromControls(): void {
     const cfg = this.opts.getConfig();
     cfg.textProcessing.detectionMode = this.getDetectionMode();
-    cfg.textProcessing.detectorProvider = this.getDetectorProvider();
-    cfg.textProcessing.detectorBaseUrls[this.getDetectorProvider()] = this.getDetectorUrl();
+    cfg.textProcessing.detectorBaseUrl = this.getDetectorUrl();
 
     cfg.preprocessing.maxImageDimension = this.getNum("preproc-max-dim", 1080);
     cfg.preprocessing.binaryThreshold = this.getNum("preproc-threshold", 0);
@@ -1003,24 +995,9 @@ export class PreprocessModalController {
     return this.previewRenderer.pointerToNormalized(clientX, clientY);
   }
 
-  private getDetectorProvider(): AppConfig["textProcessing"]["detectorProvider"] {
-    return this.mustById<HTMLSelectElement>("preproc-detector-provider").value === "paddle" ? "paddle" : "rapid";
-  }
-
   private getDetectionMode(): AppConfig["textProcessing"]["detectionMode"] {
     const mode = this.mustById<HTMLSelectElement>("preproc-detect-mode").value;
     return mode === "off" || mode === "fullscreen_only" || mode === "all" ? mode : "off";
-  }
-
-  private getDetectorProviderLabel(): string {
-    return this.getDetectorProvider() === "paddle" ? "PaddleOCR" : "RapidOCR";
-  }
-
-  private getConfigDetectorUrl(
-    cfg: AppConfig,
-    provider: AppConfig["textProcessing"]["detectorProvider"] = cfg.textProcessing.detectorProvider
-  ): string {
-    return cfg.textProcessing.detectorBaseUrls[provider].trim();
   }
 
   private getDetectorUrl(): string {

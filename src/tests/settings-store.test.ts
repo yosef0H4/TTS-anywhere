@@ -46,17 +46,21 @@ describe("settings store", () => {
     cfg.llm.model = "vision-model";
     cfg.tts.voice = "nova";
     cfg.ui.language = "ar";
+    cfg.system.abortHotkey = "ctrl+shift+alt+z";
+    cfg.system.playPauseHotkey = "ctrl+shift+alt+space";
+    cfg.system.replayCaptureHotkey = "ctrl+shift+alt+d";
     cfg.textProcessing.detectionMode = "fullscreen_only";
-    cfg.textProcessing.detectorProvider = "paddle";
-    cfg.textProcessing.detectorBaseUrls.paddle = "http://127.0.0.1:8093";
+    cfg.textProcessing.detectorBaseUrl = "http://127.0.0.1:8093";
     store.save(cfg);
 
     expect(store.load().llm.model).toBe("vision-model");
     expect(store.load().tts.voice).toBe("nova");
     expect(store.load().ui.language).toBe("ar");
+    expect(store.load().system.abortHotkey).toBe("ctrl+shift+alt+z");
+    expect(store.load().system.playPauseHotkey).toBe("ctrl+shift+alt+space");
+    expect(store.load().system.replayCaptureHotkey).toBe("ctrl+shift+alt+d");
     expect(store.load().textProcessing.detectionMode).toBe("fullscreen_only");
-    expect(store.load().textProcessing.detectorProvider).toBe("paddle");
-    expect(store.load().textProcessing.detectorBaseUrls.paddle).toBe("http://127.0.0.1:8093");
+    expect(store.load().textProcessing.detectorBaseUrl).toBe("http://127.0.0.1:8093");
   });
 
   it("migrates legacy panel width config", () => {
@@ -91,8 +95,27 @@ describe("settings store", () => {
     const restored = new SettingsStore().load();
 
     expect(restored.textProcessing.detectionMode).toBe("all");
-    expect(restored.textProcessing.detectorProvider).toBe("rapid");
-    expect(restored.textProcessing.detectorBaseUrls.rapid).toBe("http://127.0.0.1:8099");
+    expect(restored.textProcessing.detectorBaseUrl).toBe("http://127.0.0.1:8099");
+  });
+
+  it("migrates legacy selected detector provider url into generic detector url", () => {
+    const legacy = {
+      ...DEFAULT_CONFIG,
+      textProcessing: {
+        detectionMode: "all",
+        detectorProvider: "paddle",
+        detectorBaseUrls: {
+          rapid: "http://127.0.0.1:8091",
+          paddle: "http://127.0.0.1:8093"
+        }
+      }
+    };
+
+    localStorage.setItem("tts-snipper:settings", JSON.stringify(legacy));
+    const restored = new SettingsStore().load();
+
+    expect(restored.textProcessing.detectionMode).toBe("all");
+    expect(restored.textProcessing.detectorBaseUrl).toBe("http://127.0.0.1:8093");
   });
 
   it("defaults missing ui.language using locale resolution", () => {

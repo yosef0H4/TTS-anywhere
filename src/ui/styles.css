@@ -1019,6 +1019,7 @@ body {
     display: flex;
     flex-direction: column;
     gap: 4px;
+    min-width: 0;
 }
 
 .setting-group.section-disabled {
@@ -1054,22 +1055,26 @@ body {
 .setting-inline {
     display: flex;
     gap: 6px;
-    align-items: center;
-}
-
-.setting-inline select {
-    flex: 1;
+    align-items: stretch;
     min-width: 0;
 }
 
-.setting-inline input {
-    flex: 1;
+.setting-inline > :first-child,
+.setting-inline select,
+.setting-inline input,
+.setting-inline .ts-wrapper {
+    flex: 1 1 auto;
     min-width: 0;
+}
+
+.setting-inline .ts-wrapper {
+    width: 100%;
 }
 
 .refetch-btn {
     width: 34px;
     height: 34px;
+    flex: 0 0 34px;
     border: 1px solid var(--line-soft);
     border-radius: 8px;
     background: var(--panel-2);
@@ -1687,15 +1692,36 @@ body {
 .ts-control {
     border-color: var(--line-soft) !important;
     border-radius: 8px !important;
-    min-height: 34px !important;
+    min-height: 42px !important;
+    padding: 7px 12px !important;
     background: var(--panel-2) !important;
     color: var(--fg) !important;
+    display: flex !important;
+    align-items: center !important;
+}
+
+.ts-control input {
+    min-width: 6ch !important;
+}
+
+.ts-dropdown,
+.ts-dropdown .option,
+.ts-dropdown .create,
+.ts-control,
+.ts-control input {
+    font-size: 14px !important;
 }
 
 .ts-dropdown {
     border-color: var(--line-soft) !important;
     background: var(--panel-2) !important;
     color: var(--fg) !important;
+    border-radius: 10px !important;
+}
+
+.ts-dropdown .option,
+.ts-dropdown .create {
+    padding: 10px 12px !important;
 }
 
 @media (max-width: 1200px) {

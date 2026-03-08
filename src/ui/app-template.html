@@ -75,13 +75,6 @@
             </select>
           </div>
           <div class="setting-group"><label data-i18n="ocr.maxTokens">Max Tokens</label><input type="number" id="llm-max-tokens" min="1"></div>
-          <div class="setting-group">
-            <label for="detector-provider" data-i18n="detection.provider">Detection Provider</label>
-            <select id="detector-provider">
-              <option value="rapid">RapidOCR</option>
-              <option value="paddle">PaddleOCR</option>
-            </select>
-          </div>
           <div class="setting-group" data-detector-dependent-main>
             <label for="detector-mode" data-i18n="detection.scope">Text Processing Scope</label>
             <select id="detector-mode">
@@ -100,6 +93,13 @@
           <div class="setting-group">
             <label data-i18n="detection.health">Detection Health</label>
             <span class="status-chip" id="detector-status-chip" data-i18n="common.idle">Idle</span>
+          </div>
+          <div class="setting-group">
+            <label data-i18n="stack.recommendedCpu">Recommended CPU Stack</label>
+            <div class="setting-inline">
+              <button type="button" id="btn-launch-cpu-stack"><i data-lucide="play" class="ui-icon"></i><span data-i18n="stack.launch">Launch</span></button>
+            </div>
+            <div class="setting-footnote" id="cpu-stack-footnote" data-i18n="stack.recommendedCpuHint">Starts Rapid CPU for local text processing. Edge TTS does not need a local launcher.</div>
           </div>
         </section>
 
@@ -198,6 +198,76 @@
             <button type="button" id="btn-copy-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
           </div>
           <div class="setting-footnote" id="copy-hotkey-recording-status"></div>
+          <div class="setting-group">
+            <label data-i18n="system.abortHotkey">Abort Hotkey</label>
+            <input type="text" id="abort-hotkey" readonly>
+          </div>
+          <div class="settings-actions-grid">
+            <button type="button" id="btn-abort-hotkey-record"><i data-lucide="keyboard" class="ui-icon"></i><span data-i18n="action.record">Record</span></button>
+            <button type="button" id="btn-abort-hotkey-apply"><i data-lucide="check" class="ui-icon"></i><span data-i18n="action.apply">Apply</span></button>
+            <button type="button" id="btn-abort-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
+          </div>
+          <div class="setting-footnote" id="abort-hotkey-recording-status"></div>
+          <div class="setting-group">
+            <label data-i18n="system.playPauseHotkey">Play / Pause Hotkey</label>
+            <input type="text" id="play-pause-hotkey" readonly>
+          </div>
+          <div class="settings-actions-grid">
+            <button type="button" id="btn-play-pause-hotkey-record"><i data-lucide="keyboard" class="ui-icon"></i><span data-i18n="action.record">Record</span></button>
+            <button type="button" id="btn-play-pause-hotkey-apply"><i data-lucide="check" class="ui-icon"></i><span data-i18n="action.apply">Apply</span></button>
+            <button type="button" id="btn-play-pause-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
+          </div>
+          <div class="setting-footnote" id="play-pause-hotkey-recording-status"></div>
+          <div class="setting-group">
+            <label data-i18n="system.nextChunkHotkey">Next Chunk Hotkey</label>
+            <input type="text" id="next-chunk-hotkey" readonly>
+          </div>
+          <div class="settings-actions-grid">
+            <button type="button" id="btn-next-chunk-hotkey-record"><i data-lucide="keyboard" class="ui-icon"></i><span data-i18n="action.record">Record</span></button>
+            <button type="button" id="btn-next-chunk-hotkey-apply"><i data-lucide="check" class="ui-icon"></i><span data-i18n="action.apply">Apply</span></button>
+            <button type="button" id="btn-next-chunk-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
+          </div>
+          <div class="setting-footnote" id="next-chunk-hotkey-recording-status"></div>
+          <div class="setting-group">
+            <label data-i18n="system.previousChunkHotkey">Previous Chunk Hotkey</label>
+            <input type="text" id="previous-chunk-hotkey" readonly>
+          </div>
+          <div class="settings-actions-grid">
+            <button type="button" id="btn-previous-chunk-hotkey-record"><i data-lucide="keyboard" class="ui-icon"></i><span data-i18n="action.record">Record</span></button>
+            <button type="button" id="btn-previous-chunk-hotkey-apply"><i data-lucide="check" class="ui-icon"></i><span data-i18n="action.apply">Apply</span></button>
+            <button type="button" id="btn-previous-chunk-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
+          </div>
+          <div class="setting-footnote" id="previous-chunk-hotkey-recording-status"></div>
+          <div class="setting-group">
+            <label data-i18n="system.volumeUpHotkey">Volume Up Hotkey</label>
+            <input type="text" id="volume-up-hotkey" readonly>
+          </div>
+          <div class="settings-actions-grid">
+            <button type="button" id="btn-volume-up-hotkey-record"><i data-lucide="keyboard" class="ui-icon"></i><span data-i18n="action.record">Record</span></button>
+            <button type="button" id="btn-volume-up-hotkey-apply"><i data-lucide="check" class="ui-icon"></i><span data-i18n="action.apply">Apply</span></button>
+            <button type="button" id="btn-volume-up-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
+          </div>
+          <div class="setting-footnote" id="volume-up-hotkey-recording-status"></div>
+          <div class="setting-group">
+            <label data-i18n="system.volumeDownHotkey">Volume Down Hotkey</label>
+            <input type="text" id="volume-down-hotkey" readonly>
+          </div>
+          <div class="settings-actions-grid">
+            <button type="button" id="btn-volume-down-hotkey-record"><i data-lucide="keyboard" class="ui-icon"></i><span data-i18n="action.record">Record</span></button>
+            <button type="button" id="btn-volume-down-hotkey-apply"><i data-lucide="check" class="ui-icon"></i><span data-i18n="action.apply">Apply</span></button>
+            <button type="button" id="btn-volume-down-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
+          </div>
+          <div class="setting-footnote" id="volume-down-hotkey-recording-status"></div>
+          <div class="setting-group">
+            <label data-i18n="system.replayCaptureHotkey">Replay Capture Hotkey</label>
+            <input type="text" id="replay-capture-hotkey" readonly>
+          </div>
+          <div class="settings-actions-grid">
+            <button type="button" id="btn-replay-capture-hotkey-record"><i data-lucide="keyboard" class="ui-icon"></i><span data-i18n="action.record">Record</span></button>
+            <button type="button" id="btn-replay-capture-hotkey-apply"><i data-lucide="check" class="ui-icon"></i><span data-i18n="action.apply">Apply</span></button>
+            <button type="button" id="btn-replay-capture-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
+          </div>
+          <div class="setting-footnote" id="replay-capture-hotkey-recording-status"></div>
           <div class="setting-group setting-toggle-row">
             <label for="capture-draw-rectangle" data-i18n="system.drawSelectionRectangle">Draw Selection Rectangle</label>
             <input id="capture-draw-rectangle" type="checkbox">

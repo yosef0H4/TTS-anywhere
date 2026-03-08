@@ -77,16 +77,19 @@ export interface SystemConfig {
   lastImportAt: string;
   captureHotkey: string;
   copyPlayHotkey: string;
+  abortHotkey: string;
+  playPauseHotkey: string;
+  nextChunkHotkey: string;
+  previousChunkHotkey: string;
+  volumeUpHotkey: string;
+  volumeDownHotkey: string;
+  replayCaptureHotkey: string;
   captureDrawRectangle: boolean;
 }
 
 export interface TextProcessingConfig {
   detectionMode: "off" | "fullscreen_only" | "all";
-  detectorProvider: "rapid" | "paddle";
-  detectorBaseUrls: {
-    rapid: string;
-    paddle: string;
-  };
+  detectorBaseUrl: string;
 }
 
 export interface PreprocessingSelectionConfig {
