@@ -60,7 +60,7 @@ Each script accepts optional `host` and `port` arguments.
 
 - `launcher.py` uses `UV_PROJECT_ENVIRONMENT` so `uv` targets either `.venv-cpu` or `.venv-gpu`
 - On Windows, the launcher uses a temp-directory `uv` cache and `UV_LINK_MODE=copy` to avoid cache rename failures on mapped/project drives
-- The launcher installs the shared package set with `uv sync`, then installs the CPU or GPU Paddle runtime into the selected env
+- The launcher installs the shared package set with `uv sync --inexact`, so it updates repo-managed deps without deleting the separately managed CPU/GPU Paddle runtime
 - `TextDetection.predict(...)` powers `/v1/detect`
 - `PaddleOCR.predict(...)` powers `/v1/chat/completions`
 - `/healthz` reports enabled features plus requested/resolved detect and OCR devices

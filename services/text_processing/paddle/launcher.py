@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -64,6 +65,44 @@ def uninstall_if_present(env_python_path: Path, package: str) -> None:
         return
 
 
+def _installed_version(env_python_path: Path, package: str) -> str | None:
+    script = (
+        "import importlib.metadata as m, json\n"
+        f"name = {package!r}\n"
+        "try:\n"
+        "    print(json.dumps({'version': m.version(name)}))\n"
+        "except m.PackageNotFoundError:\n"
+        "    print(json.dumps({'version': None}))\n"
+    )
+    result = subprocess.run(
+        [str(env_python_path), "-c", script],
+        cwd=PROJECT_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(result.stdout)
+    version = payload.get("version")
+    return version if isinstance(version, str) else None
+
+
+def _parse_requirement(spec: str) -> tuple[str, str | None]:
+    if "==" in spec:
+        name, expected = spec.split("==", 1)
+        return name.strip(), expected.strip()
+    return spec.strip(), None
+
+
+def _runtime_matches(env_python_path: Path, package_spec: str) -> bool:
+    package_name, expected_version = _parse_requirement(package_spec)
+    installed_version = _installed_version(env_python_path, package_name)
+    if installed_version is None:
+        return False
+    if expected_version is not None and installed_version != expected_version:
+        return False
+    return True
+
+
 def choose_env(args: argparse.Namespace) -> tuple[Path, bool]:
     requested = {
         args.detect_device if args.enable_detect else "cpu",
@@ -81,28 +120,32 @@ def ensure_env(args: argparse.Namespace) -> Path:
     env.setdefault("UV_CACHE_DIR", str(LOCAL_UV_CACHE_DIR))
     env.setdefault("UV_LINK_MODE", "copy")
 
-    run(["uv", "sync", "--group", "dev"], env=env)
+    run(["uv", "sync", "--group", "dev", "--inexact"], env=env)
 
     env_python_path = venv_python(env_dir)
-    uninstall_if_present(env_python_path, "paddlepaddle")
-    uninstall_if_present(env_python_path, "paddlepaddle-gpu")
 
     if needs_gpu_env:
-        run(
-            [
-                "uv",
-                "pip",
-                "install",
-                "--python",
-                str(env_python_path),
-                "--index-url",
-                args.gpu_index_url.strip(),
-                args.gpu_package,
-            ],
-            env=env,
-        )
+        if not _runtime_matches(env_python_path, args.gpu_package):
+            uninstall_if_present(env_python_path, "paddlepaddle")
+            uninstall_if_present(env_python_path, "paddlepaddle-gpu")
+            run(
+                [
+                    "uv",
+                    "pip",
+                    "install",
+                    "--python",
+                    str(env_python_path),
+                    "--index-url",
+                    args.gpu_index_url.strip(),
+                    args.gpu_package,
+                ],
+                env=env,
+            )
     else:
-        run(["uv", "pip", "install", "--python", str(env_python_path), CPU_PADDLE_PACKAGE], env=env)
+        if not _runtime_matches(env_python_path, CPU_PADDLE_PACKAGE):
+            uninstall_if_present(env_python_path, "paddlepaddle")
+            uninstall_if_present(env_python_path, "paddlepaddle-gpu")
+            run(["uv", "pip", "install", "--python", str(env_python_path), CPU_PADDLE_PACKAGE], env=env)
 
     return env_python_path
 

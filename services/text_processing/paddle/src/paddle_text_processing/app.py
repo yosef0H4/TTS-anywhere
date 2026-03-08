@@ -132,6 +132,47 @@ def _package_version(name: str) -> str | None:
         return None
 
 
+def _describe_runtime_device(resolution: DeviceResolution) -> str:
+    if resolution.resolved != "gpu" or paddle is None:
+        return resolution.resolved
+    try:
+        current = paddle.device.get_device()
+    except Exception:  # noqa: BLE001
+        current = "gpu"
+
+    gpu_index: int | None = None
+    if ":" in current:
+        _, _, raw_index = current.partition(":")
+        if raw_index.isdigit():
+            gpu_index = int(raw_index)
+    if gpu_index is None:
+        gpu_index = 0
+
+    device_name: str | None = None
+    try:
+        if hasattr(paddle.device.cuda, "get_device_name"):
+            device_name = str(paddle.device.cuda.get_device_name(gpu_index))
+    except Exception:  # noqa: BLE001
+        device_name = None
+
+    if device_name:
+        return f"gpu:{gpu_index} ({device_name})"
+    return f"gpu:{gpu_index}"
+
+
+def _log_startup_runtime(label: str, enabled: bool, resolution: DeviceResolution) -> None:
+    if not enabled:
+        logger.info("Paddle %s startup disabled", label)
+        return
+    logger.info(
+        "Paddle %s startup requested=%s resolved=%s runtime=%s",
+        label,
+        resolution.requested,
+        resolution.resolved,
+        _describe_runtime_device(resolution),
+    )
+
+
 class PaddleDetectFactory:
     def __init__(self, config: RuntimeConfig, resolution: DeviceResolution):
         self.config = config
@@ -145,6 +186,13 @@ class PaddleDetectFactory:
             if TextDetection is None:
                 raise RuntimeError("PaddleOCR TextDetection is not installed")
 
+            logger.info(
+                "Initializing Paddle detect engine requested=%s resolved=%s runtime=%s model=%s",
+                self.resolution.requested,
+                self.resolution.resolved,
+                _describe_runtime_device(self.resolution),
+                self.config.detect_model_name,
+            )
             self._detector = TextDetection(
                 model_name=self.config.detect_model_name,
                 model_dir=self.config.detect_model_dir,
@@ -169,6 +217,14 @@ class PaddleOcrFactory:
             if PaddleOCR is None:
                 raise RuntimeError("PaddleOCR is not installed")
 
+            logger.info(
+                "Initializing Paddle OCR engine requested=%s resolved=%s runtime=%s det_model=%s rec_model=%s",
+                self.resolution.requested,
+                self.resolution.resolved,
+                _describe_runtime_device(self.resolution),
+                self.config.ocr_detection_model_name,
+                self.config.ocr_recognition_model_name,
+            )
             self._ocr = PaddleOCR(
                 text_detection_model_name=self.config.ocr_detection_model_name,
                 text_detection_model_dir=self.config.ocr_detection_model_dir,
@@ -352,6 +408,11 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.on_event("startup")
+    async def log_runtime_startup() -> None:
+        _log_startup_runtime("detect", runtime.enable_detect, resolved_detect_device)
+        _log_startup_runtime("ocr", runtime.enable_openai_ocr, resolved_ocr_device)
 
     @app.get("/healthz")
     def healthz() -> dict[str, object]:
