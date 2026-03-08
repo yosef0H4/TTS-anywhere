@@ -1,0 +1,72 @@
+[
+  {
+    "id": "icdar_tr_img_00008",
+    "category": "document",
+    "source": "icdar-mini",
+    "filename": "document_icdar_tr_img_00008.jpg",
+    "url": "https://huggingface.co/datasets/kenza-ily/icdar_disco/resolve/main/images/tr_img_00008.jpg"
+  },
+  {
+    "id": "icdar_tr_img_00019",
+    "category": "document",
+    "source": "icdar-mini",
+    "filename": "document_icdar_tr_img_00019.jpg",
+    "url": "https://huggingface.co/datasets/kenza-ily/icdar_disco/resolve/main/images/tr_img_00019.jpg"
+  },
+  {
+    "id": "icdar_tr_img_00043",
+    "category": "document",
+    "source": "icdar-mini",
+    "filename": "document_icdar_tr_img_00043.jpg",
+    "url": "https://huggingface.co/datasets/kenza-ily/icdar_disco/resolve/main/images/tr_img_00043.jpg"
+  },
+  {
+    "id": "icdar_tr_img_00101",
+    "category": "document",
+    "source": "icdar-mini",
+    "filename": "document_icdar_tr_img_00101.jpg",
+    "url": "https://huggingface.co/datasets/kenza-ily/icdar_disco/resolve/main/images/tr_img_00101.jpg"
+  },
+  {
+    "id": "icdar_tr_img_07848",
+    "category": "document",
+    "source": "icdar-mini",
+    "filename": "document_icdar_tr_img_07848.jpg",
+    "url": "https://huggingface.co/datasets/kenza-ily/icdar_disco/resolve/main/images/tr_img_07848.jpg"
+  },
+  {
+    "id": "easyocr_english",
+    "category": "scene",
+    "source": "easyocr-examples",
+    "filename": "scene_easyocr_english.png",
+    "url": "https://raw.githubusercontent.com/JaidedAI/EasyOCR/master/examples/english.png"
+  },
+  {
+    "id": "easyocr_example2",
+    "category": "scene",
+    "source": "easyocr-examples",
+    "filename": "scene_easyocr_example2.png",
+    "url": "https://raw.githubusercontent.com/JaidedAI/EasyOCR/master/examples/example2.png"
+  },
+  {
+    "id": "easyocr_french",
+    "category": "scene",
+    "source": "easyocr-examples",
+    "filename": "scene_easyocr_french.jpg",
+    "url": "https://raw.githubusercontent.com/JaidedAI/EasyOCR/master/examples/french.jpg"
+  },
+  {
+    "id": "easyocr_japanese",
+    "category": "scene",
+    "source": "easyocr-examples",
+    "filename": "scene_easyocr_japanese.jpg",
+    "url": "https://raw.githubusercontent.com/JaidedAI/EasyOCR/master/examples/japanese.jpg"
+  },
+  {
+    "id": "easyocr_korean",
+    "category": "scene",
+    "source": "easyocr-examples",
+    "filename": "scene_easyocr_korean.png",
+    "url": "https://raw.githubusercontent.com/JaidedAI/EasyOCR/master/examples/korean.png"
+  }
+]

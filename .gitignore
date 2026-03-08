@@ -22,10 +22,8 @@ playwright-report/
 test-results/
 logs/
 codex/
+**/__pycache__/
+**/*.pyc
 services/nodehotkey/build/
-services/text_processing/openai_mitm/.venv/
-services/text_processing/openai_mitm/.mypy_cache/
-services/text_processing/openai_mitm/.pytest_cache/
-services/text_processing/openai_mitm/.ruff_cache/
-services/text_processing/openai_mitm/**/__pycache__/
-services/text_processing/openai_mitm/**/*.pyc
+bench_data/
+bench_results/

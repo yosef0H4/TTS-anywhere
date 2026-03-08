@@ -36,8 +36,11 @@ Each script accepts optional `host` and `port` arguments.
 
 - `launcher.py` uses `UV_PROJECT_ENVIRONMENT` so `uv` targets either `.venv-cpu` or `.venv-gpu` instead of the default `.venv`.
 - The Windows batch scripts call `launcher.py` directly with `py -3` so they do not create an extra bootstrap `.venv`.
-- CPU-only launches install `onnxruntime`.
+- The launcher uses `uv sync --inexact`, so it updates repo-managed deps without deleting the separately managed CPU/GPU runtime packages.
+- On Windows, the launcher uses a temp-directory `uv` cache and `UV_LINK_MODE=copy` to avoid cache rename and hardlink issues on mapped/project drives.
+- CPU-only launches install `onnxruntime` in `.venv-cpu`.
 - Any launch that requests CUDA or auto installs `onnxruntime-gpu` and a CUDA-enabled PyTorch build in `.venv-gpu`.
+- The launcher checks the installed runtime versions first and skips reinstalling them when the current env already matches the requested runtime.
 - The server still exposes the same APIs; only the runtime bootstrap path changes.
 
 ## Endpoints
