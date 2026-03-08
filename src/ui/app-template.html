@@ -96,10 +96,13 @@
           </div>
           <div class="setting-group">
             <label data-i18n="stack.recommendedCpu">Recommended CPU Stack</label>
-            <div class="setting-inline">
-              <button type="button" id="btn-launch-cpu-stack"><i data-lucide="play" class="ui-icon"></i><span data-i18n="stack.launch">Launch</span></button>
+            <div class="stack-controls">
+              <button type="button" id="btn-launch-cpu-stack" class="stack-action-btn stack-action-btn-primary"><i data-lucide="play" class="ui-icon"></i><span data-i18n="stack.launch">Launch</span></button>
+              <button type="button" id="btn-stop-cpu-stack" class="stack-action-btn"><i data-lucide="square" class="ui-icon"></i><span data-i18n="stack.stop">Stop</span></button>
+              <button type="button" id="btn-open-runtime-services" class="stack-action-btn"><i data-lucide="folder-open" class="ui-icon"></i><span data-i18n="stack.openServices">Open Services</span></button>
+              <span class="status-chip" id="cpu-stack-status-chip" data-i18n="common.idle">Idle</span>
             </div>
-            <div class="setting-footnote" id="cpu-stack-footnote" data-i18n="stack.recommendedCpuHint">Starts Rapid CPU for local text processing. Edge TTS does not need a local launcher.</div>
+            <div class="setting-footnote" id="cpu-stack-footnote" data-i18n="stack.recommendedCpuHint">Launches Rapid CPU for OCR + detection and Edge TTS. The app picks free local ports automatically.</div>
           </div>
         </section>
 

@@ -5,6 +5,19 @@ export interface PlatformBridge {
   onPlaybackHotkey(handler: (action: "toggle_play_pause" | "next_chunk" | "previous_chunk" | "volume_up" | "volume_down") => void): void;
 }
 
+export interface RecommendedCpuStackUrls {
+  detectionBaseUrl: string;
+  ocrBaseUrl: string;
+  ttsBaseUrl: string;
+}
+
+export interface RecommendedCpuStackStatus {
+  state: "stopped" | "starting" | "running" | "failed";
+  managed: boolean;
+  urls: RecommendedCpuStackUrls | null;
+  error: string | null;
+}
+
 export interface ElectronApi {
   onCapturedImage: (handler: (payload: { dataUrl: string; isTap: boolean }) => void) => void;
   onCopiedTextForPlayback: (handler: (text: string) => void) => void;
@@ -48,7 +61,11 @@ export interface ElectronApi {
   getReplayCaptureHotkey: () => Promise<string>;
   setCaptureDrawRectangle: (enabled: boolean) => Promise<boolean>;
   getCaptureDrawRectangle: () => Promise<boolean>;
-  launchRecommendedCpuStack: () => Promise<"started" | "already_running">;
+  launchRecommendedCpuStack: () => Promise<RecommendedCpuStackStatus>;
+  stopRecommendedCpuStack: () => Promise<RecommendedCpuStackStatus>;
+  openRuntimeServicesFolder: () => Promise<string>;
+  getRecommendedCpuStackStatus: () => Promise<RecommendedCpuStackStatus>;
+  recordStartupPhase?: (phase: string, details?: Record<string, unknown>) => void;
   sendLogEntries: (entries: unknown[]) => void;
   getLogLevel: () => Promise<string>;
   setLogLevel: (level: string) => Promise<void>;

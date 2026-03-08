@@ -22,6 +22,7 @@ import {
 } from "../core/playback/chunking";
 import { AppPipeline } from "../core/pipeline/app-pipeline";
 import { SettingsStore } from "../core/services/settings-store";
+import type { RecommendedCpuStackStatus } from "../core/services/platform";
 import { WorkspaceResizer } from "../ui/workspace-resizer";
 import { cleanTextForTts, findChunkIndexByTime } from "../core/utils/chunking";
 import { RequestPreemptor } from "../core/utils/request-preemptor";
@@ -189,6 +190,7 @@ export class WebApp {
     ttsStartsBySessionAndHash: {}
   };
   private detectorHealthy = false;
+  private recommendedCpuStackStatus: RecommendedCpuStackStatus | null = null;
   private lastRenderedActiveChunkId: string | null = null;
   private currentLanguage(): AppConfig["ui"]["language"] {
     return this.config.ui.language;
@@ -345,6 +347,7 @@ export class WebApp {
     this.renderConfig();
     this.logBootstrapStep("config.rendered");
     void this.checkDetectorHealth(false);
+    void this.refreshRecommendedCpuStackStatus();
     void this.syncAllElectronHotkeysFromSettings();
     void this.syncElectronCaptureRectangleSetting();
     this.logBootstrapStep("electron.settings.sync.started");
@@ -823,6 +826,118 @@ export class WebApp {
     }
   }
 
+  private renderRecommendedCpuStackStatus(): void {
+    const launchButton = this.must<HTMLButtonElement>("btn-launch-cpu-stack");
+    const stopButton = this.must<HTMLButtonElement>("btn-stop-cpu-stack");
+    const openButton = this.must<HTMLButtonElement>("btn-open-runtime-services");
+    const footnote = this.must<HTMLDivElement>("cpu-stack-footnote");
+    if (!window.electronAPI) {
+      launchButton.disabled = true;
+      stopButton.disabled = true;
+      openButton.disabled = true;
+      this.updateStatusChip("cpu-stack-status-chip", this.t("stack.electronOnly"), "idle");
+      footnote.textContent = this.t("stack.electronOnly");
+      return;
+    }
+
+    const status = this.recommendedCpuStackStatus;
+    const state = status?.state ?? "stopped";
+    launchButton.disabled = state === "starting" || state === "running";
+    stopButton.disabled = state === "stopped" || state === "failed" || state === "starting";
+    openButton.disabled = false;
+
+    if (state === "running" && status?.urls) {
+      this.updateStatusChip("cpu-stack-status-chip", this.t("stack.status.running"), "ok");
+      footnote.textContent = this.t("stack.detail.running", {
+        detectionUrl: status.urls.detectionBaseUrl,
+        ttsUrl: status.urls.ttsBaseUrl
+      });
+      return;
+    }
+
+    if (state === "starting") {
+      this.updateStatusChip("cpu-stack-status-chip", this.t("stack.status.starting"), "idle");
+      footnote.textContent = this.t("stack.detail.starting");
+      return;
+    }
+
+    if (state === "failed") {
+      this.updateStatusChip("cpu-stack-status-chip", this.t("stack.status.failed"), "error");
+      footnote.textContent = this.t("stack.detail.failed", { error: status?.error ?? "unknown error" });
+      return;
+    }
+
+    this.updateStatusChip("cpu-stack-status-chip", this.t("stack.status.stopped"), "idle");
+    footnote.textContent = this.t("stack.detail.stopped");
+  }
+
+  private async refreshRecommendedCpuStackStatus(): Promise<void> {
+    if (!window.electronAPI?.getRecommendedCpuStackStatus) {
+      this.recommendedCpuStackStatus = null;
+      this.renderRecommendedCpuStackStatus();
+      return;
+    }
+    this.recommendedCpuStackStatus = await window.electronAPI.getRecommendedCpuStackStatus();
+    this.renderRecommendedCpuStackStatus();
+  }
+
+  private applyRecommendedCpuStackUrls(status: RecommendedCpuStackStatus): void {
+    if (!status.urls) return;
+    this.config.textProcessing.detectorBaseUrl = status.urls.detectionBaseUrl;
+    this.config.llm.baseUrl = status.urls.ocrBaseUrl;
+    this.config.tts.baseUrl = status.urls.ttsBaseUrl;
+    this.store.save(this.config);
+    this.renderConfig();
+    this.renderRecommendedCpuStackStatus();
+    void this.checkDetectorHealth(false);
+  }
+
+  private async launchRecommendedCpuStack(): Promise<void> {
+    if (!window.electronAPI?.launchRecommendedCpuStack) {
+      this.setStatus(this.t("stack.electronOnly"));
+      return;
+    }
+    this.recommendedCpuStackStatus = {
+      state: "starting",
+      managed: false,
+      urls: null,
+      error: null
+    };
+    this.renderRecommendedCpuStackStatus();
+    const status = await window.electronAPI.launchRecommendedCpuStack();
+    this.recommendedCpuStackStatus = status;
+    this.renderRecommendedCpuStackStatus();
+    if (status.state === "running") {
+      this.applyRecommendedCpuStackUrls(status);
+      this.setStatus(this.t("status.cpuStackLaunched"));
+      return;
+    }
+    this.setStatus(this.t("status.cpuStackLaunchFailed", { error: status.error ?? "unknown error" }));
+  }
+
+  private async stopRecommendedCpuStack(): Promise<void> {
+    if (!window.electronAPI?.stopRecommendedCpuStack) {
+      this.setStatus(this.t("stack.electronOnly"));
+      return;
+    }
+    this.recommendedCpuStackStatus = await window.electronAPI.stopRecommendedCpuStack();
+    this.renderRecommendedCpuStackStatus();
+    this.setStatus(this.t("status.cpuStackStopped"));
+  }
+
+  private async openRuntimeServicesFolder(): Promise<void> {
+    if (!window.electronAPI?.openRuntimeServicesFolder) {
+      this.setStatus(this.t("stack.electronOnly"));
+      return;
+    }
+    const error = await window.electronAPI.openRuntimeServicesFolder();
+    if (error) {
+      this.setStatus(this.t("status.runtimeServicesOpenFailed", { error }));
+      return;
+    }
+    this.setStatus(this.t("status.runtimeServicesOpened"));
+  }
+
   private async tryFetchVoiceOptions(baseUrl: string, apiKey: string, query: VoiceListQuery = {}): Promise<NamedOption[]> {
     const candidates = ["/voices", "/audio/voices", "/models"];
     for (const path of candidates) {
@@ -1099,6 +1214,15 @@ export class WebApp {
     this.must<HTMLButtonElement>("detector-health").addEventListener("click", async () => {
       await this.checkDetectorHealth();
     });
+    this.must<HTMLButtonElement>("btn-launch-cpu-stack").addEventListener("click", () => {
+      void this.launchRecommendedCpuStack();
+    });
+    this.must<HTMLButtonElement>("btn-stop-cpu-stack").addEventListener("click", () => {
+      void this.stopRecommendedCpuStack();
+    });
+    this.must<HTMLButtonElement>("btn-open-runtime-services").addEventListener("click", () => {
+      void this.openRuntimeServicesFolder();
+    });
     this.must<HTMLInputElement>("capture-draw-rectangle").addEventListener("change", () => {
       this.syncConfigFromInputs();
       void this.syncElectronCaptureRectangleSetting();
@@ -1333,6 +1457,7 @@ export class WebApp {
       this.detectorHealthy ? this.describeDetectionMode(this.config.textProcessing.detectionMode) : this.t("statuschip.unreachable"),
       this.detectorHealthy ? "idle" : "error"
     );
+    this.renderRecommendedCpuStackStatus();
     this.renderMainPreviewOverlay();
   }
 
@@ -2938,11 +3063,18 @@ export class WebApp {
 }
 
 export function startWebApp(): void {
+  window.electronAPI?.recordStartupPhase?.("renderer.app.start", {
+    readyState: document.readyState,
+    sinceRendererBootMs: Number((performance.now() - rendererBootAt).toFixed(2))
+  });
   loggers.app.info("renderer.entry.start", {
     readyState: document.readyState,
     sinceRendererBootMs: Number((performance.now() - rendererBootAt).toFixed(2))
   });
   window.addEventListener("DOMContentLoaded", () => {
+    window.electronAPI?.recordStartupPhase?.("renderer.dom-content-loaded", {
+      sinceRendererBootMs: Number((performance.now() - rendererBootAt).toFixed(2))
+    });
     loggers.app.info("renderer.dom-content-loaded", {
       sinceRendererBootMs: Number((performance.now() - rendererBootAt).toFixed(2))
     });
@@ -2956,6 +3088,15 @@ export function startWebApp(): void {
     localStorage.setItem("tts-snipper:settings", JSON.stringify(DEFAULT_CONFIG));
   }
 
+  window.electronAPI?.recordStartupPhase?.("renderer.app.mount.begin", {
+    sinceRendererBootMs: Number((performance.now() - rendererBootAt).toFixed(2))
+  });
   new WebApp().mount(root);
+  window.electronAPI?.recordStartupPhase?.("renderer.app.mount.end", {
+    sinceRendererBootMs: Number((performance.now() - rendererBootAt).toFixed(2))
+  });
   dismissBootScreen();
+  window.electronAPI?.recordStartupPhase?.("renderer.boot.dismissed", {
+    sinceRendererBootMs: Number((performance.now() - rendererBootAt).toFixed(2))
+  });
 }

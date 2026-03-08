@@ -1,5 +1,5 @@
-import { app, BrowserWindow, ipcMain } from "electron";
-import { spawn, type ChildProcess } from "node:child_process";
+import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
   beginFrozenMonitorCaptureAtPoint,
   BorderOverlay,
@@ -10,6 +10,7 @@ import {
   type FrozenCaptureHandle
 } from "nodehotkey";
 import fs from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,6 +23,24 @@ interface BackendLogEntry {
   message: string;
   context?: Record<string, unknown> | undefined;
   source: "frontend" | "backend";
+}
+
+interface RecommendedCpuStackUrls {
+  detectionBaseUrl: string;
+  ocrBaseUrl: string;
+  ttsBaseUrl: string;
+}
+
+interface RecommendedCpuStackStatus {
+  state: "stopped" | "starting" | "running" | "failed";
+  managed: boolean;
+  urls: RecommendedCpuStackUrls | null;
+  error: string | null;
+}
+
+interface ManagedStackChild {
+  name: "rapid" | "edge";
+  child: ChildProcess;
 }
 
 const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
@@ -78,8 +97,20 @@ let selectionStartedAt = 0;
 let copyPlayInFlight = false;
 let appCloseInFlight = false;
 let shutdownWatchdog: NodeJS.Timeout | null = null;
-let recommendedCpuStackProcess: ChildProcess | null = null;
+let recommendedCpuStackChildren: ManagedStackChild[] = [];
+let recommendedCpuStackLaunchPromise: Promise<RecommendedCpuStackStatus> | null = null;
+let recommendedCpuStackStatus: RecommendedCpuStackStatus = {
+  state: "stopped",
+  managed: false,
+  urls: null,
+  error: null
+};
 const processStartAt = Date.now();
+const startupPhaseBuffer: string[] = [];
+let startupWatchdogDomReady: NodeJS.Timeout | null = null;
+let startupWatchdogRendererMount: NodeJS.Timeout | null = null;
+let startupDomReadySeen = false;
+let startupRendererMountSeen = false;
 
 const CAPTURE_TAP_THRESHOLD_MS = 150;
 const CAPTURE_TAP_MAX_DRIFT_PX = 6;
@@ -126,6 +157,10 @@ function diagnosticsPath(): string {
   return path.join(getLogDir(), "capture-diagnostics.log");
 }
 
+function startupDiagnosticsPath(): string {
+  return path.join(getLogDir(), "startup-diagnostics.log");
+}
+
 function projectRootPath(): string {
   return path.resolve(__dirname, "..");
 }
@@ -144,58 +179,449 @@ function bundledBinPath(): string {
   return path.join(projectRootPath(), "bin");
 }
 
-function recommendedCpuStackScriptPath(): string {
-  return path.join(servicesBasePath(), "text_processing", "rapid", "scripts", "host_both.bat");
+function bundledUvPath(): string | null {
+  const executableName = process.platform === "win32" ? "uv.exe" : "uv";
+  const candidate = path.join(bundledBinPath(), executableName);
+  return fs.existsSync(candidate) ? candidate : null;
 }
 
-function launchRecommendedCpuStack(): "started" | "already_running" {
-  if (process.platform !== "win32") {
-    throw new Error("Recommended CPU stack launcher is currently Windows-only.");
+function recommendedCpuStackRuntimeRoot(): string {
+  return path.join(app.getPath("userData"), "managed-services", "recommended-cpu");
+}
+
+function runtimeServicesRoot(): string {
+  return path.join(app.getPath("userData"), "runtime", "services");
+}
+
+function runtimeSyncVersionFile(): string {
+  return path.join(app.getPath("userData"), "runtime", ".bundled-services-version");
+}
+
+function recommendedCpuStackStatusSnapshot(): RecommendedCpuStackStatus {
+  return {
+    state: recommendedCpuStackStatus.state,
+    managed: recommendedCpuStackStatus.managed,
+    urls: recommendedCpuStackStatus.urls ? { ...recommendedCpuStackStatus.urls } : null,
+    error: recommendedCpuStackStatus.error
+  };
+}
+
+function setRecommendedCpuStackStatus(next: Partial<RecommendedCpuStackStatus>): RecommendedCpuStackStatus {
+  recommendedCpuStackStatus = {
+    ...recommendedCpuStackStatus,
+    ...next
+  };
+  return recommendedCpuStackStatusSnapshot();
+}
+
+function preferredUvCommand(): string {
+  return bundledUvPath() ?? "uv";
+}
+
+function windowsEnv(base: NodeJS.ProcessEnv, additions: Record<string, string>): NodeJS.ProcessEnv {
+  const next = { ...base, ...additions };
+  const uvPath = bundledUvPath();
+  if (uvPath) {
+    next.PATH = `${path.dirname(uvPath)};${next.PATH ?? ""}`;
   }
-  if (recommendedCpuStackProcess && recommendedCpuStackProcess.exitCode === null && !recommendedCpuStackProcess.killed) {
-    return "already_running";
+  next.UV_LINK_MODE ??= "copy";
+  next.PYTHONUTF8 ??= "1";
+  return next;
+}
+
+function ensureDir(dirPath: string): void {
+  fs.mkdirSync(dirPath, { recursive: true });
+}
+
+function runtimeCopyShouldSkipName(name: string): boolean {
+  return [
+    ".venv",
+    ".venv-cpu",
+    ".venv-gpu",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".cache",
+    ".hf-cache",
+    ".paddlex-cache"
+  ].includes(name);
+}
+
+function runtimeCopyShouldSkipFile(name: string): boolean {
+  return name.endsWith(".pyc") || name.endsWith(".pyo");
+}
+
+function copyBundledServiceTree(sourceDir: string, targetDir: string): void {
+  ensureDir(targetDir);
+  const entries = fs.readdirSync(sourceDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (runtimeCopyShouldSkipName(entry.name)) continue;
+    const sourcePath = path.join(sourceDir, entry.name);
+    const targetPath = path.join(targetDir, entry.name);
+    if (entry.isDirectory()) {
+      copyBundledServiceTree(sourcePath, targetPath);
+      continue;
+    }
+    if (!entry.isFile() || runtimeCopyShouldSkipFile(entry.name)) continue;
+    ensureDir(path.dirname(targetPath));
+    fs.copyFileSync(sourcePath, targetPath);
+  }
+}
+
+function readRuntimeServicesVersion(): string | null {
+  try {
+    return fs.readFileSync(runtimeSyncVersionFile(), "utf-8").trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function writeRuntimeServicesVersion(version: string): void {
+  ensureDir(path.dirname(runtimeSyncVersionFile()));
+  fs.writeFileSync(runtimeSyncVersionFile(), version, "utf-8");
+}
+
+function syncBundledServicesToRuntime(): string {
+  if (!app.isPackaged) {
+    return servicesBasePath();
+  }
+  const sourceRoot = servicesBasePath();
+  const targetRoot = runtimeServicesRoot();
+  const currentVersion = app.getVersion();
+  if (readRuntimeServicesVersion() === currentVersion && fs.existsSync(targetRoot)) {
+    return targetRoot;
   }
 
-  const scriptPath = recommendedCpuStackScriptPath();
-  if (!fs.existsSync(scriptPath)) {
-    throw new Error(`Launcher script not found: ${scriptPath}`);
+  ensureDir(targetRoot);
+  const topLevelEntries = fs.readdirSync(sourceRoot, { withFileTypes: true });
+  for (const entry of topLevelEntries) {
+    if (!entry.isDirectory() || runtimeCopyShouldSkipName(entry.name)) continue;
+    copyBundledServiceTree(path.join(sourceRoot, entry.name), path.join(targetRoot, entry.name));
   }
+  writeRuntimeServicesVersion(currentVersion);
+  writeBackendLog("info", "stack", "runtime.services.synced", {
+    version: currentVersion,
+    sourceRoot,
+    targetRoot
+  });
+  return targetRoot;
+}
 
-  const env = { ...process.env };
-  const binDir = bundledBinPath();
-  if (fs.existsSync(binDir)) {
-    env.PATH = `${binDir};${env.PATH ?? ""}`;
+function envPythonPath(envDir: string): string {
+  if (process.platform === "win32") {
+    return path.join(envDir, "Scripts", "python.exe");
   }
+  return path.join(envDir, "bin", "python");
+}
 
-  const child = spawn("cmd.exe", ["/d", "/s", "/c", `"${scriptPath}"`], {
-    cwd: path.dirname(path.dirname(scriptPath)),
+function attachManagedChildLogging(name: ManagedStackChild["name"], child: ChildProcess): void {
+  child.stdout?.on("data", (chunk) => {
+    writeBackendLog("info", "stack", `${name}.stdout`, { line: String(chunk).trim() });
+  });
+  child.stderr?.on("data", (chunk) => {
+    writeBackendLog("warn", "stack", `${name}.stderr`, { line: String(chunk).trim() });
+  });
+  child.on("exit", (code, signal) => {
+    writeBackendLog("info", "stack", `${name}.exit`, { code, signal });
+    recommendedCpuStackChildren = recommendedCpuStackChildren.filter((entry) => entry.child !== child);
+    if (recommendedCpuStackStatus.state === "running" && recommendedCpuStackChildren.length === 0) {
+      setRecommendedCpuStackStatus({
+        state: "stopped",
+        managed: false,
+        urls: null,
+        error: null
+      });
+    }
+  });
+  child.on("error", (error) => {
+    writeBackendLog("error", "stack", `${name}.error`, { error: error.stack ?? String(error) });
+  });
+}
+
+function spawnManagedChild(
+  name: ManagedStackChild["name"],
+  command: string,
+  args: string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv
+): ChildProcess {
+  const child = spawn(command, args, {
+    cwd,
     env,
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"]
   });
+  attachManagedChildLogging(name, child);
+  recommendedCpuStackChildren.push({ name, child });
+  return child;
+}
 
-  child.stdout?.on("data", (chunk) => {
-    writeBackendLog("info", "stack", "recommendedCpu.stdout", { line: String(chunk).trim() });
+function runManagedCommand(label: string, command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv): Promise<void> {
+  return new Promise((resolve, reject) => {
+    writeBackendLog("info", "stack", `${label}.run`, { command, args, cwd });
+    const child = spawn(command, args, {
+      cwd,
+      env,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    child.stdout?.on("data", (chunk) => {
+      writeBackendLog("info", "stack", `${label}.stdout`, { line: String(chunk).trim() });
+    });
+    child.stderr?.on("data", (chunk) => {
+      writeBackendLog("warn", "stack", `${label}.stderr`, { line: String(chunk).trim() });
+    });
+    child.on("error", (error) => reject(error));
+    child.on("exit", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`${label} exited with code ${code ?? "unknown"}`));
+    });
   });
-  child.stderr?.on("data", (chunk) => {
-    writeBackendLog("warn", "stack", "recommendedCpu.stderr", { line: String(chunk).trim() });
-  });
-  child.on("exit", (code, signal) => {
-    writeBackendLog("info", "stack", "recommendedCpu.exit", { code, signal });
-    if (recommendedCpuStackProcess === child) {
-      recommendedCpuStackProcess = null;
+}
+
+function terminateChildTreeSync(child: ChildProcess): void {
+  if (!child.pid || child.exitCode !== null || child.killed) return;
+  if (process.platform === "win32") {
+    spawnSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true });
+    return;
+  }
+  child.kill("SIGTERM");
+}
+
+function terminateChildTree(child: ChildProcess): Promise<void> {
+  if (!child.pid || child.exitCode !== null || child.killed) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    child.once("exit", finish);
+    child.once("error", finish);
+    if (process.platform === "win32") {
+      const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, stdio: "ignore" });
+      killer.once("exit", finish);
+      killer.once("error", finish);
+      return;
     }
+    child.kill("SIGTERM");
+    setTimeout(finish, 2000);
   });
-  child.on("error", (error) => {
-    writeBackendLog("error", "stack", "recommendedCpu.error", { error: error.stack ?? String(error) });
-    if (recommendedCpuStackProcess === child) {
-      recommendedCpuStackProcess = null;
-    }
+}
+
+async function stopRecommendedCpuStack(): Promise<RecommendedCpuStackStatus> {
+  recommendedCpuStackLaunchPromise = null;
+  const children = [...recommendedCpuStackChildren].reverse();
+  recommendedCpuStackChildren = [];
+  await Promise.all(children.map(({ child }) => terminateChildTree(child)));
+  return setRecommendedCpuStackStatus({
+    state: "stopped",
+    managed: false,
+    urls: null,
+    error: null
+  });
+}
+
+async function openRuntimeServicesFolder(): Promise<string> {
+  const target = app.isPackaged ? syncBundledServicesToRuntime() : servicesBasePath();
+  ensureDir(target);
+  return shell.openPath(target);
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function resolveAvailablePort(preferredPort: number): Promise<number> {
+  const tryListen = (port: number): Promise<number> => new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.once("error", (error) => {
+      server.close();
+      reject(error);
+    });
+    server.listen(port, "127.0.0.1", () => {
+      const address = server.address();
+      const resolvedPort = typeof address === "object" && address ? address.port : port;
+      server.close(() => resolve(resolvedPort));
+    });
   });
 
-  recommendedCpuStackProcess = child;
-  writeBackendLog("info", "stack", "recommendedCpu.started", { scriptPath });
-  return "started";
+  try {
+    return await tryListen(preferredPort);
+  } catch {
+    return tryListen(0);
+  }
+}
+
+async function waitForServiceHealth(
+  baseUrl: string,
+  timeoutMs: number,
+  validate: (payload: Record<string, unknown>) => boolean
+): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = "no response";
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${baseUrl}/healthz`);
+      if (!response.ok) {
+        lastError = `HTTP ${response.status}`;
+      } else {
+        const payload = (await response.json()) as Record<string, unknown>;
+        if (validate(payload)) {
+          return payload;
+        }
+        lastError = JSON.stringify(payload);
+      }
+    } catch (error) {
+      lastError = String(error);
+    }
+    await delay(1000);
+  }
+  throw new Error(`Service at ${baseUrl} did not become healthy in ${Math.round(timeoutMs / 1000)}s: ${lastError}`);
+}
+
+async function launchRecommendedCpuStackInternal(): Promise<RecommendedCpuStackStatus> {
+  if (process.platform !== "win32") {
+    throw new Error("Recommended CPU stack launcher is currently Windows-only.");
+  }
+
+  const stackRoot = recommendedCpuStackRuntimeRoot();
+  const uvCacheDir = path.join(stackRoot, "uv-cache");
+  const runtimeServicesDir = syncBundledServicesToRuntime();
+  const rapidServiceDir = path.join(runtimeServicesDir, "text_processing", "rapid");
+  const edgeServiceDir = path.join(runtimeServicesDir, "tts", "edge");
+  const rapidEnvDir = path.join(rapidServiceDir, ".venv");
+  const edgeEnvDir = path.join(edgeServiceDir, ".venv");
+  if (!fs.existsSync(rapidServiceDir)) {
+    throw new Error(`Rapid service directory not found: ${rapidServiceDir}`);
+  }
+  if (!fs.existsSync(edgeServiceDir)) {
+    throw new Error(`Edge service directory not found: ${edgeServiceDir}`);
+  }
+  ensureDir(uvCacheDir);
+
+  const rapidPort = await resolveAvailablePort(8091);
+  const edgePort = await resolveAvailablePort(8012);
+  const urls: RecommendedCpuStackUrls = {
+    detectionBaseUrl: `http://127.0.0.1:${rapidPort}`,
+    ocrBaseUrl: `http://127.0.0.1:${rapidPort}`,
+    ttsBaseUrl: `http://127.0.0.1:${edgePort}`
+  };
+
+  const baseEnv = windowsEnv(process.env, { UV_CACHE_DIR: uvCacheDir });
+
+  await runManagedCommand(
+    "recommendedCpu.rapid.sync",
+    preferredUvCommand(),
+    ["sync", "--inexact"],
+    rapidServiceDir,
+    windowsEnv(baseEnv, { UV_PROJECT_ENVIRONMENT: rapidEnvDir })
+  );
+  await runManagedCommand(
+    "recommendedCpu.rapid.runtime",
+    preferredUvCommand(),
+    ["pip", "install", "--python", envPythonPath(rapidEnvDir), "onnxruntime>=1.24.2"],
+    rapidServiceDir,
+    windowsEnv(baseEnv, { UV_PROJECT_ENVIRONMENT: rapidEnvDir })
+  );
+
+  const rapidChild = spawnManagedChild(
+    "rapid",
+    envPythonPath(rapidEnvDir),
+    [
+      "-m",
+      "rapid_text_processing.cli",
+      "serve",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      String(rapidPort),
+      "--enable-detect",
+      "--enable-openai-ocr",
+      "--detect-provider",
+      "cpu",
+      "--ocr-provider",
+      "cpu"
+    ],
+    rapidServiceDir,
+    windowsEnv(baseEnv, { UV_PROJECT_ENVIRONMENT: rapidEnvDir })
+  );
+  writeBackendLog("info", "stack", "recommendedCpu.rapid.started", { pid: rapidChild.pid, port: rapidPort });
+  await waitForServiceHealth(
+    urls.detectionBaseUrl,
+    120000,
+    (payload) => payload.ok === true
+      && typeof payload.features === "object"
+      && payload.features !== null
+      && (payload.features as Record<string, unknown>).detect === true
+      && (payload.features as Record<string, unknown>).openai_ocr === true
+  );
+
+  await runManagedCommand(
+    "recommendedCpu.edge.sync",
+    preferredUvCommand(),
+    ["sync", "--inexact"],
+    edgeServiceDir,
+    windowsEnv(baseEnv, { UV_PROJECT_ENVIRONMENT: edgeEnvDir })
+  );
+  const edgeChild = spawnManagedChild(
+    "edge",
+    envPythonPath(edgeEnvDir),
+    ["-m", "tts_edge_adapter.cli", "serve", "--host", "127.0.0.1", "--port", String(edgePort)],
+    edgeServiceDir,
+    windowsEnv(baseEnv, { UV_PROJECT_ENVIRONMENT: edgeEnvDir })
+  );
+  writeBackendLog("info", "stack", "recommendedCpu.edge.started", { pid: edgeChild.pid, port: edgePort });
+  await waitForServiceHealth(urls.ttsBaseUrl, 60000, (payload) => payload.ok === true);
+
+  return setRecommendedCpuStackStatus({
+    state: "running",
+    managed: true,
+    urls,
+    error: null
+  });
+}
+
+async function launchRecommendedCpuStack(): Promise<RecommendedCpuStackStatus> {
+  if (recommendedCpuStackStatus.state === "running") {
+    return recommendedCpuStackStatusSnapshot();
+  }
+  if (recommendedCpuStackLaunchPromise) {
+    return recommendedCpuStackLaunchPromise;
+  }
+
+  setRecommendedCpuStackStatus({
+    state: "starting",
+    managed: false,
+    urls: null,
+    error: null
+  });
+
+  recommendedCpuStackLaunchPromise = (async () => {
+    try {
+      return await launchRecommendedCpuStackInternal();
+    } catch (error) {
+      await stopRecommendedCpuStack();
+      return setRecommendedCpuStackStatus({
+        state: "failed",
+        managed: false,
+        urls: null,
+        error: String(error)
+      });
+    } finally {
+      recommendedCpuStackLaunchPromise = null;
+    }
+  })();
+
+  return recommendedCpuStackLaunchPromise;
 }
 
 function loadPinnedPref(): boolean {
@@ -247,6 +673,71 @@ function appendLogLine(line: string): void {
   }
 }
 
+function appendStartupLine(line: string): void {
+  try {
+    ensureDir(getLogDir());
+    fs.appendFileSync(startupDiagnosticsPath(), `${line}\n`, "utf-8");
+  } catch {
+    // keep process alive even if file logging fails
+  }
+}
+
+function flushStartupPhaseBuffer(): void {
+  if (startupPhaseBuffer.length === 0) return;
+  for (const line of startupPhaseBuffer.splice(0, startupPhaseBuffer.length)) {
+    appendStartupLine(line);
+  }
+}
+
+function recordStartupPhase(phase: string, details?: Record<string, unknown>): void {
+  const line = JSON.stringify({
+    timestamp: new Date().toISOString(),
+    uptimeMs: processUptimeMs(),
+    phase,
+    ...(details ?? {})
+  });
+  if (app.isReady()) {
+    flushStartupPhaseBuffer();
+    appendStartupLine(line);
+    return;
+  }
+  startupPhaseBuffer.push(line);
+}
+
+function clearStartupWatchdog(timer: NodeJS.Timeout | null): NodeJS.Timeout | null {
+  if (timer) clearTimeout(timer);
+  return null;
+}
+
+function armStartupWatchdogs(): void {
+  startupWatchdogDomReady = clearStartupWatchdog(startupWatchdogDomReady);
+  startupWatchdogRendererMount = clearStartupWatchdog(startupWatchdogRendererMount);
+  startupDomReadySeen = false;
+  startupRendererMountSeen = false;
+  startupWatchdogDomReady = setTimeout(() => {
+    if (!startupDomReadySeen) {
+      recordStartupPhase("watchdog.dom-ready.slow", { thresholdMs: 5000 });
+    }
+  }, 5000);
+  startupWatchdogRendererMount = setTimeout(() => {
+    if (!startupRendererMountSeen) {
+      recordStartupPhase("watchdog.renderer-mount.slow", { thresholdMs: 15000 });
+    }
+  }, 15000);
+}
+
+function noteStartupPhase(phase: string, details?: Record<string, unknown>): void {
+  recordStartupPhase(phase, details);
+  if (phase === "window.web.dom-ready") {
+    startupDomReadySeen = true;
+    startupWatchdogDomReady = clearStartupWatchdog(startupWatchdogDomReady);
+  }
+  if (phase === "renderer.app.mount.end") {
+    startupRendererMountSeen = true;
+    startupWatchdogRendererMount = clearStartupWatchdog(startupWatchdogRendererMount);
+  }
+}
+
 function writeBackendLog(level: LogLevel, category: string, message: string, context?: Record<string, unknown>): void {
   if (!shouldWrite(level)) return;
   const entry: BackendLogEntry = {
@@ -280,6 +771,7 @@ function diag(event: string, data?: Record<string, unknown>): void {
   } catch {
     // no-op
   }
+  noteStartupPhase(event, data);
 }
 
 function clearLogs(): void {
@@ -367,8 +859,15 @@ function requestAppClose(): void {
   }, 0);
 }
 
+recordStartupPhase("process.start", {
+  pid: process.pid,
+  packaged: app.isPackaged,
+  platform: process.platform
+});
+
 function createMainWindow(): BrowserWindow {
   diag("window.create.begin");
+  armStartupWatchdogs();
   const win = new BrowserWindow({
     width: 1040,
     height: 720,
@@ -422,6 +921,8 @@ function createMainWindow(): BrowserWindow {
       reason: details.reason,
       exitCode: details.exitCode
     });
+    startupWatchdogDomReady = clearStartupWatchdog(startupWatchdogDomReady);
+    startupWatchdogRendererMount = clearStartupWatchdog(startupWatchdogRendererMount);
   });
   webContents.on("unresponsive", () => {
     diag("window.web.unresponsive");
@@ -441,6 +942,8 @@ function createMainWindow(): BrowserWindow {
   });
   win.on("closed", () => {
     diag("window.closed");
+    startupWatchdogDomReady = clearStartupWatchdog(startupWatchdogDomReady);
+    startupWatchdogRendererMount = clearStartupWatchdog(startupWatchdogRendererMount);
     clearShutdownWatchdog();
     mainWindow = null;
   });
@@ -859,6 +1362,7 @@ function emitPlaybackHotkey(action: "toggle_play_pause" | "next_chunk" | "previo
 }
 
 app.whenReady().then(() => {
+  flushStartupPhaseBuffer();
   diag("app.ready");
   const nativePrefs = loadNativePrefs();
   isPinned = nativePrefs.alwaysOnTop ?? true;
@@ -1382,6 +1886,15 @@ ipcMain.handle("capture:set-draw-rectangle", (_event, enabled: boolean) => {
 });
 
 ipcMain.handle("capture:get-draw-rectangle", () => drawSelectionRectangle);
+ipcMain.handle("stack:get-recommended-cpu-status", () => recommendedCpuStackStatusSnapshot());
+ipcMain.handle("stack:launch-recommended-cpu", async () => launchRecommendedCpuStack());
+ipcMain.handle("stack:stop-recommended-cpu", async () => stopRecommendedCpuStack());
+ipcMain.handle("stack:open-runtime-services", async () => openRuntimeServicesFolder());
+
+ipcMain.on("startup:phase", (_event, payload: { phase?: string; details?: Record<string, unknown> }) => {
+  if (!payload?.phase) return;
+  noteStartupPhase(payload.phase, payload.details);
+});
 
 ipcMain.on("log:write", (_event, entries: unknown[]) => {
   if (!Array.isArray(entries)) return;
@@ -1427,6 +1940,16 @@ app.on("window-all-closed", () => {
 app.on("will-quit", () => {
   diag("app.will-quit.begin");
   clearShutdownWatchdog();
+  for (const { child } of recommendedCpuStackChildren) {
+    terminateChildTreeSync(child);
+  }
+  recommendedCpuStackChildren = [];
+  setRecommendedCpuStackStatus({
+    state: "stopped",
+    managed: false,
+    urls: null,
+    error: null
+  });
   disposeNativeResources();
   diag("app.will-quit.end");
 });

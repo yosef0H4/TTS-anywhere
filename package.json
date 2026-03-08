@@ -14,6 +14,9 @@
     "dev:electron:launch": "wait-on tcp:5173 file:dist-electron/main.js && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
     "build:web": "npm run check:no-any && vite build",
     "build:electron": "npm run check:no-any && npm run build:web && tsc -p tsconfig.electron.json",
+    "fetch:uv:win": "node scripts/fetch-bundled-uv.mjs",
+    "prepare:bundle-resources": "node scripts/prepare-bundled-resources.mjs",
+    "dist:win": "npm run build:electron && npm run fetch:uv:win && npm run prepare:bundle-resources -- --require-uv && electron-builder --win",
     "typecheck": "tsc --noEmit",
     "test": "npm run test:chunking && npm run test:openai && npm run test:settings",
     "test:chunking": "vitest run src/tests/chunking.test.ts --pool=threads --maxWorkers=1",
@@ -33,6 +36,7 @@
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.58.2",
     "@types/node": "^25.3.3",
+    "adm-zip": "^0.5.16",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "electron": "^40.6.1",
@@ -46,9 +50,53 @@
     "wait-on": "^9.0.4"
   },
   "dependencies": {
+    "ignore": "^7.0.5",
     "lucide": "^0.576.0",
     "nodehotkey": "file:services/nodehotkey",
     "openai": "^6.25.0",
     "tom-select": "^2.5.2"
+  },
+  "build": {
+    "appId": "com.ttssnipper.app",
+    "asar": true,
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "package.json",
+      "!**/node_modules/koffi/doc{,/**}",
+      "!**/node_modules/koffi/src{,/**}",
+      "!**/node_modules/koffi/vendor{,/**}",
+      "!**/node_modules/koffi/build/koffi/darwin_*{,/**}",
+      "!**/node_modules/koffi/build/koffi/freebsd_*{,/**}",
+      "!**/node_modules/koffi/build/koffi/linux_*{,/**}",
+      "!**/node_modules/koffi/build/koffi/musl_*{,/**}",
+      "!**/node_modules/koffi/build/koffi/openbsd_*{,/**}",
+      "!**/node_modules/koffi/build/koffi/win32_arm64{,/**}",
+      "!**/node_modules/koffi/build/koffi/win32_ia32{,/**}",
+      "!**/node_modules/nodehotkey/src{,/**}",
+      "!**/node_modules/nodehotkey/tsconfig.json",
+      "!**/node_modules/nodehotkey/build/*.vcxproj",
+      "!**/node_modules/nodehotkey/build/*.vcxproj.filters",
+      "!**/node_modules/nodehotkey/build/Release/obj{,/**}",
+      "!**/node_modules/nodehotkey/build/Release/*.exp",
+      "!**/node_modules/nodehotkey/build/Release/*.iobj",
+      "!**/node_modules/nodehotkey/build/Release/*.ipdb",
+      "!**/node_modules/nodehotkey/build/Release/*.lib"
+    ],
+    "extraResources": [
+      {
+        "from": ".bundle-resources/services",
+        "to": "services"
+      },
+      {
+        "from": ".bundle-resources/bin",
+        "to": "bin"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
   }
 }

@@ -1,5 +1,23 @@
 import { contextBridge, ipcRenderer } from "electron";
 
+function recordStartupPhase(phase: string, details?: Record<string, unknown>): void {
+  ipcRenderer.send("startup:phase", { phase, details });
+}
+
+recordStartupPhase("preload.evaluate.start", {
+  readyState: document.readyState
+});
+
+window.addEventListener("DOMContentLoaded", () => {
+  recordStartupPhase("preload.dom-content-loaded", {
+    readyState: document.readyState
+  });
+}, { once: true });
+
+recordStartupPhase("preload.evaluate.end", {
+  readyState: document.readyState
+});
+
 contextBridge.exposeInMainWorld("electronAPI", {
   onCapturedImage: (handler: (payload: { dataUrl: string; isTap: boolean }) => void) => {
     ipcRenderer.on("capture-image", (_event, payload: { dataUrl?: string; isTap?: boolean }) => {
@@ -141,8 +159,18 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return ipcRenderer.invoke("capture:get-draw-rectangle") as Promise<boolean>;
   },
   launchRecommendedCpuStack: () => {
-    return ipcRenderer.invoke("stack:launch-recommended-cpu") as Promise<"started" | "already_running">;
+    return ipcRenderer.invoke("stack:launch-recommended-cpu");
   },
+  stopRecommendedCpuStack: () => {
+    return ipcRenderer.invoke("stack:stop-recommended-cpu");
+  },
+  openRuntimeServicesFolder: () => {
+    return ipcRenderer.invoke("stack:open-runtime-services") as Promise<string>;
+  },
+  getRecommendedCpuStackStatus: () => {
+    return ipcRenderer.invoke("stack:get-recommended-cpu-status");
+  },
+  recordStartupPhase,
   sendLogEntries: (entries: unknown[]) => {
     ipcRenderer.send("log:write", entries);
   },
