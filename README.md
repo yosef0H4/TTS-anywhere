@@ -77,6 +77,12 @@ Useful launchers:
 - `host_detect_cpu_ocr_gpu.bat`
 - `host_detect_gpu_ocr_cpu.bat`
 
+Text processing is optional:
+
+- You do not have to run a local detection/OCR stack to use the app.
+- The OCR side of the app speaks an OpenAI-compatible API, so you can point it at any OpenAI-compatible local or cloud service if you prefer hosted inference.
+- Local text processing is mainly useful when you want region-based OCR, lower cloud usage, or more control over preprocessing.
+
 Current practical takeaway from local benchmarking:
 
 - Rapid is the better CPU default overall
