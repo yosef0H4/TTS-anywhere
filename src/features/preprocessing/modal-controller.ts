@@ -7,6 +7,7 @@ import type { DrawRect, FilteredBox, RawBox, SelectionOp, ToolMode } from "./typ
 import type { AppConfig } from "../../core/models/types";
 import { createIcons } from "lucide";
 import { APP_ICONS } from "../../ui/lucide-icons";
+import { applyTranslationsToElement, translate, type TranslationKey } from "../../web/i18n";
 
 type ImageGeometry = {
   naturalWidth: number;
@@ -101,6 +102,9 @@ export class PreprocessModalController {
   private draggingStart: { x: number; y: number } | null = null;
 
   private filterStats = { widthRemoved: 0, heightRemoved: 0, medianRemoved: 0, medianHeightPx: 0 };
+  private t(key: TranslationKey, params?: Record<string, string | number>): string {
+    return translate(this.opts.getConfig().ui.language, key, params);
+  }
 
   constructor(opts: ModalControllerOptions) {
     this.opts = opts;
@@ -151,13 +155,14 @@ export class PreprocessModalController {
     this.bind();
     this.bindRangeNumberSync();
     this.bindResets();
+    this.applyLanguage();
   }
 
   async open(): Promise<void> {
     const cfg = this.opts.getConfig();
     const source = this.opts.getCurrentImageDataUrl();
     if (!source) {
-      this.opts.setStatus("Load an image first.");
+      this.opts.setStatus(this.t("status.loadImageFirst"));
       return;
     }
 
@@ -191,6 +196,7 @@ export class PreprocessModalController {
     this.syncNumericInputsFromRanges();
     this.renderLabels();
     this.updateQualityViz();
+    this.applyLanguage();
 
     this.backdrop.hidden = false;
     this.backdrop.style.display = "flex";
@@ -242,13 +248,13 @@ export class PreprocessModalController {
       this.setValue("preproc-detector-url", this.getConfigDetectorUrl(cfg, provider));
       this.detectorHealthy = false;
       this.applyHealthGate();
-      this.mustById<HTMLDivElement>("preproc-health-status").textContent = "Idle";
+      this.mustById<HTMLDivElement>("preproc-health-status").textContent = this.t("common.idle");
     });
 
     this.mustById<HTMLInputElement>("preproc-detector-url").addEventListener("change", () => {
       this.detectorHealthy = false;
       this.applyHealthGate();
-      this.mustById<HTMLDivElement>("preproc-health-status").textContent = "Idle";
+      this.mustById<HTMLDivElement>("preproc-health-status").textContent = this.t("common.idle");
     });
 
     for (const id of RANGE_CONTROL_IDS) {
@@ -429,20 +435,20 @@ export class PreprocessModalController {
           if (this.detectAbortController?.signal.aborted) return;
           this.rawBoxes = detect.boxes ?? [];
           this.detectorHealthy = true;
-          this.mustById<HTMLDivElement>("preproc-health-status").textContent = `Healthy (${this.getDetectorProviderLabel()})`;
+          this.mustById<HTMLDivElement>("preproc-health-status").textContent = this.t("preproc.health.healthy", { provider: this.getDetectorProviderLabel() });
         } catch (error) {
           if (this.isAbortError(error)) {
-            this.mustById<HTMLDivElement>("preproc-health-status").textContent = "Detection cancelled";
+            this.mustById<HTMLDivElement>("preproc-health-status").textContent = this.t("preproc.health.cancelled");
           } else {
             this.rawBoxes = [];
             this.detectorHealthy = false;
-            this.mustById<HTMLDivElement>("preproc-health-status").textContent = `${this.getDetectorProviderLabel()} error: ${String(error)}`;
+            this.mustById<HTMLDivElement>("preproc-health-status").textContent = this.t("preproc.health.error", { provider: this.getDetectorProviderLabel(), error: String(error) });
           }
         }
       } else {
         this.rawBoxes = [];
         this.detectorHealthy = false;
-        this.mustById<HTMLDivElement>("preproc-health-status").textContent = "Disabled";
+        this.mustById<HTMLDivElement>("preproc-health-status").textContent = this.t("preproc.health.disabled");
       }
 
       this.applyHealthGate();
@@ -511,7 +517,13 @@ export class PreprocessModalController {
     this.renderOverlay();
     const keepCount = this.filterResults.filter((f) => f.keep).length;
     const dropCount = this.filterResults.length - keepCount;
-    this.mustById<HTMLDivElement>("preproc-metrics").textContent = `${this.getDetectorProviderLabel()} raw: ${this.rawBoxes.length}, keep: ${keepCount}, drop: ${dropCount}, final: ${this.finalBoxes.length}`;
+    this.mustById<HTMLDivElement>("preproc-metrics").textContent = this.t("preproc.metrics.summary", {
+      provider: this.getDetectorProviderLabel(),
+      raw: this.rawBoxes.length,
+      keep: keepCount,
+      drop: dropCount,
+      final: this.finalBoxes.length
+    });
     this.mustById<HTMLElement>("preproc-debug-state").textContent = JSON.stringify({
       overlayMode: this.overlayMode,
       activeFilterRule: this.activeFilterRule,
@@ -632,7 +644,7 @@ export class PreprocessModalController {
     if (this.activeFilterRule) {
       const badge = document.createElement("div");
       badge.className = "filter-live-badge";
-      badge.textContent = `Failing ${failCount} / ${this.filterResults.length} by ${this.activeFilterRule}`;
+      badge.textContent = this.t("preproc.filterBadge", { failCount, total: this.filterResults.length, rule: this.activeFilterRule });
       this.overlay.appendChild(badge);
     }
   }
@@ -772,10 +784,12 @@ export class PreprocessModalController {
     try {
       const h = await checkTextProcessingHealth(this.getDetectorUrl());
       this.detectorHealthy = h.ok;
-      this.mustById<HTMLDivElement>("preproc-health-status").textContent = h.ok ? `Healthy (${h.detector ?? this.getDetectorProviderLabel()})` : "Unhealthy";
+      this.mustById<HTMLDivElement>("preproc-health-status").textContent = h.ok
+        ? this.t("preproc.health.healthy", { provider: h.detector ?? this.getDetectorProviderLabel() })
+        : this.t("statuschip.unhealthy");
     } catch {
       this.detectorHealthy = false;
-      this.mustById<HTMLDivElement>("preproc-health-status").textContent = "Unreachable";
+      this.mustById<HTMLDivElement>("preproc-health-status").textContent = this.t("statuschip.unreachable");
     }
     this.applyHealthGate();
   }
@@ -859,7 +873,7 @@ export class PreprocessModalController {
     sctx.font = "700 24px 'Segoe UI', sans-serif";
     sctx.textAlign = "center";
     sctx.textBaseline = "middle";
-    sctx.fillText("Quality", sourceW / 2, sourceH / 2);
+    sctx.fillText(this.t("preproc.quality"), sourceW / 2, sourceH / 2);
 
     const scaleFactor = clamp(this.getNum("preproc-max-dim", 1080) / 1080, 0.2, 1);
     const tinyW = Math.max(1, Math.round(sourceW * scaleFactor));
@@ -896,12 +910,20 @@ export class PreprocessModalController {
     this.setText("preproc-merge-w-val", this.getNum("preproc-merge-w", 0.75).toFixed(2));
     this.setText("preproc-group-val", this.getNum("preproc-group", 0.5).toFixed(2));
 
-    this.setText("preproc-rule-min-width", `Reject widths below ${(this.getNum("preproc-min-width", 0) * 100).toFixed(1)}% of image width.`);
-    this.setText("preproc-rule-min-height", `Reject heights below ${(this.getNum("preproc-min-height", 0) * 100).toFixed(1)}% of image height.`);
-    this.setText("preproc-rule-median", `Reject narrow boxes shorter than ${(this.getNum("preproc-median", 0.45) * 100).toFixed(0)}% of median height (${this.filterStats.medianHeightPx}px).`);
-    this.setText("preproc-stat-min-width", `Removed by width rule: ${this.filterStats.widthRemoved}`);
-    this.setText("preproc-stat-min-height", `Removed by height rule: ${this.filterStats.heightRemoved}`);
-    this.setText("preproc-stat-median", `Removed by median rule: ${this.filterStats.medianRemoved}`);
+    this.setText("preproc-rule-min-width", this.t("preproc.rule.minWidth", { percent: (this.getNum("preproc-min-width", 0) * 100).toFixed(1) }));
+    this.setText("preproc-rule-min-height", this.t("preproc.rule.minHeight", { percent: (this.getNum("preproc-min-height", 0) * 100).toFixed(1) }));
+    this.setText("preproc-rule-median", this.t("preproc.rule.median", {
+      percent: (this.getNum("preproc-median", 0.45) * 100).toFixed(0),
+      medianPx: this.filterStats.medianHeightPx
+    }));
+    this.setText("preproc-stat-min-width", this.t("preproc.stat.minWidth", { count: this.filterStats.widthRemoved }));
+    this.setText("preproc-stat-min-height", this.t("preproc.stat.minHeight", { count: this.filterStats.heightRemoved }));
+    this.setText("preproc-stat-median", this.t("preproc.stat.median", { count: this.filterStats.medianRemoved }));
+  }
+
+  private applyLanguage(): void {
+    applyTranslationsToElement(this.backdrop, this.opts.getConfig().ui.language);
+    this.backdrop.dir = this.opts.getConfig().ui.language === "ar" ? "rtl" : "ltr";
   }
 
   private persistConfigFromControls(): void {

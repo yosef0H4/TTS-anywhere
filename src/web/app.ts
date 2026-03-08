@@ -34,6 +34,7 @@ import { PreprocPreviewRenderer } from "../features/preprocessing/preview-render
 import type { FilteredBox, MergeGroup, RawBox } from "../features/preprocessing/types";
 import { APP_ICONS } from "../ui/lucide-icons";
 import { joinApiPath, makeOptionCacheKey, resolveVoiceSelection, type VoiceListQuery } from "./tts-option-utils";
+import { applyTranslationsToElement, translate, type TranslationKey } from "./i18n";
 import "../ui/styles.css";
 
 interface NamedOption {
@@ -127,6 +128,14 @@ export class WebApp {
     ttsStartsBySessionAndHash: {}
   };
   private detectorHealthy = false;
+  private lastRenderedActiveChunkId: string | null = null;
+  private currentLanguage(): AppConfig["ui"]["language"] {
+    return this.config.ui.language;
+  }
+
+  private t(key: TranslationKey, params?: Record<string, string | number>): string {
+    return translate(this.currentLanguage(), key, params);
+  }
 
   mount(root: HTMLElement): void {
     this.logBootstrapStep("mount.begin");
@@ -322,14 +331,14 @@ export class WebApp {
 
     if (speakingInvalidated) {
       this.abortPlaybackAndSynthesis();
-      this.setStatus(options?.source === "llm" ? "Streaming updated the spoken chunk. Playback stopped." : "Edited spoken chunk. Playback stopped.");
+      this.setStatus(options?.source === "llm" ? this.t("status.textUpdatedByStream") : this.t("status.textUpdatedByEdit"));
     }
 
     this.renderReadingPreview();
     this.maybeStartPlaybackFromStream();
 
     if (previousText !== nextText && !speakingInvalidated && options?.source === "user") {
-      this.setStatus(treatAsNewDocument ? "Text replaced. Restarting from the beginning." : "Text updated.");
+      this.setStatus(treatAsNewDocument ? this.t("status.textReplaced") : this.t("status.textUpdated"));
     }
   }
 
@@ -499,29 +508,34 @@ export class WebApp {
       create: true,
       persist: false,
       maxOptions: 500,
-      placeholder: "Select OCR model"
+      placeholder: this.t("ocr.model")
     });
 
     this.ttsModelSelect = new TomSelect(this.must<HTMLSelectElement>("tts-model"), {
       create: true,
       persist: false,
       maxOptions: 500,
-      placeholder: "Select TTS model"
+      placeholder: this.t("tts.model")
     });
 
     this.ttsVoiceSelect = new TomSelect(this.must<HTMLSelectElement>("tts-voice"), {
       create: true,
       persist: false,
       maxOptions: 500,
-      placeholder: "Select voice"
+      placeholder: this.t("tts.voice")
     });
 
     this.bindSelectorFetchBehavior(this.llmModelSelect, "llm-model", () => this.fetchLlmModels(false));
     this.bindSelectorFetchBehavior(this.ttsModelSelect, "tts-model", () => this.fetchTtsModels(false));
     this.bindSelectorFetchBehavior(this.ttsVoiceSelect, "tts-voice", () => this.fetchTtsVoices(false));
+    this.updateTomSelectPlaceholders();
 
     this.must<HTMLButtonElement>("llm-refetch").addEventListener("click", () => {
       void this.fetchLlmModels(true);
+    });
+    this.must<HTMLButtonElement>("llm-prompt-reset").addEventListener("click", () => {
+      this.must<HTMLInputElement>("llm-prompt").value = DEFAULT_CONFIG.llm.promptTemplate;
+      this.syncConfigFromInputs();
     });
 
     this.must<HTMLButtonElement>("tts-refetch").addEventListener("click", async () => {
@@ -608,20 +622,20 @@ export class WebApp {
       if (!payload.ok) {
         this.detectorHealthy = false;
         this.applyDetectorHealthGate();
-        this.updateStatusChip("detector-status-chip", "Unhealthy", "error");
-        if (showStatus) this.setStatus(`${providerLabel} health failed: unhealthy`);
+        this.updateStatusChip("detector-status-chip", this.t("statuschip.unhealthy"), "error");
+        if (showStatus) this.setStatus(this.t("status.detectorHealthFailedUnhealthy", { provider: providerLabel }));
         return;
       }
       this.detectorHealthy = true;
       this.applyDetectorHealthGate();
       this.updateStatusChip("detector-status-chip", `Healthy (${payload.detector ?? this.config.textProcessing.detectorProvider})`, "ok");
-      if (showStatus) this.setStatus(`${providerLabel} is healthy.`);
+      if (showStatus) this.setStatus(this.t("status.detectorHealthy", { provider: providerLabel }));
     } catch (error) {
       const message = String(error);
       this.detectorHealthy = false;
       this.applyDetectorHealthGate();
-      this.updateStatusChip("detector-status-chip", "Unreachable", "error");
-      if (showStatus) this.setStatus(`${providerLabel} health failed: ${message}`);
+      this.updateStatusChip("detector-status-chip", this.t("statuschip.unreachable"), "error");
+      if (showStatus) this.setStatus(this.t("status.detectorHealthFailed", { provider: providerLabel, message }));
     }
   }
 
@@ -636,15 +650,15 @@ export class WebApp {
         const body = (await response.json()) as unknown;
         const options = this.parseOptions(body);
         if (options.length > 0) {
-          this.updateStatusChip("tts-status-chip", "Voices loaded", "ok");
+          this.updateStatusChip("tts-status-chip", this.t("statuschip.voicesLoaded"), "ok");
           return options;
         }
       } catch {
         // try next endpoint
       }
     }
-    this.updateStatusChip("tts-status-chip", "Voice list unavailable", "error");
-    this.setStatus("Voice list unavailable from API; you can still type manually.");
+    this.updateStatusChip("tts-status-chip", this.t("statuschip.voiceListUnavailable"), "error");
+    this.setStatus(this.t("status.voiceListUnavailable"));
     return this.config.tts.voice ? [{ value: this.config.tts.voice, label: this.config.tts.voice }] : [];
   }
 
@@ -664,7 +678,7 @@ export class WebApp {
         headers: this.authHeaders(apiKey)
       });
       if (!response.ok) {
-        this.setStatus(`Failed to fetch ${namespace}: ${response.status}`);
+        this.setStatus(this.t("status.fetchFailed", { namespace, reason: response.status }));
         if (namespace.startsWith("llm")) this.updateStatusChip("llm-status-chip", `HTTP ${response.status}`, "error");
         if (namespace.startsWith("tts")) this.updateStatusChip("tts-status-chip", `HTTP ${response.status}`, "error");
         return [];
@@ -678,15 +692,15 @@ export class WebApp {
 
       this.optionCache.set(cacheKey, options);
       if (force) {
-        this.setStatus(`Refetched ${namespace}`);
+        this.setStatus(this.t("status.refetched", { namespace }));
       }
-      if (namespace.startsWith("llm")) this.updateStatusChip("llm-status-chip", `Loaded ${options.length}`, "ok");
-      if (namespace.startsWith("tts")) this.updateStatusChip("tts-status-chip", `Loaded ${options.length}`, "ok");
+      if (namespace.startsWith("llm")) this.updateStatusChip("llm-status-chip", this.t("statuschip.loadedCount", { count: options.length }), "ok");
+      if (namespace.startsWith("tts")) this.updateStatusChip("tts-status-chip", this.t("statuschip.loadedCount", { count: options.length }), "ok");
       return options;
     } catch (error) {
-      this.setStatus(`Failed to fetch ${namespace}: ${String(error)}`);
-      if (namespace.startsWith("llm")) this.updateStatusChip("llm-status-chip", "Network error", "error");
-      if (namespace.startsWith("tts")) this.updateStatusChip("tts-status-chip", "Network error", "error");
+      this.setStatus(this.t("status.fetchFailed", { namespace, reason: String(error) }));
+      if (namespace.startsWith("llm")) this.updateStatusChip("llm-status-chip", this.t("statuschip.networkError"), "error");
+      if (namespace.startsWith("tts")) this.updateStatusChip("tts-status-chip", this.t("statuschip.networkError"), "error");
       return [];
     }
   }
@@ -772,6 +786,48 @@ export class WebApp {
     el.textContent = text;
   }
 
+  private setRawTextValuePreservingScroll(value: string): void {
+    const raw = this.must<HTMLTextAreaElement>("raw-text");
+    const scrollTop = raw.scrollTop;
+    const scrollLeft = raw.scrollLeft;
+    const selectionStart = raw.selectionStart;
+    const selectionEnd = raw.selectionEnd;
+    raw.value = value;
+    raw.scrollTop = scrollTop;
+    raw.scrollLeft = scrollLeft;
+    try {
+      raw.setSelectionRange(selectionStart, selectionEnd);
+    } catch {
+      // Ignore when the textarea is not focusable or selection is invalid.
+    }
+  }
+
+  private applyStaticTranslations(): void {
+    applyTranslationsToElement(document, this.currentLanguage());
+  }
+
+  private updateTomSelectPlaceholders(): void {
+    const pairs: Array<[TomSelect | null, string]> = [
+      [this.llmModelSelect, this.t("ocr.model")],
+      [this.ttsModelSelect, this.t("tts.model")],
+      [this.ttsVoiceSelect, this.t("tts.voice")]
+    ];
+    for (const [select, placeholder] of pairs) {
+      if (!select) continue;
+      select.settings.placeholder = placeholder;
+      select.control_input.placeholder = placeholder;
+      select.input.setAttribute("placeholder", placeholder);
+    }
+  }
+
+  private applyLanguage(): void {
+    document.documentElement.lang = this.currentLanguage();
+    document.documentElement.dir = this.currentLanguage() === "ar" ? "rtl" : "ltr";
+    this.applyStaticTranslations();
+    this.updateTomSelectPlaceholders();
+    this.renderPlayState();
+  }
+
   private bindSettings(): void {
     const sidebar = this.must<HTMLElement>("sidebar");
     const drawer = this.must<HTMLElement>("settings-drawer");
@@ -811,6 +867,12 @@ export class WebApp {
 
     this.must<HTMLButtonElement>("theme-zen").addEventListener("click", () => this.setTheme("zen"));
     this.must<HTMLButtonElement>("theme-pink").addEventListener("click", () => this.setTheme("pink"));
+    this.must<HTMLSelectElement>("ui-language").addEventListener("change", () => {
+      const value = this.must<HTMLSelectElement>("ui-language").value;
+      this.config.ui.language = value === "ar" ? "ar" : "en";
+      this.renderConfig();
+      this.store.save(this.config);
+    });
 
     const basicIds = [
       "llm-url",
@@ -845,7 +907,7 @@ export class WebApp {
     this.must<HTMLInputElement>("detector-url").addEventListener("change", () => {
       this.detectorHealthy = false;
       this.applyDetectorHealthGate();
-      this.updateStatusChip("detector-status-chip", "Unreachable", "error");
+      this.updateStatusChip("detector-status-chip", this.t("statuschip.unreachable"), "error");
     });
 
     this.must<HTMLInputElement>("diagnostics-enabled").addEventListener("change", () => this.syncConfigFromInputs());
@@ -880,7 +942,7 @@ export class WebApp {
       void this.syncElectronCaptureHotkeyFromSettings();
       void this.syncElectronCopyHotkeyFromSettings();
       void this.syncElectronCaptureRectangleSetting();
-      this.setStatus("Settings reset to defaults.");
+      this.setStatus(this.t("status.settingsReset"));
     });
 
     this.must<HTMLButtonElement>("btn-hotkey-record").addEventListener("click", () => {
@@ -971,12 +1033,14 @@ export class WebApp {
     this.config.system.diagnosticsEnabled = this.must<HTMLInputElement>("diagnostics-enabled").checked;
     this.config.system.captureDrawRectangle = this.must<HTMLInputElement>("capture-draw-rectangle").checked;
     this.config.ui.showChunkDiagnostics = this.must<HTMLInputElement>("show-chunk-diagnostics").checked;
+    this.config.ui.language = this.must<HTMLSelectElement>("ui-language").value === "ar" ? "ar" : "en";
     this.applyUiState();
     this.store.save(this.config);
     this.updateTimelineFromRawText();
   }
 
   private renderConfig(): void {
+    this.must<HTMLSelectElement>("ui-language").value = this.config.ui.language;
     this.must<HTMLInputElement>("llm-url").value = this.config.llm.baseUrl;
     this.must<HTMLInputElement>("llm-key").value = this.config.llm.apiKey;
     this.must<HTMLInputElement>("llm-prompt").value = this.config.llm.promptTemplate;
@@ -1004,8 +1068,8 @@ export class WebApp {
     this.must<HTMLInputElement>("capture-draw-rectangle").checked = this.config.system.captureDrawRectangle;
     this.must<HTMLInputElement>("capture-hotkey").value = this.pendingCaptureHotkey ?? this.config.system.captureHotkey;
     this.must<HTMLInputElement>("copy-play-hotkey").value = this.pendingCopyPlayHotkey ?? this.config.system.copyPlayHotkey;
-    this.setCaptureHotkeyRecordingStatus(window.electronAPI ? "Current hotkey is active." : "Hotkey editing is available in Electron only.");
-    this.setCopyHotkeyRecordingStatus(window.electronAPI ? "Current hotkey is active." : "Hotkey editing is available in Electron only.");
+    this.setCaptureHotkeyRecordingStatus(window.electronAPI ? this.t("hotkey.currentActive") : this.t("hotkey.electronOnly"));
+    this.setCopyHotkeyRecordingStatus(window.electronAPI ? this.t("hotkey.currentActive") : this.t("hotkey.electronOnly"));
     this.renderHotkeyButtonState();
     this.must<HTMLInputElement>("show-chunk-diagnostics").checked = this.config.ui.showChunkDiagnostics;
     this.must<HTMLSelectElement>("log-level").value = this.config.logging.level;
@@ -1016,13 +1080,14 @@ export class WebApp {
     this.must<HTMLInputElement>("speed-slider").value = String(this.config.ui.playbackRate);
     this.must<HTMLInputElement>("speed-input").value = String(this.config.ui.playbackRate);
     this.must<HTMLDivElement>("settings-last-import").textContent = this.config.system.lastImportAt
-      ? `Last import: ${this.config.system.lastImportAt}`
-      : "No import yet.";
+      ? this.t("settings.lastImport", { timestamp: this.config.system.lastImportAt })
+      : this.t("settings.noImportYet");
 
     this.audio.volume = Math.max(0, Math.min(1, this.config.ui.volume / 100));
     this.audio.playbackRate = this.config.ui.playbackRate;
 
     this.applyUiState();
+    this.applyLanguage();
 
     this.applyOptions(this.llmModelSelect, [{ value: this.config.llm.model, label: this.config.llm.model }], this.config.llm.model);
     this.applyOptions(this.ttsModelSelect, [{ value: this.config.tts.model, label: this.config.tts.model }], this.config.tts.model);
@@ -1030,7 +1095,7 @@ export class WebApp {
     this.applyDetectorHealthGate();
     this.updateStatusChip(
       "detector-status-chip",
-      this.detectorHealthy ? this.describeDetectionMode(this.config.textProcessing.detectionMode) : "Unreachable",
+      this.detectorHealthy ? this.describeDetectionMode(this.config.textProcessing.detectionMode) : this.t("statuschip.unreachable"),
       this.detectorHealthy ? "idle" : "error"
     );
     this.renderMainPreviewOverlay();
@@ -1041,6 +1106,7 @@ export class WebApp {
     shell.dataset.theme = this.config.ui.theme;
     shell.dataset.settingsOpen = this.config.ui.settingsDrawerOpen ? "true" : "false";
     shell.dataset.settingsPeek = this.settingsPeekOpen ? "true" : "false";
+    shell.dataset.language = this.config.ui.language;
     shell.dataset.density = "comfortable";
     shell.dataset.showAdvanced = "true";
     shell.dataset.showDiagnostics = this.config.ui.showChunkDiagnostics ? "true" : "false";
@@ -1063,11 +1129,11 @@ export class WebApp {
   private describeDetectionMode(mode: AppConfig["textProcessing"]["detectionMode"]): string {
     switch (mode) {
       case "fullscreen_only":
-        return "Full screen only";
+        return this.t("detection.mode.fullscreen_only");
       case "all":
-        return "All screenshots";
+        return this.t("detection.mode.all");
       default:
-        return "Off";
+        return this.t("detection.mode.off");
     }
   }
 
@@ -1151,7 +1217,7 @@ export class WebApp {
     a.download = "tts-snipper-settings.json";
     a.click();
     URL.revokeObjectURL(url);
-    this.setStatus("Settings exported.");
+    this.setStatus(this.t("status.settingsExported"));
   }
 
   private async importSettings(event: Event): Promise<void> {
@@ -1169,6 +1235,7 @@ export class WebApp {
         ui: {
           ...DEFAULT_CONFIG.ui,
           ...parsed.ui,
+          language: parsed.ui?.language === "ar" || parsed.ui?.language === "en" ? parsed.ui.language : DEFAULT_CONFIG.ui.language,
           panels: mergedPanels
         },
         system: { ...DEFAULT_CONFIG.system, ...parsed.system },
@@ -1205,10 +1272,10 @@ export class WebApp {
       void this.syncElectronCaptureHotkeyFromSettings();
       void this.syncElectronCopyHotkeyFromSettings();
       void this.syncElectronCaptureRectangleSetting();
-      this.setStatus("Settings imported.");
+      this.setStatus(this.t("status.settingsImported"));
       loggers.settings.info("Settings imported");
     } catch (error) {
-      this.setStatus(`Import failed: ${String(error)}`);
+      this.setStatus(this.t("status.importFailed", { error: String(error) }));
     } finally {
       input.value = "";
     }
@@ -1328,10 +1395,10 @@ export class WebApp {
           await this.runPipeline(dataUrl, { source: "clipboard" });
           return;
         }
-        this.setStatus("No image in clipboard. Copy an image, then use Paste Image or upload.");
+        this.setStatus(this.t("status.noImageClipboard"));
       } catch (error) {
         loggers.capture.error("Paste image failed", { error: String(error) });
-        this.setStatus(`Paste image failed: ${String(error)}`);
+        this.setStatus(this.t("status.pasteImageFailed", { error: String(error) }));
       }
     });
 
@@ -1347,7 +1414,7 @@ export class WebApp {
 
     this.must<HTMLButtonElement>("btn-extract").addEventListener("click", async () => {
       if (!this.lastOriginalImageDataUrl) {
-        this.setStatus("Load an image first.");
+        this.setStatus(this.t("status.loadImageFirst"));
         return;
       }
       try {
@@ -1359,7 +1426,7 @@ export class WebApp {
         this.renderMainPreviewOverlay();
         await this.runPreparedOcr();
       } catch (error) {
-        this.setStatus(`Extract failed: ${String(error)}`);
+        this.setStatus(this.t("status.extractFailed", { error: String(error) }));
       }
     });
 
@@ -1458,17 +1525,17 @@ export class WebApp {
   private async playCopiedText(text: string): Promise<void> {
     const nextText = text.trim();
     if (!nextText) {
-      this.setStatus("Copy hotkey triggered but no text was copied.");
+      this.setStatus(this.t("status.copyHotkeyNoText"));
       return;
     }
     this.must<HTMLTextAreaElement>("raw-text").value = nextText;
     this.updateTimelineFromRawText();
     this.resetPlaybackForTextChange();
-    this.setStatus("Copied text received. Playing...");
+    this.setStatus(this.t("status.copiedTextPlaying"));
     try {
       await this.startOrResumePlayback();
     } catch (error) {
-      this.setStatus(`Playback failed: ${String(error)}`);
+      this.setStatus(this.t("status.playbackFailed", { error: String(error) }));
     }
   }
 
@@ -1497,11 +1564,11 @@ export class WebApp {
       this.config.system.captureHotkey = applied;
       this.pendingCaptureHotkey = null;
       this.must<HTMLInputElement>("capture-hotkey").value = applied;
-      this.setCaptureHotkeyRecordingStatus("Current hotkey is active.");
+      this.setCaptureHotkeyRecordingStatus(this.t("hotkey.currentActive"));
       this.renderHotkeyButtonState();
       this.store.save(this.config);
     } catch (error) {
-      this.setStatus(`Failed to apply saved hotkey: ${String(error)}`);
+      this.setStatus(this.t("status.applySavedHotkeyFailed", { error: String(error) }));
     }
   }
 
@@ -1512,11 +1579,11 @@ export class WebApp {
       this.config.system.copyPlayHotkey = applied;
       this.pendingCopyPlayHotkey = null;
       this.must<HTMLInputElement>("copy-play-hotkey").value = applied;
-      this.setCopyHotkeyRecordingStatus("Current hotkey is active.");
+      this.setCopyHotkeyRecordingStatus(this.t("hotkey.currentActive"));
       this.renderHotkeyButtonState();
       this.store.save(this.config);
     } catch (error) {
-      this.setStatus(`Failed to apply saved copy hotkey: ${String(error)}`);
+      this.setStatus(this.t("status.applySavedCopyHotkeyFailed", { error: String(error) }));
     }
   }
 
@@ -1528,7 +1595,7 @@ export class WebApp {
       this.must<HTMLInputElement>("capture-draw-rectangle").checked = applied;
       this.store.save(this.config);
     } catch (error) {
-      this.setStatus(`Failed to apply rectangle setting: ${String(error)}`);
+      this.setStatus(this.t("status.applyRectangleSettingFailed", { error: String(error) }));
     }
   }
 
@@ -1562,13 +1629,13 @@ export class WebApp {
     this.captureHotkeyRecording = true;
     this.pendingCaptureHotkey = null;
     this.must<HTMLInputElement>("capture-hotkey").value = "";
-    this.setCaptureHotkeyRecordingStatus("Recording... press your desired hotkey.");
+    this.setCaptureHotkeyRecordingStatus(this.t("hotkey.recording"));
     this.renderHotkeyButtonState();
     try {
       await window.electronAPI?.beginCaptureHotkeyEdit?.();
     } catch (error) {
       this.captureHotkeyRecording = false;
-      this.setCaptureHotkeyRecordingStatus(`Failed to start recording: ${String(error)}`);
+      this.setCaptureHotkeyRecordingStatus(this.t("hotkey.startFailed", { error: String(error) }));
       this.renderHotkeyButtonState();
       return;
     }
@@ -1581,7 +1648,7 @@ export class WebApp {
       event.stopPropagation();
       this.pendingCaptureHotkey = normalized;
       this.must<HTMLInputElement>("capture-hotkey").value = normalized;
-      this.setCaptureHotkeyRecordingStatus(`Captured: ${normalized}. Click Apply to activate.`);
+      this.setCaptureHotkeyRecordingStatus(this.t("hotkey.captured", { hotkey: normalized }));
       this.stopCaptureHotkeyRecordingListener();
       this.captureHotkeyRecording = false;
       this.renderHotkeyButtonState();
@@ -1607,10 +1674,10 @@ export class WebApp {
       this.captureHotkeyRecording = false;
       this.stopCaptureHotkeyRecordingListener();
       this.must<HTMLInputElement>("capture-hotkey").value = next;
-      this.setCaptureHotkeyRecordingStatus(`Active hotkey: ${next}`);
+      this.setCaptureHotkeyRecordingStatus(this.t("hotkey.active", { hotkey: next }));
       this.store.save(this.config);
     } catch (error) {
-      this.setCaptureHotkeyRecordingStatus(`Apply failed: ${String(error)}`);
+      this.setCaptureHotkeyRecordingStatus(this.t("hotkey.applyFailed", { error: String(error) }));
       return;
     }
     this.renderHotkeyButtonState();
@@ -1626,10 +1693,10 @@ export class WebApp {
         this.config.system.captureHotkey = restored;
       }
     } catch (error) {
-      this.setStatus(`Failed to cancel hotkey edit: ${String(error)}`);
+      this.setStatus(this.t("status.cancelHotkeyEditFailed", { error: String(error) }));
     }
     this.must<HTMLInputElement>("capture-hotkey").value = this.config.system.captureHotkey;
-    this.setCaptureHotkeyRecordingStatus("Current hotkey is active.");
+    this.setCaptureHotkeyRecordingStatus(this.t("hotkey.currentActive"));
     this.renderHotkeyButtonState();
     this.store.save(this.config);
   }
@@ -1639,13 +1706,13 @@ export class WebApp {
     this.copyHotkeyRecording = true;
     this.pendingCopyPlayHotkey = null;
     this.must<HTMLInputElement>("copy-play-hotkey").value = "";
-    this.setCopyHotkeyRecordingStatus("Recording... press your desired hotkey.");
+    this.setCopyHotkeyRecordingStatus(this.t("hotkey.recording"));
     this.renderHotkeyButtonState();
     try {
       await window.electronAPI?.beginCopyHotkeyEdit?.();
     } catch (error) {
       this.copyHotkeyRecording = false;
-      this.setCopyHotkeyRecordingStatus(`Failed to start recording: ${String(error)}`);
+      this.setCopyHotkeyRecordingStatus(this.t("hotkey.startFailed", { error: String(error) }));
       this.renderHotkeyButtonState();
       return;
     }
@@ -1658,7 +1725,7 @@ export class WebApp {
       event.stopPropagation();
       this.pendingCopyPlayHotkey = normalized;
       this.must<HTMLInputElement>("copy-play-hotkey").value = normalized;
-      this.setCopyHotkeyRecordingStatus(`Captured: ${normalized}. Click Apply to activate.`);
+      this.setCopyHotkeyRecordingStatus(this.t("hotkey.captured", { hotkey: normalized }));
       this.stopCopyHotkeyRecordingListener();
       this.copyHotkeyRecording = false;
       this.renderHotkeyButtonState();
@@ -1684,10 +1751,10 @@ export class WebApp {
       this.copyHotkeyRecording = false;
       this.stopCopyHotkeyRecordingListener();
       this.must<HTMLInputElement>("copy-play-hotkey").value = next;
-      this.setCopyHotkeyRecordingStatus(`Active hotkey: ${next}`);
+      this.setCopyHotkeyRecordingStatus(this.t("hotkey.active", { hotkey: next }));
       this.store.save(this.config);
     } catch (error) {
-      this.setCopyHotkeyRecordingStatus(`Apply failed: ${String(error)}`);
+      this.setCopyHotkeyRecordingStatus(this.t("hotkey.applyFailed", { error: String(error) }));
       return;
     }
     this.renderHotkeyButtonState();
@@ -1703,10 +1770,10 @@ export class WebApp {
         this.config.system.copyPlayHotkey = restored;
       }
     } catch (error) {
-      this.setStatus(`Failed to cancel copy hotkey edit: ${String(error)}`);
+      this.setStatus(this.t("status.cancelCopyHotkeyEditFailed", { error: String(error) }));
     }
     this.must<HTMLInputElement>("copy-play-hotkey").value = this.config.system.copyPlayHotkey;
-    this.setCopyHotkeyRecordingStatus("Current hotkey is active.");
+    this.setCopyHotkeyRecordingStatus(this.t("hotkey.currentActive"));
     this.renderHotkeyButtonState();
     this.store.save(this.config);
   }
@@ -1776,7 +1843,7 @@ export class WebApp {
       });
       if (nextIndex >= this.timeline.chunks.length) {
         this.chunkPlaybackMode = false;
-        this.setStatus("Ready");
+        this.setStatus(this.t("playback.ready"));
         this.renderPlayState();
         return;
       }
@@ -1789,7 +1856,7 @@ export class WebApp {
 
   private async runPipeline(dataUrl: string, captureContext: CaptureContext): Promise<void> {
     const { runId, signal } = this.startRun();
-    this.setStatus("Running OCR + TTS...");
+    this.setStatus(this.t("status.runningPipeline"));
     const done = loggers.pipeline.time("pipeline.run");
     try {
       this.lastOriginalImageDataUrl = await normalizeImageDataUrl(dataUrl);
@@ -1830,7 +1897,7 @@ export class WebApp {
         loggers.pipeline.info("Pipeline cancelled", { runId });
       } else {
         loggers.pipeline.error("Pipeline failed", { error: String(error) });
-        this.setStatus(`Pipeline error: ${String(error)}`);
+        this.setStatus(this.t("status.pipelineError", { error: String(error) }));
       }
     } finally {
       this.finishRun(runId);
@@ -1847,17 +1914,17 @@ export class WebApp {
     this.ocrStreamDone = false;
     this.activeOcrRequests = 0;
     this.setRawTextLock(true);
-    this.must<HTMLTextAreaElement>("raw-text").value = "";
+    this.setRawTextValuePreservingScroll("");
     this.lastPlaybackText = "";
     this.replaceTimelineWithChunks([]);
     this.renderReadingPreview();
-    this.setStatus("Streaming OCR text...");
+    this.setStatus(this.t("status.streamingOcr"));
 
     let streamText = "";
     const applyStreamToken = (token: string): void => {
       if (streamSession !== this.ocrStreamSession || signal.aborted) return;
       streamText += token;
-      this.must<HTMLTextAreaElement>("raw-text").value = streamText;
+      this.setRawTextValuePreservingScroll(streamText);
       this.reconcileText(this.getPlaybackText(), { source: "llm" });
     };
 
@@ -1884,7 +1951,7 @@ export class WebApp {
       this.ocrStreamDone = true;
       this.ocrStreaming = false;
       this.setRawTextLock(false);
-      this.must<HTMLTextAreaElement>("raw-text").value = result.text;
+      this.setRawTextValuePreservingScroll(result.text);
       this.reconcileText(this.getPlaybackText(), { source: "llm", finalizeTail: true });
       void this.startOrResumePlayback();
       return { text: result.text };
@@ -1895,7 +1962,7 @@ export class WebApp {
       if (this.isAbortError(error)) {
         throw error;
       }
-      this.setStatus(`OCR stream error (partial kept): ${String(error)}`);
+      this.setStatus(this.t("status.ocrStreamError", { error: String(error) }));
       return { text: this.getPlaybackText() };
     } finally {
       if (streamSession === this.ocrStreamSession) {
@@ -1919,7 +1986,7 @@ export class WebApp {
     if (this.maxPlayableChunkIndex() < 0) return;
     this.playbackStartInFlight = true;
     void this.startOrResumePlayback().catch((error) => {
-      this.setStatus(`Playback failed: ${String(error)}`);
+      this.setStatus(this.t("status.playbackFailed", { error: String(error) }));
     }).finally(() => {
       this.playbackStartInFlight = false;
     });
@@ -2001,7 +2068,7 @@ export class WebApp {
       if (this.isAbortError(error)) {
         loggers.pipeline.info("Prepared OCR cancelled", { runId });
       } else {
-        this.setStatus(`Pipeline error: ${String(error)}`);
+        this.setStatus(this.t("status.pipelineError", { error: String(error) }));
       }
     } finally {
       this.finishRun(runId);
@@ -2053,10 +2120,10 @@ export class WebApp {
         if (signal?.aborted) throw new Error("Cancelled");
         if (runId !== undefined) this.throwIfStale(runId);
         detectedBoxes = detect.boxes;
-        this.updateStatusChip("detector-status-chip", `Loaded ${detect.boxes.length}`, "ok");
+        this.updateStatusChip("detector-status-chip", this.t("statuschip.loadedCount", { count: detect.boxes.length }), "ok");
       } catch (error) {
         if (this.isAbortError(error)) throw error;
-        this.updateStatusChip("detector-status-chip", "Detect failed", "error");
+        this.updateStatusChip("detector-status-chip", this.t("statuschip.detectFailed"), "error");
         loggers.pipeline.warn("Text detection failed, falling back to manual/full image", {
           provider: this.config.textProcessing.detectorProvider,
           error: String(error)
@@ -2122,7 +2189,7 @@ export class WebApp {
   private async startOrResumePlayback(): Promise<void> {
     const text = this.getPlaybackText().trim();
     if (!text) {
-      this.setStatus("Enter text first.");
+      this.setStatus(this.t("status.enterTextFirst"));
       return;
     }
 
@@ -2134,11 +2201,11 @@ export class WebApp {
     this.reconcileText(text, { source: "user", finalizeTail: true });
 
     if (this.timeline.chunks.length === 0) {
-      this.setStatus("Nothing to read.");
+      this.setStatus(this.t("status.nothingToRead"));
       return;
     }
     if (this.programmaticPauseActive) {
-      this.setStatus(this.programmaticPauseReason || "Paused by cursor gate.");
+      this.setStatus(this.programmaticPauseReason || this.t("status.pausedByCursorGate"));
       this.renderPlayState();
       return;
     }
@@ -2162,14 +2229,14 @@ export class WebApp {
     if (!this.isChunkPlayable(index)) {
       this.chunkPlaybackMode = false;
       this.renderPlayState();
-      this.setStatus("Waiting for typing to settle before this chunk is playable...");
+      this.setStatus(this.t("status.waitingTyping"));
       return;
     }
     if (index > this.maxPlayableChunkIndex()) {
       this.chunkPlaybackMode = false;
       this.renderPlayState();
       if (this.ocrStreaming && !this.ocrStreamDone) {
-        this.setStatus("Waiting for OCR stream to finalize next chunk...");
+        this.setStatus(this.t("status.waitingOcrFinalize"));
       }
       return;
     }
@@ -2189,7 +2256,7 @@ export class WebApp {
     this.activeChunkIndex = chunk.index;
     this.renderReadingPreview();
     this.prefetchFromIndex(chunk.id, session);
-    this.setStatus(`Buffering chunk ${chunk.index + 1}/${this.timeline.chunks.length}...`);
+    this.setStatus(this.t("status.bufferingChunk", { current: chunk.index + 1, total: this.timeline.chunks.length }));
 
     try {
       const audioUrl = await this.getChunkAudioUrl(chunk.id, session);
@@ -2201,17 +2268,12 @@ export class WebApp {
       this.speakingRevision = chunk.revision;
       this.renderReadingPreview();
       await this.audio.play();
-      this.setStatus(`Playing chunk ${chunk.index + 1}/${this.timeline.chunks.length}`);
+      this.setStatus(this.t("status.playingChunk", { current: chunk.index + 1, total: this.timeline.chunks.length }));
       this.prefetchFromIndex(chunk.id, session);
     } catch (error) {
       if (session !== this.chunkPlaybackSession) return;
-      chunk.status = "failed";
-      this.chunkPlaybackMode = false;
-      this.speakingChunkId = null;
-      this.speakingRevision = null;
-      this.renderReadingPreview();
-      this.renderPlayState();
-      this.setStatus(`Stopped: failed to synthesize chunk ${chunk.index + 1}/${this.timeline.chunks.length}. ${String(error)}`);
+      this.failPlaybackAtChunk(chunk.id);
+      this.setStatus(this.t("status.chunkSynthesisFailed", { current: chunk.index + 1, total: this.timeline.chunks.length, error: String(error) }));
     }
   }
 
@@ -2272,6 +2334,32 @@ export class WebApp {
     this.updateBreakButtonState();
   }
 
+  private failPlaybackAtChunk(chunkId: string): void {
+    this.chunkPlaybackSession += 1;
+    this.chunkPlaybackMode = false;
+    this.speakingChunkId = null;
+    this.speakingRevision = null;
+    this.audio.pause();
+    this.audio.src = "";
+    this.chunkAbortControllersById.forEach((controller) => controller.abort());
+    this.chunkAbortControllersById.clear();
+    this.chunkInFlightById.clear();
+
+    for (const chunk of this.getChunkRecords()) {
+      if (chunk.id === chunkId) {
+        chunk.status = "failed";
+        continue;
+      }
+      chunk.status = chunk.audioUrl ? "ready" : "dirty";
+    }
+
+    this.syncActiveChunkIndex();
+    this.renderReadingPreview();
+    this.renderPlayState();
+    this.refreshChunkDiagnostics();
+    this.updateBreakButtonState();
+  }
+
   private resetChunkVisualStateAfterAbort(): void {
     for (const chunk of this.getChunkRecords()) {
       chunk.status = chunk.audioUrl ? "ready" : "dirty";
@@ -2289,6 +2377,7 @@ export class WebApp {
 
   private renderReadingPreview(): void {
     const preview = this.must<HTMLDivElement>("reading-preview");
+    const previousActiveChunkId = this.lastRenderedActiveChunkId;
     preview.innerHTML = "";
 
     this.getChunkRecords().forEach((chunk) => {
@@ -2301,16 +2390,16 @@ export class WebApp {
         span.classList.add("chunk-draft");
       }
       if (state === "ready") {
-        span.title = "Synthesized and ready";
+        span.title = this.t("chunk.ready");
       }
       if (state === "failed") {
-        span.title = "Synthesis failed";
+        span.title = this.t("chunk.error");
       }
       const playable = this.isChunkPlayable(chunk.index);
       if (!playable) {
         span.classList.add("chunk-unplayable");
         if (!span.title) {
-          span.title = "Waiting for typing to settle";
+          span.title = this.t("chunk.waitingTyping");
         }
       }
       const shouldHighlightActive = this.chunkPlaybackMode || !this.audio.paused;
@@ -2326,8 +2415,9 @@ export class WebApp {
     });
 
     const active = preview.querySelector<HTMLElement>("span.active-chunk");
-    if (active) {
-      active.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+    this.lastRenderedActiveChunkId = active ? this.activeChunkId : null;
+    if (active && this.activeChunkId && this.activeChunkId !== previousActiveChunkId) {
+      active.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
     }
   }
 
@@ -2336,7 +2426,7 @@ export class WebApp {
     const chunk = this.getChunkRecords()[index];
     if (!chunk) return;
     if (!this.isChunkPlayable(index)) {
-      this.setStatus("Chunk is still drafting while typing is active.");
+      this.setStatus(this.t("status.chunkDrafting"));
       return;
     }
     this.abortPlaybackAndSynthesis();
@@ -2394,9 +2484,7 @@ export class WebApp {
         lastError = error;
         loggers.tts.warn("Chunk synthesis attempt failed", { index: index + 1, attempt, error: String(error) });
         if (attempt < maxAttempts) {
-          this.setStatus(
-            `Retrying chunk ${index + 1}/${this.timeline.chunks.length} (${attempt}/${retries})...`
-          );
+          this.setStatus(this.t("status.retryingChunk", { current: index + 1, total: this.timeline.chunks.length, attempt, retries }));
           continue;
         }
       }
@@ -2412,7 +2500,7 @@ export class WebApp {
     }
     icon.setAttribute("data-lucide", this.audio.paused ? "play" : "pause");
     playBtn.classList.toggle("programmatic-paused", this.programmaticPauseActive);
-    playBtn.title = this.programmaticPauseActive ? this.programmaticPauseReason : (this.audio.paused ? "Play" : "Pause");
+    playBtn.title = this.programmaticPauseActive ? this.programmaticPauseReason : (this.audio.paused ? this.t("controls.play") : this.t("controls.pause"));
     this.renderIcons();
     this.updateBreakButtonState();
   }
@@ -2599,17 +2687,17 @@ export class WebApp {
 
     viewBtn.addEventListener("click", async () => {
       const logPath = await window.electronAPI?.getLogFilePath?.();
-      pathLabel.textContent = logPath ? `Log path: ${logPath}` : "Log path: available in Electron only";
-      this.setStatus(logPath ? `Log file: ${logPath}` : "Not running in Electron");
+      pathLabel.textContent = logPath ? this.t("logging.path.value", { path: logPath }) : this.t("logging.path.availableElectronOnly");
+      this.setStatus(logPath ? this.t("logging.file.value", { path: logPath }) : this.t("status.notRunningElectron"));
     });
 
     clearBtn.addEventListener("click", async () => {
       await window.electronAPI?.clearLogs?.();
-      this.setStatus("Logs cleared");
+      this.setStatus(this.t("status.logsCleared"));
     });
 
     void window.electronAPI?.getLogFilePath?.().then((logPath) => {
-      if (logPath) pathLabel.textContent = `Log path: ${logPath}`;
+      if (logPath) pathLabel.textContent = this.t("logging.path.value", { path: logPath });
     });
   }
 

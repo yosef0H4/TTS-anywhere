@@ -3,62 +3,62 @@
     <div class="preproc-modal-header">
       <div class="preproc-header-left">
         <i data-lucide="scan" class="ui-icon"></i>
-        <h3>Preprocessing Lab</h3>
+        <h3 data-i18n="preproc.title">Preprocessing Lab</h3>
       </div>
-      <button id="preproc-close" class="window-btn" title="Close"><i data-lucide="x" class="ui-icon"></i></button>
+      <button id="preproc-close" class="window-btn" data-i18n-title="preproc.close"><i data-lucide="x" class="ui-icon"></i></button>
     </div>
     <div class="preproc-modal-body">
       <aside class="preproc-sidebar">
         <section class="preproc-section">
           <div class="preproc-section-head">
             <i data-lucide="cpu" class="ui-icon"></i>
-            <h4>Text Processing</h4>
+            <h4 data-i18n="preproc.textProcessing">Text Processing</h4>
           </div>
           <div class="preproc-field">
-            <label for="preproc-detector-provider">Provider</label>
+            <label for="preproc-detector-provider" data-i18n="preproc.provider">Provider</label>
             <div class="control-row">
-              <select id="preproc-detector-provider" title="Select detection provider">
+              <select id="preproc-detector-provider" data-i18n-title="preproc.selectProvider">
                 <option value="rapid">RapidOCR</option>
                 <option value="paddle">PaddleOCR</option>
               </select>
             </div>
           </div>
           <div class="preproc-field">
-            <label for="preproc-detect-mode">Text Processing Scope</label>
+            <label for="preproc-detect-mode" data-i18n="preproc.scope">Text Processing Scope</label>
             <div class="control-row">
-              <select id="preproc-detect-mode" title="Select when box detection should run">
-                <option value="off">Off</option>
-                <option value="fullscreen_only">Full screen only</option>
-                <option value="all">All screenshots</option>
+              <select id="preproc-detect-mode" data-i18n-title="preproc.selectScope">
+                <option value="off" data-i18n="detection.scope.off">Off</option>
+                <option value="fullscreen_only" data-i18n="detection.scope.fullscreen_only">Full screen only</option>
+                <option value="all" data-i18n="detection.scope.all">All screenshots</option>
               </select>
             </div>
           </div>
           <div class="preproc-field">
-            <label for="preproc-detector-url">Server URL</label>
+            <label for="preproc-detector-url" data-i18n="preproc.serverUrl">Server URL</label>
             <div class="preproc-input-row">
-              <input id="preproc-detector-url" type="text" placeholder="http://127.0.0.1:8091" title="Detection service base URL" />
-              <button id="preproc-detector-health" class="window-btn" title="Check server health"><i data-lucide="activity" class="ui-icon"></i></button>
+              <input id="preproc-detector-url" type="text" placeholder="http://127.0.0.1:8091" data-i18n-title="preproc.serverUrlTitle" />
+              <button id="preproc-detector-health" class="window-btn" data-i18n-title="preproc.checkServerHealth"><i data-lucide="activity" class="ui-icon"></i></button>
             </div>
           </div>
           <div id="preproc-health-status" class="preproc-hint"></div>
-          <button id="preproc-detect-now" class="preproc-action-btn" title="Run detection now">
+          <button id="preproc-detect-now" class="preproc-action-btn" data-i18n-title="preproc.runDetectionNow">
             <i data-lucide="scan-search" class="ui-icon"></i>
-            <span>Run Detection</span>
+            <span data-i18n="preproc.runDetection">Run Detection</span>
           </button>
         </section>
 
         <section class="preproc-section">
           <div class="preproc-section-head">
             <i data-lucide="sliders-horizontal" class="ui-icon"></i>
-            <h4>Quality</h4>
+            <h4 data-i18n="preproc.quality">Quality</h4>
           </div>
           <div class="viz-wrap"><canvas id="preproc-quality-viz" class="side-viz" width="320" height="60"></canvas></div>
           <div class="preproc-field">
-            <label>Max Dimension <span id="preproc-max-dim-val" class="val-badge"></span></label>
+            <label><span data-i18n="preproc.maxDimension">Max Dimension</span> <span id="preproc-max-dim-val" class="val-badge"></span></label>
             <div class="control-row">
-              <input id="preproc-max-dim" type="range" min="360" max="3840" step="60" title="Resize image to this max dimension before OCR">
+              <input id="preproc-max-dim" type="range" min="360" max="3840" step="60" data-i18n-title="preproc.maxDimensionTitle">
               <input id="preproc-max-dim-num" type="number" min="360" max="3840" step="60" class="control-num">
-              <button id="preproc-max-dim-reset" class="control-reset" title="Reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
+              <button id="preproc-max-dim-reset" class="control-reset" data-i18n-title="common.reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
             </div>
           </div>
         </section>
@@ -66,108 +66,108 @@
         <section class="preproc-section">
           <div class="preproc-section-head">
             <i data-lucide="mouse-pointer-2" class="ui-icon"></i>
-            <h4>Selection Tools</h4>
+            <h4 data-i18n="preproc.selectionTools">Selection Tools</h4>
           </div>
-          <p class="preproc-hint">Add/Sub modifies selection mask; Manual creates deletable boxes.</p>
+          <p class="preproc-hint" data-i18n="preproc.selectionHint">Add/Sub modifies selection mask; Manual creates deletable boxes.</p>
           <div class="preproc-tool-group">
-            <button id="preproc-tool-none" class="preproc-tool-btn" title="View mode"><i data-lucide="eye" class="ui-icon"></i></button>
-            <button id="preproc-tool-add" class="preproc-tool-btn" title="Draw add-area selection mask"><i data-lucide="plus-square" class="ui-icon"></i></button>
-            <button id="preproc-tool-sub" class="preproc-tool-btn" title="Draw remove-area selection mask"><i data-lucide="minus-square" class="ui-icon"></i></button>
-            <button id="preproc-tool-manual" class="preproc-tool-btn" title="Draw explicit manual boxes"><i data-lucide="box-select" class="ui-icon"></i></button>
+            <button id="preproc-tool-none" class="preproc-tool-btn" data-i18n-title="preproc.tool.view"><i data-lucide="eye" class="ui-icon"></i></button>
+            <button id="preproc-tool-add" class="preproc-tool-btn" data-i18n-title="preproc.tool.add"><i data-lucide="plus-square" class="ui-icon"></i></button>
+            <button id="preproc-tool-sub" class="preproc-tool-btn" data-i18n-title="preproc.tool.sub"><i data-lucide="minus-square" class="ui-icon"></i></button>
+            <button id="preproc-tool-manual" class="preproc-tool-btn" data-i18n-title="preproc.tool.manual"><i data-lucide="box-select" class="ui-icon"></i></button>
           </div>
           <div class="preproc-tool-group">
-            <button id="preproc-select-all" class="preproc-tool-btn" title="Select full image mask"><i data-lucide="check-check" class="ui-icon"></i></button>
-            <button id="preproc-deselect-all" class="preproc-tool-btn" title="Deselect full image mask"><i data-lucide="square" class="ui-icon"></i></button>
-            <button id="preproc-clear-manual" class="preproc-tool-btn" title="Clear all manual boxes"><i data-lucide="trash-2" class="ui-icon"></i></button>
+            <button id="preproc-select-all" class="preproc-tool-btn" data-i18n-title="preproc.tool.selectAll"><i data-lucide="check-check" class="ui-icon"></i></button>
+            <button id="preproc-deselect-all" class="preproc-tool-btn" data-i18n-title="preproc.tool.deselectAll"><i data-lucide="square" class="ui-icon"></i></button>
+            <button id="preproc-clear-manual" class="preproc-tool-btn" data-i18n-title="preproc.tool.clearManual"><i data-lucide="trash-2" class="ui-icon"></i></button>
           </div>
         </section>
 
         <section class="preproc-section">
           <div class="preproc-section-head">
             <i data-lucide="sun-moon" class="ui-icon"></i>
-            <h4>Preprocessing</h4>
+            <h4 data-i18n="preproc.preprocessing">Preprocessing</h4>
           </div>
           <div class="preproc-field">
-            <label>Threshold <span id="preproc-threshold-val" class="val-badge"></span></label>
+            <label><span data-i18n="preproc.threshold">Threshold</span> <span id="preproc-threshold-val" class="val-badge"></span></label>
             <div class="control-row">
-              <input id="preproc-threshold" type="range" min="0" max="255" step="1" title="Convert image to binary at threshold">
+              <input id="preproc-threshold" type="range" min="0" max="255" step="1" data-i18n-title="preproc.thresholdTitle">
               <input id="preproc-threshold-num" type="number" min="0" max="255" step="1" class="control-num">
-              <button id="preproc-threshold-reset" class="control-reset" title="Reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
+              <button id="preproc-threshold-reset" class="control-reset" data-i18n-title="common.reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
             </div>
           </div>
 
           <div class="preproc-field">
-            <label>Contrast <span id="preproc-contrast-val" class="val-badge"></span></label>
+            <label><span data-i18n="preproc.contrast">Contrast</span> <span id="preproc-contrast-val" class="val-badge"></span></label>
             <div class="control-row">
-              <input id="preproc-contrast" type="range" min="0.2" max="3" step="0.1" title="Increase/decrease contrast before OCR">
+              <input id="preproc-contrast" type="range" min="0.2" max="3" step="0.1" data-i18n-title="preproc.contrastTitle">
               <input id="preproc-contrast-num" type="number" min="0.2" max="3" step="0.1" class="control-num">
-              <button id="preproc-contrast-reset" class="control-reset" title="Reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
+              <button id="preproc-contrast-reset" class="control-reset" data-i18n-title="common.reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
             </div>
           </div>
 
           <div class="preproc-field">
-            <label>Brightness <span id="preproc-brightness-val" class="val-badge"></span></label>
+            <label><span data-i18n="preproc.brightness">Brightness</span> <span id="preproc-brightness-val" class="val-badge"></span></label>
             <div class="control-row">
-              <input id="preproc-brightness" type="range" min="-100" max="100" step="1" title="Increase/decrease brightness before OCR">
+              <input id="preproc-brightness" type="range" min="-100" max="100" step="1" data-i18n-title="preproc.brightnessTitle">
               <input id="preproc-brightness-num" type="number" min="-100" max="100" step="1" class="control-num">
-              <button id="preproc-brightness-reset" class="control-reset" title="Reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
+              <button id="preproc-brightness-reset" class="control-reset" data-i18n-title="common.reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
             </div>
           </div>
 
           <div class="preproc-field">
-            <label>Dilation <span id="preproc-dilation-val" class="val-badge"></span></label>
+            <label><span data-i18n="preproc.dilation">Dilation</span> <span id="preproc-dilation-val" class="val-badge"></span></label>
             <div class="control-row">
-              <input id="preproc-dilation" type="range" min="-5" max="5" step="1" title="Positive thickens text, negative thins text">
+              <input id="preproc-dilation" type="range" min="-5" max="5" step="1" data-i18n-title="preproc.dilationTitle">
               <input id="preproc-dilation-num" type="number" min="-5" max="5" step="1" class="control-num">
-              <button id="preproc-dilation-reset" class="control-reset" title="Reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
+              <button id="preproc-dilation-reset" class="control-reset" data-i18n-title="common.reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
             </div>
           </div>
 
           <div class="preproc-row">
-            <label class="preproc-checkbox" title="Invert image colors before OCR">
+            <label class="preproc-checkbox" data-i18n-title="preproc.invertTitle">
               <input id="preproc-invert" type="checkbox">
-              <span>Invert</span>
+              <span data-i18n="preproc.invert">Invert</span>
             </label>
-            <button id="preproc-invert-reset" class="control-reset" title="Reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
+            <button id="preproc-invert-reset" class="control-reset" data-i18n-title="common.reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
           </div>
         </section>
 
         <section class="preproc-section" data-detector-dependent>
           <div class="preproc-section-head">
             <i data-lucide="filter" class="ui-icon"></i>
-            <h4>Detection Filter</h4>
-            <span class="preproc-live-badge">LIVE</span>
+            <h4 data-i18n="preproc.detectionFilter">Detection Filter</h4>
+            <span class="preproc-live-badge" data-i18n="preproc.live">LIVE</span>
           </div>
           <div class="preproc-field">
-            <label>Min Width <span id="preproc-min-width-val" class="val-badge"></span></label>
+            <label><span data-i18n="preproc.minWidth">Min Width</span> <span id="preproc-min-width-val" class="val-badge"></span></label>
             <div class="preproc-hint" id="preproc-rule-min-width"></div>
             <div class="preproc-hint" id="preproc-stat-min-width"></div>
             <div class="control-row">
-              <input id="preproc-min-width" type="range" min="0" max="0.1" step="0.001" title="Reject boxes narrower than this image-width fraction">
+              <input id="preproc-min-width" type="range" min="0" max="0.1" step="0.001" data-i18n-title="preproc.minWidthTitle">
               <input id="preproc-min-width-num" type="number" min="0" max="0.1" step="0.001" class="control-num">
-              <button id="preproc-min-width-reset" class="control-reset" title="Reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
+              <button id="preproc-min-width-reset" class="control-reset" data-i18n-title="common.reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
             </div>
           </div>
 
           <div class="preproc-field">
-            <label>Min Height <span id="preproc-min-height-val" class="val-badge"></span></label>
+            <label><span data-i18n="preproc.minHeight">Min Height</span> <span id="preproc-min-height-val" class="val-badge"></span></label>
             <div class="preproc-hint" id="preproc-rule-min-height"></div>
             <div class="preproc-hint" id="preproc-stat-min-height"></div>
             <div class="control-row">
-              <input id="preproc-min-height" type="range" min="0" max="0.1" step="0.001" title="Reject boxes shorter than this image-height fraction">
+              <input id="preproc-min-height" type="range" min="0" max="0.1" step="0.001" data-i18n-title="preproc.minHeightTitle">
               <input id="preproc-min-height-num" type="number" min="0" max="0.1" step="0.001" class="control-num">
-              <button id="preproc-min-height-reset" class="control-reset" title="Reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
+              <button id="preproc-min-height-reset" class="control-reset" data-i18n-title="common.reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
             </div>
           </div>
 
           <div class="preproc-field">
-            <label>Median Frac <span id="preproc-median-val" class="val-badge"></span></label>
+            <label><span data-i18n="preproc.medianFrac">Median Frac</span> <span id="preproc-median-val" class="val-badge"></span></label>
             <div class="preproc-hint" id="preproc-rule-median"></div>
             <div class="preproc-hint" id="preproc-stat-median"></div>
             <div class="control-row">
-              <input id="preproc-median" type="range" min="0.1" max="1.2" step="0.05" title="Adaptive filter against median text height">
+              <input id="preproc-median" type="range" min="0.1" max="1.2" step="0.05" data-i18n-title="preproc.medianFracTitle">
               <input id="preproc-median-num" type="number" min="0.1" max="1.2" step="0.05" class="control-num">
-              <button id="preproc-median-reset" class="control-reset" title="Reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
+              <button id="preproc-median-reset" class="control-reset" data-i18n-title="common.reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
             </div>
           </div>
         </section>
@@ -175,55 +175,55 @@
         <section class="preproc-section" data-detector-dependent>
           <div class="preproc-section-head">
             <i data-lucide="git-merge" class="ui-icon"></i>
-            <h4>Merge &amp; Order</h4>
-            <span class="preproc-live-badge">LIVE</span>
+            <h4 data-i18n="preproc.mergeOrder">Merge &amp; Order</h4>
+            <span class="preproc-live-badge" data-i18n="preproc.live">LIVE</span>
           </div>
           <div class="preproc-field">
-            <label>Reading Direction</label>
+            <label data-i18n="preproc.readingDirection">Reading Direction</label>
             <div class="control-row">
-              <select id="preproc-direction" title="Sort reading order for boxes">
-                <option value="horizontal_ltr">Horizontal LTR</option>
-                <option value="horizontal_rtl">Horizontal RTL</option>
-                <option value="vertical_ltr">Vertical LTR</option>
-                <option value="vertical_rtl">Vertical RTL</option>
+              <select id="preproc-direction" data-i18n-title="preproc.readingDirectionTitle">
+                <option value="horizontal_ltr" data-i18n="preproc.direction.horizontal_ltr">Horizontal LTR</option>
+                <option value="horizontal_rtl" data-i18n="preproc.direction.horizontal_rtl">Horizontal RTL</option>
+                <option value="vertical_ltr" data-i18n="preproc.direction.vertical_ltr">Vertical LTR</option>
+                <option value="vertical_rtl" data-i18n="preproc.direction.vertical_rtl">Vertical RTL</option>
               </select>
-              <button id="preproc-direction-reset" class="control-reset" title="Reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
+              <button id="preproc-direction-reset" class="control-reset" data-i18n-title="common.reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
             </div>
           </div>
 
           <div class="preproc-field">
-            <label>Merge V <span id="preproc-merge-v-val" class="val-badge"></span></label>
+            <label><span data-i18n="preproc.mergeV">Merge V</span> <span id="preproc-merge-v-val" class="val-badge"></span></label>
             <div class="control-row">
-              <input id="preproc-merge-v" type="range" min="0" max="1" step="0.01" title="Vertical gap merge tolerance">
+              <input id="preproc-merge-v" type="range" min="0" max="1" step="0.01" data-i18n-title="preproc.mergeVTitle">
               <input id="preproc-merge-v-num" type="number" min="0" max="1" step="0.01" class="control-num">
-              <button id="preproc-merge-v-reset" class="control-reset" title="Reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
+              <button id="preproc-merge-v-reset" class="control-reset" data-i18n-title="common.reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
             </div>
           </div>
 
           <div class="preproc-field">
-            <label>Merge H <span id="preproc-merge-h-val" class="val-badge"></span></label>
+            <label><span data-i18n="preproc.mergeH">Merge H</span> <span id="preproc-merge-h-val" class="val-badge"></span></label>
             <div class="control-row">
-              <input id="preproc-merge-h" type="range" min="0" max="2" step="0.01" title="Horizontal gap merge tolerance">
+              <input id="preproc-merge-h" type="range" min="0" max="2" step="0.01" data-i18n-title="preproc.mergeHTitle">
               <input id="preproc-merge-h-num" type="number" min="0" max="2" step="0.01" class="control-num">
-              <button id="preproc-merge-h-reset" class="control-reset" title="Reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
+              <button id="preproc-merge-h-reset" class="control-reset" data-i18n-title="common.reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
             </div>
           </div>
 
           <div class="preproc-field">
-            <label>Width Thresh <span id="preproc-merge-w-val" class="val-badge"></span></label>
+            <label><span data-i18n="preproc.widthThresh">Width Thresh</span> <span id="preproc-merge-w-val" class="val-badge"></span></label>
             <div class="control-row">
-              <input id="preproc-merge-w" type="range" min="0" max="1" step="0.01" title="Minimum width similarity for vertical merge">
+              <input id="preproc-merge-w" type="range" min="0" max="1" step="0.01" data-i18n-title="preproc.widthThreshTitle">
               <input id="preproc-merge-w-num" type="number" min="0" max="1" step="0.01" class="control-num">
-              <button id="preproc-merge-w-reset" class="control-reset" title="Reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
+              <button id="preproc-merge-w-reset" class="control-reset" data-i18n-title="common.reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
             </div>
           </div>
 
           <div class="preproc-field">
-            <label>Group Tol <span id="preproc-group-val" class="val-badge"></span></label>
+            <label><span data-i18n="preproc.groupTol">Group Tol</span> <span id="preproc-group-val" class="val-badge"></span></label>
             <div class="control-row">
-              <input id="preproc-group" type="range" min="0.1" max="1.2" step="0.01" title="Line/column grouping tolerance">
+              <input id="preproc-group" type="range" min="0.1" max="1.2" step="0.01" data-i18n-title="preproc.groupTolTitle">
               <input id="preproc-group-num" type="number" min="0.1" max="1.2" step="0.01" class="control-num">
-              <button id="preproc-group-reset" class="control-reset" title="Reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
+              <button id="preproc-group-reset" class="control-reset" data-i18n-title="common.reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
             </div>
           </div>
         </section>
@@ -231,16 +231,16 @@
         <section class="preproc-section">
           <div class="preproc-section-head">
             <i data-lucide="bar-chart-3" class="ui-icon"></i>
-            <h4>Metrics</h4>
+            <h4 data-i18n="preproc.metrics">Metrics</h4>
           </div>
-          <div id="preproc-metrics" class="preproc-hint">No detection run yet.</div>
-          <pre id="preproc-debug-state" class="preproc-debug">No debug state yet</pre>
+          <div id="preproc-metrics" class="preproc-hint" data-i18n="preproc.noDetectionYet">No detection run yet.</div>
+          <pre id="preproc-debug-state" class="preproc-debug" data-i18n="preproc.noDebugYet">No debug state yet</pre>
         </section>
       </aside>
 
       <main class="preproc-canvas-wrap">
         <div class="preproc-viewer" id="preproc-viewer">
-          <img id="preproc-preview" alt="Preprocessed preview" />
+          <img id="preproc-preview" data-i18n-alt="preproc.previewAlt" alt="Preprocessed preview" />
           <canvas id="preproc-selection-mask" class="preproc-selection-mask"></canvas>
           <svg id="preproc-overlay-svg" class="preproc-overlay-svg"></svg>
           <div id="preproc-overlay" class="preproc-overlay"></div>

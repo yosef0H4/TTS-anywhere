@@ -1,4 +1,5 @@
 import { DEFAULT_CONFIG } from "../models/defaults";
+import { resolveUiLanguage } from "../models/locale";
 import type { AppConfig } from "../models/types";
 
 const SETTINGS_KEY = "tts-snipper:settings";
@@ -18,6 +19,7 @@ export class SettingsStore {
         ui: {
           ...DEFAULT_CONFIG.ui,
           ...parsed.ui,
+          language: parsed.ui?.language === "ar" || parsed.ui?.language === "en" ? parsed.ui.language : resolveUiLanguage(),
           panels: migratedPanels
         },
         system: { ...DEFAULT_CONFIG.system, ...parsed.system },

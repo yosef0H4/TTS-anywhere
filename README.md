@@ -85,6 +85,47 @@ Current practical takeaway from local benchmarking:
 - Rapid is much faster for CPU OCR
 - Paddle is faster for GPU detection and GPU OCR
 
+## Recommended Stacks
+
+### If You Have a GPU
+
+Best overall stack:
+
+- Text processing: `Paddle` on GPU
+- OCR: `H2OVL Mississippi`
+- TTS: `Kokoro`
+
+This full stack is relatively lightweight for a local GPU setup. It has been run successfully on a machine with `4 GB` of VRAM, so most PCs with NVIDIA GPUs should be able to handle it.
+
+### If Your GPU Is Busy or You Want a Low-Overhead All-Rounder
+
+Recommended stack:
+
+- Text processing: `Paddle` for both detection and OCR
+- TTS: `Edge`
+
+This is the best all-rounder if you want to keep GPU usage very low during normal use. It runs well on almost any CUDA-capable GPU and uses very little GPU at runtime compared with the heavier local VLM stack.
+
+### If You Do Not Have a GPU
+
+Recommended stack:
+
+- Text processing: `Rapid` for both detection and OCR
+- TTS: `Edge`
+
+Rapid is the better CPU choice in this project, especially for OCR speed, so this is the best non-GPU default.
+
+### If You Want to Avoid Edge
+
+- If privacy matters more than using Microsoft Edge TTS, you can use any of the other local TTS backends instead.
+- In practice they are currently all in roughly the same quality tier relative to each other, even if they are not as strong a recommendation as Kokoro on GPU.
+
+### OCR Note
+
+- `Qwen3-VL-4B` is also a strong OCR option for local use.
+- You can run it through `LM Studio`, or through `Ollama` when you do have an NVIDIA GPU.
+- It is probably one of the best OCR options overall, but because of its size it is not the default recommendation for this project.
+
 ## Benchmarking
 
 Fetch the public benchmark image set:
@@ -130,19 +171,6 @@ Interpretation:
 - Paddle wins on GPU overall
 
 This benchmark is intended as a rough speed comparison, not a full accuracy benchmark.
-
-## TTS Recommendation
-
-Current practical recommendation:
-
-- If you can spare about `3 GB` of VRAM, `Kokoro` is the best TTS option in this project right now.
-- Most of the other local TTS options are currently less reliable or harder to understand in practice.
-- If you do not have a GPU, or do not want to use GPU-backed TTS, the recommended fallback is the `Edge` TTS service, which uses Microsoft's servers.
-
-So the default guidance is:
-
-- Best quality: `services/tts/kokoro/`
-- Easiest non-GPU fallback: `services/tts/edge/`
 
 ## Tests
 

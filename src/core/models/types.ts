@@ -39,6 +39,7 @@ export interface UiConfig {
   panels: PanelConfig;
   volume: number;
   playbackRate: number;
+  language: "en" | "ar";
   theme: "zen" | "pink";
   settingsDrawerOpen: boolean;
   showChunkDiagnostics: boolean;

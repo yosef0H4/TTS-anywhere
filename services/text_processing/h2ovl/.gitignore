@@ -1,0 +1,9 @@
+.venv/
+.venv-gpu/
+.cache/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.hf-cache/
+**/__pycache__/
+*.pyc

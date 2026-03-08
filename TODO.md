@@ -3,8 +3,8 @@
 3. rapid the ocr support (gpu/cpu) x
 4. paddleocr and their text processer (gpu/cpu)
 5. korko tts x
-6. kitten tts x
-7. H2OVL-Mississippi support
+6. kitten tts x 
+7. H2OVL-Mississippi support x
 8. fix screenshot hotkey x
 9. full screenshot support x
 10. strict types no any x
@@ -13,4 +13,8 @@
 14. streaming ocr x
 15. adding logic x
 16. extract text button and remove auto apply x
-17. arabic
+17. arabic x
+18. auto mode
+19. abort hotkey
+20. installer
+21. fix rapid and paddle selection

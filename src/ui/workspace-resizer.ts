@@ -68,7 +68,10 @@ export class WorkspaceResizer {
 
     if (this.draggingAxis === "vertical") {
       const rect = this.options.shell.getBoundingClientRect();
-      const next = ((event.clientX - rect.left) / rect.width) * 100;
+      const isRtl = this.options.shell.dataset.language === "ar";
+      const next = isRtl
+        ? ((rect.right - event.clientX) / rect.width) * 100
+        : ((event.clientX - rect.left) / rect.width) * 100;
       this.leftPercent = this.clamp(next, this.minLeftPercent, this.maxLeftPercent);
     } else {
       const workspaceRight = this.options.shell.querySelector<HTMLElement>(".workspace-right");

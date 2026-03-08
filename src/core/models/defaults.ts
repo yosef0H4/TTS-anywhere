@@ -1,11 +1,12 @@
 import type { AppConfig } from "./types";
+import { resolveUiLanguage } from "./locale";
 
 export const DEFAULT_CONFIG: AppConfig = {
   llm: {
     baseUrl: "https://api.openai.com/v1",
     apiKey: "",
     model: "gpt-4.1-mini",
-    promptTemplate: "Extract text exactly as shown.",
+    promptTemplate: "Extract all text from this image. Return only the extracted text, no additional commentary.",
     imageDetail: "low",
     ocrStreamingEnabled: true,
     ocrStreamingFallbackToNonStream: true,
@@ -54,6 +55,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     },
     volume: 80,
     playbackRate: 1,
+    language: resolveUiLanguage(),
     theme: "zen",
     settingsDrawerOpen: false,
     showChunkDiagnostics: true

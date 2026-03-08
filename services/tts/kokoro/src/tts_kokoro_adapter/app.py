@@ -96,6 +96,19 @@ class KokoroRuntime:
                 self._pipelines[lang_code] = KPipeline(lang_code=lang_code)
             return self._pipelines[lang_code]
 
+    def warmup(self) -> None:
+        """Preload the default pipeline and run a tiny silent synth."""
+        self._check_gpu()
+        voice = self.settings.default_voice
+        speed = self.settings.default_speed
+        lang_code = self._get_lang_code(voice)
+        pipeline = self.get_pipeline(lang_code)
+        logger.info("Warming Kokoro pipeline voice='%s' lang_code='%s'", voice, lang_code)
+        generator = pipeline("TTS ready", voice=voice, speed=speed)
+        for _gs, _ps, audio in generator:
+            if audio is not None:
+                break
+
     def get_available_voices(self) -> list[str]:
         """Get list of available voices."""
         if self._voices_cache is not None:
@@ -192,6 +205,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.on_event("startup")
+    async def startup_warmup() -> None:
+        runtime.warmup()
 
     @app.get("/v1/models")
     def models(_: None = Depends(auth)) -> dict:

@@ -1,0 +1,30 @@
+[project]
+name = "h2ovl-text-processing"
+version = "0.1.0"
+description = "GPU-only OpenAI-compatible OCR adapter for H2OVL Mississippi 800M"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "fastapi>=0.116.1",
+  "uvicorn[standard]>=0.35.0",
+  "pydantic>=2.11.0",
+  "pydantic-settings>=2.10.1",
+  "pillow>=11.0.0",
+  "huggingface_hub[hf-xet]==0.36.0",
+  "sentencepiece>=0.2.0",
+  "safetensors>=0.6.0",
+  "einops>=0.8.0",
+]
+
+[project.scripts]
+h2ovl-text-processing = "h2ovl_text_processing.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.4.0",
+  "httpx>=0.28.0"
+]
