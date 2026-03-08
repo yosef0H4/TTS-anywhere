@@ -1,5 +1,8 @@
 .venv/
 .venv-win/
+.venv-cpu/
+.venv-gpu/
+.cache/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/

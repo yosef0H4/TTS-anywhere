@@ -1,7 +1,7 @@
 [project]
 name = "paddle-text-processing"
-version = "0.3.0"
-description = "PaddleOCR detect server for preprocessing workflow"
+version = "0.4.0"
+description = "PaddleOCR detect server and OpenAI-compatible OCR adapter for preprocessing workflow"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -11,7 +11,6 @@ dependencies = [
   "pydantic>=2.11.0",
   "numpy>=2.2.0",
   "Pillow>=11.3.0",
-  "paddlepaddle==3.2.0",
   "paddleocr==3.4.0",
 ]
 
