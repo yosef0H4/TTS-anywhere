@@ -19,7 +19,7 @@ export class FileTransport implements Transport {
   constructor(private readonly logDir: string, options: FileTransportOptions = {}) {
     this.maxFileSizeBytes = options.maxFileSizeBytes ?? 5 * 1024 * 1024;
     this.maxFiles = options.maxFiles ?? 3;
-    this.baseName = options.baseName ?? "tts-sniffer.log";
+    this.baseName = options.baseName ?? "tts-anywhere.log";
     fs.mkdirSync(this.logDir, { recursive: true });
     try {
       this.fileSize = fs.statSync(this.getLogPath()).size;

@@ -1,4 +1,4 @@
-# TTS Snipper
+# TTS Anywhere
 
 Electron/Web app for screen capture, OCR, preprocessing, and text-to-speech workflows, with local pluggable text-processing services.
 

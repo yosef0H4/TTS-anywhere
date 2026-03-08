@@ -54,7 +54,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let mainWindow: BrowserWindow | null = null;
-let isPinned = true;
+let isPinned = false;
 let currentLogLevel: LogLevel = "info";
 let captureHotkeySession: HotkeySession | null = null;
 let copyHotkeySession: HotkeySession | null = null;
@@ -150,7 +150,7 @@ function getLogDir(): string {
 }
 
 function getLogFilePath(): string {
-  return path.join(getLogDir(), "tts-sniffer.log");
+  return path.join(getLogDir(), "tts-anywhere.log");
 }
 
 function diagnosticsPath(): string {
@@ -163,6 +163,29 @@ function startupDiagnosticsPath(): string {
 
 function projectRootPath(): string {
   return path.resolve(__dirname, "..");
+}
+
+function legacyUserDataCandidates(): string[] {
+  const currentUserData = app.getPath("userData");
+  const appDataRoot = path.dirname(currentUserData);
+  return ["tts-snipper", "TTS Snipper"]
+    .map((name) => path.join(appDataRoot, name))
+    .filter((candidate) => candidate !== currentUserData);
+}
+
+function migrateLegacyUserData(): void {
+  if (isDevMode()) return;
+  const currentUserData = app.getPath("userData");
+  ensureDir(currentUserData);
+  for (const legacyPath of legacyUserDataCandidates()) {
+    if (!fs.existsSync(legacyPath)) continue;
+    try {
+      fs.cpSync(legacyPath, currentUserData, { recursive: true, force: false, errorOnExist: false });
+      console.info(`[migration] merged legacy userData from ${legacyPath} to ${currentUserData}`);
+    } catch (error) {
+      console.warn(`[migration] failed to merge legacy userData from ${legacyPath}: ${String(error)}`);
+    }
+  }
 }
 
 function servicesBasePath(): string {
@@ -628,9 +651,9 @@ function loadPinnedPref(): boolean {
   try {
     const raw = fs.readFileSync(prefsPath(), "utf-8");
     const parsed = JSON.parse(raw) as NativePrefs;
-    return parsed.alwaysOnTop ?? true;
+    return parsed.alwaysOnTop ?? false;
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -658,6 +681,19 @@ function saveNativePrefs(next: NativePrefs): void {
 
 function savePinnedPref(value: boolean): void {
   saveNativePrefs({ alwaysOnTop: value });
+}
+
+function setAlwaysOnTopState(value: boolean, targetWindow?: BrowserWindow | null): boolean {
+  isPinned = Boolean(value);
+  const activeWindow = targetWindow && !targetWindow.isDestroyed()
+    ? targetWindow
+    : (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null);
+  if (activeWindow) {
+    activeWindow.setAlwaysOnTop(isPinned, "floating");
+  }
+  savePinnedPref(isPinned);
+  diag("window.always-on-top.changed", { enabled: isPinned });
+  return isPinned;
 }
 
 function shouldWrite(level: LogLevel): boolean {
@@ -890,7 +926,7 @@ function createMainWindow(): BrowserWindow {
 
   win.setResizable(true);
   win.setMenuBarVisibility(false);
-  win.setAlwaysOnTop(isPinned, "floating");
+  setAlwaysOnTopState(isPinned, win);
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
   const webContents = win.webContents;
@@ -1363,9 +1399,10 @@ function emitPlaybackHotkey(action: "toggle_play_pause" | "next_chunk" | "previo
 
 app.whenReady().then(() => {
   flushStartupPhaseBuffer();
+  migrateLegacyUserData();
   diag("app.ready");
   const nativePrefs = loadNativePrefs();
-  isPinned = nativePrefs.alwaysOnTop ?? true;
+  isPinned = nativePrefs.alwaysOnTop ?? false;
   activeCaptureHotkey = nativePrefs.captureHotkey ?? activeCaptureHotkey;
   activeCopyHotkey = nativePrefs.copyPlayHotkey ?? activeCopyHotkey;
   activeAbortHotkey = nativePrefs.abortHotkey ?? activeAbortHotkey;
@@ -1886,6 +1923,8 @@ ipcMain.handle("capture:set-draw-rectangle", (_event, enabled: boolean) => {
 });
 
 ipcMain.handle("capture:get-draw-rectangle", () => drawSelectionRectangle);
+ipcMain.handle("window:get-always-on-top", () => isPinned);
+ipcMain.handle("window:set-always-on-top", (_event, enabled: boolean) => setAlwaysOnTopState(enabled));
 ipcMain.handle("stack:get-recommended-cpu-status", () => recommendedCpuStackStatusSnapshot());
 ipcMain.handle("stack:launch-recommended-cpu", async () => launchRecommendedCpuStack());
 ipcMain.handle("stack:stop-recommended-cpu", async () => stopRecommendedCpuStack());

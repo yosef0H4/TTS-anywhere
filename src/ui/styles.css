@@ -1231,6 +1231,17 @@ body {
     justify-content: center;
 }
 
+.icon-pill.active {
+    border-color: color-mix(in srgb, var(--accent-strong) 72%, white 28%);
+    background: color-mix(in srgb, var(--accent-soft) 60%, var(--panel-2) 40%);
+    color: var(--accent-strong);
+}
+
+.icon-pill:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
 .break-pill {
     border-color: #ef4444 !important;
     color: #ef4444 !important;

@@ -1,8 +1,9 @@
 {
-  "name": "tts-snipper",
+  "name": "tts-anywhere",
+  "productName": "TTS Anywhere",
   "version": "0.1.0",
   "private": true,
-  "description": "Dual-mode Electron/Web TTS snipper",
+  "description": "Dual-mode Electron/Web screen OCR and TTS app",
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -57,7 +58,7 @@
     "tom-select": "^2.5.2"
   },
   "build": {
-    "appId": "com.ttssnipper.app",
+    "appId": "com.ttsanywhere.app",
     "asar": true,
     "files": [
       "dist/**",

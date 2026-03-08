@@ -25,6 +25,7 @@ interface PlaybackMetrics {
 
 export async function gotoApp(page: Page): Promise<void> {
   await page.addInitScript(() => {
+    localStorage.removeItem("tts-anywhere:settings");
     localStorage.removeItem("tts-snipper:settings");
     const proto = window.HTMLMediaElement?.prototype as { play?: () => Promise<void>; pause?: () => void };
     if (proto?.play) {

@@ -21,7 +21,7 @@ import {
   type ChunkStatus
 } from "../core/playback/chunking";
 import { AppPipeline } from "../core/pipeline/app-pipeline";
-import { SettingsStore } from "../core/services/settings-store";
+import { LEGACY_SETTINGS_KEYS, SettingsStore, SETTINGS_KEY } from "../core/services/settings-store";
 import type { RecommendedCpuStackStatus } from "../core/services/platform";
 import { WorkspaceResizer } from "../ui/workspace-resizer";
 import { cleanTextForTts, findChunkIndexByTime } from "../core/utils/chunking";
@@ -192,6 +192,7 @@ export class WebApp {
   private detectorHealthy = false;
   private recommendedCpuStackStatus: RecommendedCpuStackStatus | null = null;
   private lastRenderedActiveChunkId: string | null = null;
+  private alwaysOnTopEnabled = false;
   private currentLanguage(): AppConfig["ui"]["language"] {
     return this.config.ui.language;
   }
@@ -1125,6 +1126,7 @@ export class WebApp {
     this.applyStaticTranslations();
     this.updateTomSelectPlaceholders();
     this.renderPlayState();
+    this.renderAlwaysOnTopButton();
   }
 
   private bindSettings(): void {
@@ -1458,7 +1460,28 @@ export class WebApp {
       this.detectorHealthy ? "idle" : "error"
     );
     this.renderRecommendedCpuStackStatus();
+    this.renderAlwaysOnTopButton();
     this.renderMainPreviewOverlay();
+  }
+
+  private renderAlwaysOnTopButton(): void {
+    const button = document.getElementById("btn-always-on-top");
+    if (!(button instanceof HTMLButtonElement)) return;
+    const isElectron = Boolean(window.electronAPI?.getAlwaysOnTop && window.electronAPI?.setAlwaysOnTop);
+    button.disabled = !isElectron;
+    button.classList.toggle("active", isElectron && this.alwaysOnTopEnabled);
+    button.setAttribute("aria-pressed", this.alwaysOnTopEnabled ? "true" : "false");
+    button.title = this.t("actions.alwaysOnTop");
+  }
+
+  private async syncAlwaysOnTopButton(): Promise<void> {
+    if (!window.electronAPI?.getAlwaysOnTop) {
+      this.alwaysOnTopEnabled = false;
+      this.renderAlwaysOnTopButton();
+      return;
+    }
+    this.alwaysOnTopEnabled = await window.electronAPI.getAlwaysOnTop();
+    this.renderAlwaysOnTopButton();
   }
 
   private applyUiState(): void {
@@ -1565,7 +1588,7 @@ export class WebApp {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "tts-snipper-settings.json";
+    a.download = "tts-anywhere-settings.json";
     a.click();
     URL.revokeObjectURL(url);
     this.setStatus(this.t("status.settingsExported"));
@@ -1736,6 +1759,13 @@ export class WebApp {
   }
 
   private bindCapture(): void {
+    this.must<HTMLButtonElement>("btn-always-on-top").addEventListener("click", async () => {
+      if (!window.electronAPI?.setAlwaysOnTop) return;
+      this.alwaysOnTopEnabled = await window.electronAPI.setAlwaysOnTop(!this.alwaysOnTopEnabled);
+      this.renderAlwaysOnTopButton();
+      this.setStatus(this.alwaysOnTopEnabled ? this.t("status.alwaysOnTopEnabled") : this.t("status.alwaysOnTopDisabled"));
+    });
+
     this.must<HTMLButtonElement>("btn-paste-image").addEventListener("click", async () => {
         loggers.capture.info("Paste image requested");
       try {
@@ -1821,6 +1851,7 @@ export class WebApp {
     window.electronAPI?.onPlaybackHotkey((action) => {
       void this.handlePlaybackHotkey(action);
     });
+    void this.syncAlwaysOnTopButton();
   }
 
   private bindMainPreviewRenderer(): void {
@@ -3084,8 +3115,11 @@ export function startWebApp(): void {
     throw new Error("Missing #app");
   }
 
-  if (!localStorage.getItem("tts-snipper:settings")) {
-    localStorage.setItem("tts-snipper:settings", JSON.stringify(DEFAULT_CONFIG));
+  if (!localStorage.getItem(SETTINGS_KEY)) {
+    const legacySettings = LEGACY_SETTINGS_KEYS
+      .map((key) => localStorage.getItem(key))
+      .find((value) => typeof value === "string");
+    localStorage.setItem(SETTINGS_KEY, legacySettings ?? JSON.stringify(DEFAULT_CONFIG));
   }
 
   window.electronAPI?.recordStartupPhase?.("renderer.app.mount.begin", {

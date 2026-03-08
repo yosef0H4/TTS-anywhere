@@ -23,6 +23,8 @@ export interface ElectronApi {
   onCopiedTextForPlayback: (handler: (text: string) => void) => void;
   onAbortRequested: (handler: () => void) => void;
   onPlaybackHotkey: (handler: (action: "toggle_play_pause" | "next_chunk" | "previous_chunk" | "volume_up" | "volume_down") => void) => void;
+  getAlwaysOnTop: () => Promise<boolean>;
+  setAlwaysOnTop: (enabled: boolean) => Promise<boolean>;
   beginCaptureHotkeyEdit: () => Promise<string>;
   applyCaptureHotkey: (hotkey: string) => Promise<string>;
   cancelCaptureHotkeyEdit: () => Promise<string>;

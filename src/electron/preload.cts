@@ -44,6 +44,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
       if (payload?.action) handler(payload.action);
     });
   },
+  getAlwaysOnTop: () => {
+    return ipcRenderer.invoke("window:get-always-on-top") as Promise<boolean>;
+  },
+  setAlwaysOnTop: (enabled: boolean) => {
+    return ipcRenderer.invoke("window:set-always-on-top", enabled) as Promise<boolean>;
+  },
   beginCaptureHotkeyEdit: () => {
     return ipcRenderer.invoke("capture:begin-hotkey-edit") as Promise<string>;
   },

@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "../core/models/defaults";
 import { resolveUiLanguage } from "../core/models/locale";
-import { SettingsStore } from "../core/services/settings-store";
+import { LEGACY_SETTINGS_KEYS, SETTINGS_KEY, SettingsStore } from "../core/services/settings-store";
 
 class MemoryStorage implements Storage {
   private map = new Map<string, string>();
@@ -53,6 +53,8 @@ describe("settings store", () => {
     cfg.textProcessing.detectorBaseUrl = "http://127.0.0.1:8093";
     store.save(cfg);
 
+    expect(localStorage.getItem(SETTINGS_KEY)).not.toBeNull();
+    expect(localStorage.getItem(LEGACY_SETTINGS_KEYS[0])).toBeNull();
     expect(store.load().llm.model).toBe("vision-model");
     expect(store.load().tts.voice).toBe("nova");
     expect(store.load().ui.language).toBe("ar");
@@ -75,7 +77,7 @@ describe("settings store", () => {
       }
     };
 
-    localStorage.setItem("tts-snipper:settings", JSON.stringify(legacy));
+    localStorage.setItem(LEGACY_SETTINGS_KEYS[0], JSON.stringify(legacy));
     const restored = new SettingsStore().load();
 
     expect(restored.ui.panels.desktop.leftPanePercent).toBe(46);
@@ -91,7 +93,7 @@ describe("settings store", () => {
       }
     };
 
-    localStorage.setItem("tts-snipper:settings", JSON.stringify(legacy));
+    localStorage.setItem(LEGACY_SETTINGS_KEYS[0], JSON.stringify(legacy));
     const restored = new SettingsStore().load();
 
     expect(restored.textProcessing.detectionMode).toBe("all");
@@ -111,7 +113,7 @@ describe("settings store", () => {
       }
     };
 
-    localStorage.setItem("tts-snipper:settings", JSON.stringify(legacy));
+    localStorage.setItem(LEGACY_SETTINGS_KEYS[0], JSON.stringify(legacy));
     const restored = new SettingsStore().load();
 
     expect(restored.textProcessing.detectionMode).toBe("all");
@@ -127,7 +129,7 @@ describe("settings store", () => {
     };
     delete (legacy.ui as Partial<typeof legacy.ui>).language;
 
-    localStorage.setItem("tts-snipper:settings", JSON.stringify(legacy));
+    localStorage.setItem(LEGACY_SETTINGS_KEYS[0], JSON.stringify(legacy));
     const restored = new SettingsStore().load();
 
     expect(restored.ui.language).toBe(resolveUiLanguage());

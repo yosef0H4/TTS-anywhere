@@ -2,11 +2,14 @@ import { DEFAULT_CONFIG } from "../models/defaults";
 import { resolveUiLanguage } from "../models/locale";
 import type { AppConfig } from "../models/types";
 
-const SETTINGS_KEY = "tts-snipper:settings";
+export const SETTINGS_KEY = "tts-anywhere:settings";
+export const LEGACY_SETTINGS_KEYS = ["tts-snipper:settings"] as const;
 
 export class SettingsStore {
   load(): AppConfig {
-    const raw = localStorage.getItem(SETTINGS_KEY);
+    const raw = localStorage.getItem(SETTINGS_KEY)
+      ?? LEGACY_SETTINGS_KEYS.map((key) => localStorage.getItem(key)).find((value) => typeof value === "string")
+      ?? null;
     if (!raw) return this.cloneDefaults();
     try {
       const parsed = JSON.parse(raw) as Partial<AppConfig>;
@@ -55,6 +58,9 @@ export class SettingsStore {
 
   save(next: AppConfig): void {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+    for (const legacyKey of LEGACY_SETTINGS_KEYS) {
+      localStorage.removeItem(legacyKey);
+    }
   }
 
   private mergePanels(panels: unknown): AppConfig["ui"]["panels"] {
