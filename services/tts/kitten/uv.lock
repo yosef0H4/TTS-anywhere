@@ -530,7 +530,7 @@ name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [
@@ -789,7 +789,7 @@ wheels = [
 [[package]]
 name = "kittentts"
 version = "0.8.1"
-source = { directory = "../../../KittenTTS" }
+source = { url = "https://github.com/KittenML/KittenTTS/releases/download/0.8.1/kittentts-0.8.1-py3-none-any.whl" }
 dependencies = [
     { name = "espeakng-loader" },
     { name = "huggingface-hub" },
@@ -800,6 +800,9 @@ dependencies = [
     { name = "onnxruntime" },
     { name = "soundfile" },
     { name = "spacy" },
+]
+wheels = [
+    { url = "https://github.com/KittenML/KittenTTS/releases/download/0.8.1/kittentts-0.8.1-py3-none-any.whl", hash = "sha256:482a436c4f1f3192153710376e459ff3689517ebcda7c2b051e2fd4187b41851" },
 ]
 
 [package.metadata]
@@ -2564,7 +2567,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.116.1" },
-    { name = "kittentts", directory = "../../../KittenTTS" },
+    { name = "kittentts", url = "https://github.com/KittenML/KittenTTS/releases/download/0.8.1/kittentts-0.8.1-py3-none-any.whl" },
     { name = "pydantic", specifier = ">=2.11.0" },
     { name = "pydantic-settings", specifier = ">=2.10.1" },
     { name = "soundfile", specifier = ">=0.13.1" },

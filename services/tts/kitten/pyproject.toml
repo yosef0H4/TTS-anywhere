@@ -10,7 +10,7 @@ dependencies = [
   "pydantic>=2.11.0",
   "pydantic-settings>=2.10.1",
   "soundfile>=0.13.1",
-  "kittentts"
+  "kittentts @ https://github.com/KittenML/KittenTTS/releases/download/0.8.1/kittentts-0.8.1-py3-none-any.whl"
 ]
 
 [project.scripts]
@@ -20,8 +20,8 @@ tts-kitten = "tts_kitten_adapter.cli:main"
 requires = ["hatchling>=1.25.0"]
 build-backend = "hatchling.build"
 
-[tool.uv.sources]
-kittentts = { path = "../../../KittenTTS" }
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [dependency-groups]
 dev = [

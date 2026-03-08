@@ -2,6 +2,8 @@
 
 OpenAI-compatible adapter for `KittenTTS`, designed for CPU inference with model-aware switching.
 
+This adapter installs the upstream `kittentts` `0.8.1` wheel directly from the official GitHub release. It does not require a local `KittenTTS/` checkout.
+
 ## Why
 - CPU-first local TTS
 - Exposes real Kitten model ids through `/v1/models`

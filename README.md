@@ -131,6 +131,19 @@ Interpretation:
 
 This benchmark is intended as a rough speed comparison, not a full accuracy benchmark.
 
+## TTS Recommendation
+
+Current practical recommendation:
+
+- If you can spare about `3 GB` of VRAM, `Kokoro` is the best TTS option in this project right now.
+- Most of the other local TTS options are currently less reliable or harder to understand in practice.
+- If you do not have a GPU, or do not want to use GPU-backed TTS, the recommended fallback is the `Edge` TTS service, which uses Microsoft's servers.
+
+So the default guidance is:
+
+- Best quality: `services/tts/kokoro/`
+- Easiest non-GPU fallback: `services/tts/edge/`
+
 ## Tests
 
 App tests:

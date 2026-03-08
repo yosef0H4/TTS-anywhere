@@ -3,7 +3,7 @@
 3. rapid the ocr support (gpu/cpu) x
 4. paddleocr and their text processer (gpu/cpu)
 5. korko tts x
-6. kitten tts
+6. kitten tts x
 7. H2OVL-Mississippi support
 8. fix screenshot hotkey x
 9. full screenshot support x
