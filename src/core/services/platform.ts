@@ -1,10 +1,10 @@
 export interface PlatformBridge {
-  onCapturedImage(handler: (dataUrl: string) => void): void;
+  onCapturedImage(handler: (payload: { dataUrl: string; isTap: boolean }) => void): void;
   onCopiedTextForPlayback(handler: (text: string) => void): void;
 }
 
 export interface ElectronApi {
-  onCapturedImage: (handler: (dataUrl: string) => void) => void;
+  onCapturedImage: (handler: (payload: { dataUrl: string; isTap: boolean }) => void) => void;
   onCopiedTextForPlayback: (handler: (text: string) => void) => void;
   beginCaptureHotkeyEdit: () => Promise<string>;
   applyCaptureHotkey: (hotkey: string) => Promise<string>;

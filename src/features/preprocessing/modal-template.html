@@ -12,23 +12,36 @@
         <section class="preproc-section">
           <div class="preproc-section-head">
             <i data-lucide="cpu" class="ui-icon"></i>
-            <h4>RapidOCR</h4>
-          </div>
-          <div class="preproc-row">
-            <label class="preproc-checkbox" title="Enable RapidOCR box detection from Python server">
-              <input id="preproc-rapid-enabled" type="checkbox">
-              <span>Enable OCR Detection</span>
-            </label>
+            <h4>Text Processing</h4>
           </div>
           <div class="preproc-field">
-            <label for="preproc-rapid-url">Server URL</label>
+            <label for="preproc-detector-provider">Provider</label>
+            <div class="control-row">
+              <select id="preproc-detector-provider" title="Select detection provider">
+                <option value="rapid">RapidOCR</option>
+                <option value="paddle">PaddleOCR</option>
+              </select>
+            </div>
+          </div>
+          <div class="preproc-field">
+            <label for="preproc-detect-mode">Text Processing Scope</label>
+            <div class="control-row">
+              <select id="preproc-detect-mode" title="Select when box detection should run">
+                <option value="off">Off</option>
+                <option value="fullscreen_only">Full screen only</option>
+                <option value="all">All screenshots</option>
+              </select>
+            </div>
+          </div>
+          <div class="preproc-field">
+            <label for="preproc-detector-url">Server URL</label>
             <div class="preproc-input-row">
-              <input id="preproc-rapid-url" type="text" placeholder="http://127.0.0.1:8091" title="RapidOCR service base URL" />
-              <button id="preproc-rapid-health" class="window-btn" title="Check server health"><i data-lucide="activity" class="ui-icon"></i></button>
+              <input id="preproc-detector-url" type="text" placeholder="http://127.0.0.1:8091" title="Detection service base URL" />
+              <button id="preproc-detector-health" class="window-btn" title="Check server health"><i data-lucide="activity" class="ui-icon"></i></button>
             </div>
           </div>
           <div id="preproc-health-status" class="preproc-hint"></div>
-          <button id="preproc-detect-now" class="preproc-action-btn" title="Run rapid detection now">
+          <button id="preproc-detect-now" class="preproc-action-btn" title="Run detection now">
             <i data-lucide="scan-search" class="ui-icon"></i>
             <span>Run Detection</span>
           </button>
@@ -119,7 +132,7 @@
           </div>
         </section>
 
-        <section class="preproc-section" data-rapid-dependent>
+        <section class="preproc-section" data-detector-dependent>
           <div class="preproc-section-head">
             <i data-lucide="filter" class="ui-icon"></i>
             <h4>Detection Filter</h4>
@@ -159,7 +172,7 @@
           </div>
         </section>
 
-        <section class="preproc-section" data-rapid-dependent>
+        <section class="preproc-section" data-detector-dependent>
           <div class="preproc-section-head">
             <i data-lucide="git-merge" class="ui-icon"></i>
             <h4>Merge &amp; Order</h4>

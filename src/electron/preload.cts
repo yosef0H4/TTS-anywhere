@@ -1,9 +1,9 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("electronAPI", {
-  onCapturedImage: (handler: (dataUrl: string) => void) => {
-    ipcRenderer.on("capture-image", (_event, payload: { dataUrl?: string }) => {
-      if (payload?.dataUrl) handler(payload.dataUrl);
+  onCapturedImage: (handler: (payload: { dataUrl: string; isTap: boolean }) => void) => {
+    ipcRenderer.on("capture-image", (_event, payload: { dataUrl?: string; isTap?: boolean }) => {
+      if (payload?.dataUrl) handler({ dataUrl: payload.dataUrl, isTap: payload.isTap === true });
     });
   },
   onCopiedTextForPlayback: (handler: (text: string) => void) => {

@@ -28,7 +28,7 @@ import { RequestPreemptor } from "../core/utils/request-preemptor";
 import { APP_TEMPLATE } from "../ui/template";
 import { PreprocessModalController, type DrawRect } from "../features/preprocessing";
 import { applyPreprocessToDataUrl, normalizeImageDataUrl, scaleDataUrlMaxDimension } from "../features/preprocessing/image";
-import { detectRapidRawBoxes } from "../features/preprocessing/rapid-client";
+import { checkTextProcessingHealth, detectRawBoxes } from "../features/preprocessing/text-processing-client";
 import { filterBySize, finalizeOcrBoxes, manualToRaw, mergeCloseBoxes, selectionKeepRatio, sortByReadingOrder } from "../features/preprocessing/logic";
 import { PreprocPreviewRenderer } from "../features/preprocessing/preview-renderer";
 import type { FilteredBox, MergeGroup, RawBox } from "../features/preprocessing/types";
@@ -45,13 +45,18 @@ interface ModelListResponse {
   data?: Array<{ id?: string }>;
 }
 
-type RequestLane = "ocr" | "rapid_main" | "rapid_modal";
+type RequestLane = "ocr" | "detect_main" | "detect_modal";
 
 interface PlaybackMetrics {
   sessionStarts: number;
   playChunkRequests: number;
   ttsStartsBySessionAndHash: Record<string, number>;
 }
+
+type CaptureContext = {
+  source: "hotkey" | "clipboard" | "upload" | "paste" | "drop";
+  isTap?: boolean;
+};
 
 const rendererBootAt = performance.now();
 
@@ -96,7 +101,7 @@ export class WebApp {
   private lastOriginalImageDataUrl: string | null = null;
   private currentOcrImageDataUrl: string | null = null;
   private currentOcrRegions: DrawRect[] = [];
-  private currentRapidRawBoxes: RawBox[] = [];
+  private currentDetectedRawBoxes: RawBox[] = [];
   private currentFilterResults: FilteredBox[] = [];
   private currentMergedGroups: MergeGroup[] = [];
   private currentFilterStats = { widthRemoved: 0, heightRemoved: 0, medianRemoved: 0, medianHeightPx: 0 };
@@ -121,6 +126,7 @@ export class WebApp {
     playChunkRequests: 0,
     ttsStartsBySessionAndHash: {}
   };
+  private detectorHealthy = false;
 
   mount(root: HTMLElement): void {
     this.logBootstrapStep("mount.begin");
@@ -154,6 +160,7 @@ export class WebApp {
     this.logBootstrapStep("logging.settings.bound");
     this.renderConfig();
     this.logBootstrapStep("config.rendered");
+    void this.checkDetectorHealth(false);
     void this.syncElectronCaptureHotkeyFromSettings();
     void this.syncElectronCopyHotkeyFromSettings();
     void this.syncElectronCaptureRectangleSetting();
@@ -593,26 +600,28 @@ export class WebApp {
     );
   }
 
-  private async checkRapidHealth(): Promise<void> {
-    const base = this.config.textProcessing.rapidBaseUrl;
+  private async checkDetectorHealth(showStatus = true): Promise<void> {
+    const base = this.getDetectorBaseUrl();
+    const providerLabel = this.getDetectorProviderLabel();
     try {
-      const response = await fetch(`${base.trim().replace(/\/+$/, "")}/healthz`);
-      if (!response.ok) {
-        this.updateStatusChip("rapid-status-chip", `HTTP ${response.status}`, "error");
-        this.setStatus(`RapidOCR health failed: HTTP ${response.status}`);
-        return;
-      }
-      const payload = (await response.json()) as { ok?: boolean; detector?: string };
+      const payload = await checkTextProcessingHealth(base);
       if (!payload.ok) {
-        this.updateStatusChip("rapid-status-chip", "Unhealthy", "error");
-        this.setStatus("RapidOCR health failed: unhealthy");
+        this.detectorHealthy = false;
+        this.applyDetectorHealthGate();
+        this.updateStatusChip("detector-status-chip", "Unhealthy", "error");
+        if (showStatus) this.setStatus(`${providerLabel} health failed: unhealthy`);
         return;
       }
-      this.updateStatusChip("rapid-status-chip", `Healthy (${payload.detector ?? "rapid"})`, "ok");
-      this.setStatus("RapidOCR is healthy.");
+      this.detectorHealthy = true;
+      this.applyDetectorHealthGate();
+      this.updateStatusChip("detector-status-chip", `Healthy (${payload.detector ?? this.config.textProcessing.detectorProvider})`, "ok");
+      if (showStatus) this.setStatus(`${providerLabel} is healthy.`);
     } catch (error) {
-      this.updateStatusChip("rapid-status-chip", "Unreachable", "error");
-      this.setStatus(`RapidOCR health failed: ${String(error)}`);
+      const message = String(error);
+      this.detectorHealthy = false;
+      this.applyDetectorHealthGate();
+      this.updateStatusChip("detector-status-chip", "Unreachable", "error");
+      if (showStatus) this.setStatus(`${providerLabel} health failed: ${message}`);
     }
   }
 
@@ -809,7 +818,7 @@ export class WebApp {
       "llm-prompt",
       "llm-image-detail",
       "llm-max-tokens",
-      "rapid-url",
+      "detector-url",
       "tts-url",
       "tts-key",
       "chunk-min",
@@ -833,10 +842,23 @@ export class WebApp {
       });
     });
 
+    this.must<HTMLInputElement>("detector-url").addEventListener("change", () => {
+      this.detectorHealthy = false;
+      this.applyDetectorHealthGate();
+      this.updateStatusChip("detector-status-chip", "Unreachable", "error");
+    });
+
     this.must<HTMLInputElement>("diagnostics-enabled").addEventListener("change", () => this.syncConfigFromInputs());
-    this.must<HTMLInputElement>("rapid-enabled").addEventListener("change", () => this.syncConfigFromInputs());
-    this.must<HTMLButtonElement>("rapid-health").addEventListener("click", async () => {
-      await this.checkRapidHealth();
+    this.must<HTMLSelectElement>("detector-provider").addEventListener("change", () => {
+      this.config.textProcessing.detectorProvider = this.getSelectedDetectorProvider();
+      this.must<HTMLInputElement>("detector-url").value = this.getDetectorBaseUrl();
+      this.detectorHealthy = false;
+      this.applyDetectorHealthGate();
+      this.syncConfigFromInputs();
+    });
+    this.must<HTMLSelectElement>("detector-mode").addEventListener("change", () => this.syncConfigFromInputs());
+    this.must<HTMLButtonElement>("detector-health").addEventListener("click", async () => {
+      await this.checkDetectorHealth();
     });
     this.must<HTMLInputElement>("capture-draw-rectangle").addEventListener("change", () => {
       this.syncConfigFromInputs();
@@ -906,8 +928,12 @@ export class WebApp {
     this.config.llm.imageDetail = this.must<HTMLSelectElement>("llm-image-detail").value as AppConfig["llm"]["imageDetail"];
     const maxTokens = Number(this.must<HTMLInputElement>("llm-max-tokens").value);
     this.config.llm.maxTokens = Number.isFinite(maxTokens) && maxTokens > 0 ? Math.floor(maxTokens) : 4096;
-    this.config.textProcessing.rapidEnabled = this.must<HTMLInputElement>("rapid-enabled").checked;
-    this.config.textProcessing.rapidBaseUrl = this.must<HTMLInputElement>("rapid-url").value;
+    const detectionMode = this.must<HTMLSelectElement>("detector-mode").value;
+    this.config.textProcessing.detectionMode = detectionMode === "off" || detectionMode === "fullscreen_only" || detectionMode === "all"
+      ? detectionMode
+      : "off";
+    this.config.textProcessing.detectorProvider = this.getSelectedDetectorProvider();
+    this.config.textProcessing.detectorBaseUrls[this.config.textProcessing.detectorProvider] = this.must<HTMLInputElement>("detector-url").value;
     this.config.tts.baseUrl = this.must<HTMLInputElement>("tts-url").value;
     this.config.tts.apiKey = this.must<HTMLInputElement>("tts-key").value;
     const minWords = Number(this.must<HTMLInputElement>("chunk-min").value);
@@ -956,8 +982,9 @@ export class WebApp {
     this.must<HTMLInputElement>("llm-prompt").value = this.config.llm.promptTemplate;
     this.must<HTMLSelectElement>("llm-image-detail").value = this.config.llm.imageDetail;
     this.must<HTMLInputElement>("llm-max-tokens").value = String(this.config.llm.maxTokens);
-    this.must<HTMLInputElement>("rapid-enabled").checked = this.config.textProcessing.rapidEnabled;
-    this.must<HTMLInputElement>("rapid-url").value = this.config.textProcessing.rapidBaseUrl;
+    this.must<HTMLSelectElement>("detector-provider").value = this.config.textProcessing.detectorProvider;
+    this.must<HTMLSelectElement>("detector-mode").value = this.config.textProcessing.detectionMode;
+    this.must<HTMLInputElement>("detector-url").value = this.getDetectorBaseUrl();
     this.must<HTMLInputElement>("tts-url").value = this.config.tts.baseUrl;
     this.must<HTMLInputElement>("tts-key").value = this.config.tts.apiKey;
     this.must<HTMLInputElement>("chunk-min").value = String(this.config.reading.minWordsPerChunk);
@@ -1000,7 +1027,12 @@ export class WebApp {
     this.applyOptions(this.llmModelSelect, [{ value: this.config.llm.model, label: this.config.llm.model }], this.config.llm.model);
     this.applyOptions(this.ttsModelSelect, [{ value: this.config.tts.model, label: this.config.tts.model }], this.config.tts.model);
     this.applyOptions(this.ttsVoiceSelect, [{ value: this.config.tts.voice, label: this.config.tts.voice }], this.config.tts.voice);
-    this.updateStatusChip("rapid-status-chip", this.config.textProcessing.rapidEnabled ? "Enabled" : "Disabled", "idle");
+    this.applyDetectorHealthGate();
+    this.updateStatusChip(
+      "detector-status-chip",
+      this.detectorHealthy ? this.describeDetectionMode(this.config.textProcessing.detectionMode) : "Unreachable",
+      this.detectorHealthy ? "idle" : "error"
+    );
     this.renderMainPreviewOverlay();
   }
 
@@ -1026,6 +1058,82 @@ export class WebApp {
     this.must<HTMLElement>("pane-image").dataset.collapsed = this.config.ui.panels.mobile.collapsed.image ? "true" : "false";
     this.must<HTMLElement>("pane-editor").dataset.collapsed = this.config.ui.panels.mobile.collapsed.editor ? "true" : "false";
     this.must<HTMLElement>("pane-reading").dataset.collapsed = this.config.ui.panels.mobile.collapsed.preview ? "true" : "false";
+  }
+
+  private describeDetectionMode(mode: AppConfig["textProcessing"]["detectionMode"]): string {
+    switch (mode) {
+      case "fullscreen_only":
+        return "Full screen only";
+      case "all":
+        return "All screenshots";
+      default:
+        return "Off";
+    }
+  }
+
+  private mergeTextProcessingConfig(textProcessing: unknown): AppConfig["textProcessing"] {
+    const defaults = DEFAULT_CONFIG.textProcessing;
+    if (!textProcessing || typeof textProcessing !== "object") {
+      return defaults;
+    }
+
+    const value = textProcessing as Record<string, unknown>;
+    const detectionMode = value.detectionMode;
+    const rapidMode = value.rapidMode;
+    const legacyRapidEnabled = value.rapidEnabled;
+    const detectorProvider = value.detectorProvider;
+    const detectorBaseUrls = (value.detectorBaseUrls as Record<string, unknown> | undefined) ?? {};
+    const legacyRapidBaseUrl = typeof value.rapidBaseUrl === "string" && value.rapidBaseUrl.trim()
+      ? value.rapidBaseUrl
+      : defaults.detectorBaseUrls.rapid;
+
+    return {
+      detectionMode: detectionMode === "off" || detectionMode === "fullscreen_only" || detectionMode === "all"
+        ? detectionMode
+        : (rapidMode === "off" || rapidMode === "fullscreen_only" || rapidMode === "all"
+            ? rapidMode
+            : (legacyRapidEnabled === true ? "all" : defaults.detectionMode)),
+      detectorProvider: detectorProvider === "rapid" || detectorProvider === "paddle"
+        ? detectorProvider
+        : defaults.detectorProvider,
+      detectorBaseUrls: {
+        rapid: typeof detectorBaseUrls.rapid === "string" && detectorBaseUrls.rapid.trim()
+          ? detectorBaseUrls.rapid
+          : legacyRapidBaseUrl,
+        paddle: typeof detectorBaseUrls.paddle === "string" && detectorBaseUrls.paddle.trim()
+          ? detectorBaseUrls.paddle
+          : defaults.detectorBaseUrls.paddle
+      }
+    };
+  }
+
+  private shouldUseDetector(captureContext?: CaptureContext): boolean {
+    const mode = this.config.textProcessing.detectionMode;
+    if (mode === "off") return false;
+    if (mode === "all") return true;
+    return captureContext?.source === "hotkey" && captureContext.isTap === true;
+  }
+
+  private applyDetectorHealthGate(): void {
+    for (const group of Array.from(document.querySelectorAll<HTMLElement>("[data-detector-dependent-main]"))) {
+      group.classList.toggle("section-disabled", !this.detectorHealthy);
+      const controls = group.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>("input, button, select");
+      for (const control of Array.from(controls)) {
+        control.disabled = !this.detectorHealthy;
+      }
+    }
+  }
+
+  private getSelectedDetectorProvider(): AppConfig["textProcessing"]["detectorProvider"] {
+    return this.must<HTMLSelectElement>("detector-provider").value === "paddle" ? "paddle" : "rapid";
+  }
+
+  private getDetectorBaseUrl(): string {
+    return this.config.textProcessing.detectorBaseUrls[this.config.textProcessing.detectorProvider];
+  }
+
+  private getDetectorProviderLabel(): string {
+    return this.config.textProcessing.detectorProvider === "paddle" ? "PaddleOCR" : "RapidOCR";
   }
 
   private setTheme(theme: "zen" | "pink"): void {
@@ -1065,7 +1173,7 @@ export class WebApp {
         },
         system: { ...DEFAULT_CONFIG.system, ...parsed.system },
         logging: { ...DEFAULT_CONFIG.logging, ...parsed.logging },
-        textProcessing: { ...DEFAULT_CONFIG.textProcessing, ...parsed.textProcessing },
+        textProcessing: this.mergeTextProcessingConfig(parsed.textProcessing),
         preprocessing: {
           ...DEFAULT_CONFIG.preprocessing,
           ...parsed.preprocessing,
@@ -1188,8 +1296,8 @@ export class WebApp {
 
   private async abortVisionWork(reason: "new_image" | "superseded"): Promise<void> {
     this.requestPreemptor.preemptLane("ocr");
-    this.requestPreemptor.preemptLane("rapid_main");
-    this.requestPreemptor.preemptLane("rapid_modal");
+    this.requestPreemptor.preemptLane("detect_main");
+    this.requestPreemptor.preemptLane("detect_modal");
     this.cancelVisionControllers();
     this.preprocessModal?.abortRunningWork();
     this.setRawTextLock(false);
@@ -1211,19 +1319,19 @@ export class WebApp {
   }
 
   private bindCapture(): void {
-    this.must<HTMLButtonElement>("btn-capture").addEventListener("click", async () => {
-        loggers.capture.info("Capture requested");
+    this.must<HTMLButtonElement>("btn-paste-image").addEventListener("click", async () => {
+        loggers.capture.info("Paste image requested");
       try {
         await this.abortVisionWork("new_image");
-        const dataUrl = await this.pickImageFromClipboard();
+        const dataUrl = await this.pasteImageFromClipboard();
         if (dataUrl) {
-          await this.runPipeline(dataUrl);
+          await this.runPipeline(dataUrl, { source: "clipboard" });
           return;
         }
-        this.setStatus("No image in clipboard. Use paste or upload.");
+        this.setStatus("No image in clipboard. Copy an image, then use Paste Image or upload.");
       } catch (error) {
-        loggers.capture.error("Capture failed", { error: String(error) });
-        this.setStatus(`Capture failed: ${String(error)}`);
+        loggers.capture.error("Paste image failed", { error: String(error) });
+        this.setStatus(`Paste image failed: ${String(error)}`);
       }
     });
 
@@ -1234,7 +1342,7 @@ export class WebApp {
       loggers.capture.info("Image uploaded", { fileName: file.name, type: file.type });
       await this.abortVisionWork("new_image");
       const dataUrl = await this.fileToDataUrl(file);
-      await this.runPipeline(dataUrl);
+      await this.runPipeline(dataUrl, { source: "upload" });
     });
 
     this.must<HTMLButtonElement>("btn-extract").addEventListener("click", async () => {
@@ -1263,7 +1371,7 @@ export class WebApp {
           if (file) {
             loggers.capture.info("Image pasted");
             await this.abortVisionWork("new_image");
-            await this.runPipeline(await this.fileToDataUrl(file));
+            await this.runPipeline(await this.fileToDataUrl(file), { source: "paste" });
           }
           return;
         }
@@ -1277,13 +1385,13 @@ export class WebApp {
       if (!file || !file.type.startsWith("image/")) return;
       loggers.capture.info("Image dropped", { fileName: file.name });
       await this.abortVisionWork("new_image");
-      await this.runPipeline(await this.fileToDataUrl(file));
+      await this.runPipeline(await this.fileToDataUrl(file), { source: "drop" });
     });
 
-    window.electronAPI?.onCapturedImage(async (dataUrl: string) => {
+    window.electronAPI?.onCapturedImage(async ({ dataUrl, isTap }) => {
       loggers.capture.info("Hotkey capture image received");
       await this.abortVisionWork("new_image");
-      await this.runPipeline(dataUrl);
+      await this.runPipeline(dataUrl, { source: "hotkey", isTap });
     });
 
     window.electronAPI?.onCopiedTextForPlayback(async (text: string) => {
@@ -1336,9 +1444,9 @@ export class WebApp {
         this.modalAbortController = controller;
         this.updateBreakButtonState();
       },
-      preemptLane: () => this.requestPreemptor.preemptLane("rapid_modal"),
-      beginLane: (parentSignal?: AbortSignal) => this.requestPreemptor.beginLane("rapid_modal", parentSignal),
-      isLaneCurrent: (token: number) => this.requestPreemptor.isCurrent("rapid_modal", token)
+      preemptLane: () => this.requestPreemptor.preemptLane("detect_modal"),
+      beginLane: (parentSignal?: AbortSignal) => this.requestPreemptor.beginLane("detect_modal", parentSignal),
+      isLaneCurrent: (token: number) => this.requestPreemptor.isCurrent("detect_modal", token)
     });
 
     this.must<HTMLDivElement>("preview-viewer").addEventListener("click", async () => {
@@ -1679,7 +1787,7 @@ export class WebApp {
     this.audio.addEventListener("pause", () => this.renderPlayState());
   }
 
-  private async runPipeline(dataUrl: string): Promise<void> {
+  private async runPipeline(dataUrl: string, captureContext: CaptureContext): Promise<void> {
     const { runId, signal } = this.startRun();
     this.setStatus("Running OCR + TTS...");
     const done = loggers.pipeline.time("pipeline.run");
@@ -1688,14 +1796,14 @@ export class WebApp {
       this.throwIfStale(runId);
       const ocrInput = await this.buildOcrInput(this.lastOriginalImageDataUrl, signal, runId, (imageDataUrl) => {
         if (runId !== this.activeRunId) return;
-        // Show image immediately; Rapid boxes will be layered when detect finishes.
-        this.currentRapidRawBoxes = [];
+        // Show image immediately; detected boxes will be layered when detect finishes.
+        this.currentDetectedRawBoxes = [];
         this.currentFilterResults = [];
         this.currentMergedGroups = [];
         this.currentFilterStats = { widthRemoved: 0, heightRemoved: 0, medianRemoved: 0, medianHeightPx: 0 };
         this.setPreviewImage(imageDataUrl);
         this.renderMainPreviewOverlay();
-      });
+      }, captureContext);
       this.throwIfStale(runId);
       this.currentOcrImageDataUrl = ocrInput.imageDataUrl;
       this.currentOcrRegions = ocrInput.regions;
@@ -1913,7 +2021,8 @@ export class WebApp {
     originalDataUrl: string,
     signal?: AbortSignal,
     runId?: number,
-    onImageReady?: (imageDataUrl: string) => void
+    onImageReady?: (imageDataUrl: string) => void,
+    captureContext?: CaptureContext
   ): Promise<{ imageDataUrl: string; regions: DrawRect[] }> {
     if (signal?.aborted) throw new Error("Cancelled");
     const pre = this.config.preprocessing;
@@ -1930,38 +2039,44 @@ export class WebApp {
     if (runId !== undefined) this.throwIfStale(runId);
     onImageReady?.(scaled);
 
-    let rapidBoxes: Array<{ id: string; norm: { x: number; y: number; w: number; h: number }; px: { x1: number; y1: number; x2: number; y2: number } }> = [];
-    if (this.config.textProcessing.rapidEnabled) {
-      const rapidLane = this.requestPreemptor.beginLane("rapid_main", signal);
+    let detectedBoxes: Array<{ id: string; norm: { x: number; y: number; w: number; h: number }; px: { x1: number; y1: number; x2: number; y2: number } }> = [];
+    if (this.shouldUseDetector(captureContext)) {
+      const detectLane = this.requestPreemptor.beginLane("detect_main", signal);
       try {
-        const detect = await detectRapidRawBoxes(this.config.textProcessing.rapidBaseUrl, scaled, { signal: rapidLane.signal });
-        if (!this.requestPreemptor.isCurrent("rapid_main", rapidLane.token)) {
+        const detect = await detectRawBoxes(this.getDetectorBaseUrl(), scaled, {
+          signal: detectLane.signal,
+          provider: this.config.textProcessing.detectorProvider
+        });
+        if (!this.requestPreemptor.isCurrent("detect_main", detectLane.token)) {
           throw new Error("Cancelled");
         }
         if (signal?.aborted) throw new Error("Cancelled");
         if (runId !== undefined) this.throwIfStale(runId);
-        rapidBoxes = detect.boxes;
-        this.updateStatusChip("rapid-status-chip", `Loaded ${detect.boxes.length}`, "ok");
+        detectedBoxes = detect.boxes;
+        this.updateStatusChip("detector-status-chip", `Loaded ${detect.boxes.length}`, "ok");
       } catch (error) {
         if (this.isAbortError(error)) throw error;
-        this.updateStatusChip("rapid-status-chip", "Detect failed", "error");
-        loggers.pipeline.warn("Rapid detect failed, falling back to manual/full image", { error: String(error) });
+        this.updateStatusChip("detector-status-chip", "Detect failed", "error");
+        loggers.pipeline.warn("Text detection failed, falling back to manual/full image", {
+          provider: this.config.textProcessing.detectorProvider,
+          error: String(error)
+        });
       } finally {
-        rapidLane.done();
+        detectLane.done();
       }
     }
 
     const dims = await this.readImageSize(scaled);
-    const selectedRapid = rapidBoxes.filter((box) => selectionKeepRatio(box, dims.width, dims.height, pre.selection.baseState, pre.selection.ops) > 0.1);
-    const filterResults = filterBySize(selectedRapid, dims.width, dims.height, pre.detectionFilter);
-    const keptRapid = filterResults.filter((f) => f.keep).map((f) => f.box);
+    const selectedDetected = detectedBoxes.filter((box) => selectionKeepRatio(box, dims.width, dims.height, pre.selection.baseState, pre.selection.ops) > 0.1);
+    const filterResults = filterBySize(selectedDetected, dims.width, dims.height, pre.detectionFilter);
+    const keptDetected = filterResults.filter((f) => f.keep).map((f) => f.box);
     const manualRaw = pre.selection.manualBoxes.map((m) => manualToRaw(m, dims.width, dims.height));
-    const ordered = sortByReadingOrder([...keptRapid, ...manualRaw], pre.sorting);
+    const ordered = sortByReadingOrder([...keptDetected, ...manualRaw], pre.sorting);
     const mergedGroups = mergeCloseBoxes(ordered, pre.merge, dims.width, dims.height);
     const mergedOrOrdered = mergedGroups.length ? mergedGroups.map((m) => m.rect) : ordered;
 
     const regions = finalizeOcrBoxes({
-      rapidRawBoxes: rapidBoxes,
+      rawBoxes: detectedBoxes,
       manualBoxes: pre.selection.manualBoxes,
       baseState: pre.selection.baseState,
       ops: pre.selection.ops,
@@ -1975,7 +2090,7 @@ export class WebApp {
     const heights = filterResults.map((f) => f.box.px.y2 - f.box.px.y1).filter((h) => h > 0).sort((a, b) => a - b);
     const mid = Math.floor(heights.length / 2);
     const med = heights.length % 2 === 0 ? ((heights[mid - 1] ?? 0) + (heights[mid] ?? 0)) / 2 : (heights[mid] ?? 0);
-    this.currentRapidRawBoxes = selectedRapid;
+    this.currentDetectedRawBoxes = selectedDetected;
     this.currentFilterResults = filterResults;
     this.currentMergedGroups = mergedGroups.length ? mergedGroups : mergedOrOrdered.map((rect) => ({ rect, members: [rect] }));
     this.currentFilterStats = {
@@ -2306,7 +2421,7 @@ export class WebApp {
     createIcons({ icons: APP_ICONS });
   }
 
-  private async pickImageFromClipboard(): Promise<string | null> {
+  private async pasteImageFromClipboard(): Promise<string | null> {
     if (!("clipboard" in navigator) || !("read" in navigator.clipboard)) {
       return null;
     }
@@ -2339,7 +2454,7 @@ export class WebApp {
       selectionBaseState: pre.selection.baseState,
       selectionOps: pre.selection.ops,
       manualBoxes: pre.selection.manualBoxes,
-      rawBoxes: this.currentRapidRawBoxes,
+      rawBoxes: this.currentDetectedRawBoxes,
       filterResults: this.currentFilterResults,
       mergedGroups: this.currentMergedGroups,
       filterStats: this.currentFilterStats

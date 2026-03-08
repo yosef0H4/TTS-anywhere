@@ -80,8 +80,12 @@ export interface SystemConfig {
 }
 
 export interface TextProcessingConfig {
-  rapidEnabled: boolean;
-  rapidBaseUrl: string;
+  detectionMode: "off" | "fullscreen_only" | "all";
+  detectorProvider: "rapid" | "paddle";
+  detectorBaseUrls: {
+    rapid: string;
+    paddle: string;
+  };
 }
 
 export interface PreprocessingSelectionConfig {

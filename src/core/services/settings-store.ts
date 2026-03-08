@@ -6,10 +6,11 @@ const SETTINGS_KEY = "tts-snipper:settings";
 export class SettingsStore {
   load(): AppConfig {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return DEFAULT_CONFIG;
+    if (!raw) return this.cloneDefaults();
     try {
       const parsed = JSON.parse(raw) as Partial<AppConfig>;
       const migratedPanels = this.mergePanels(parsed.ui?.panels);
+      const migratedTextProcessing = this.mergeTextProcessing(parsed.textProcessing);
       return {
         llm: { ...DEFAULT_CONFIG.llm, ...parsed.llm },
         tts: { ...DEFAULT_CONFIG.tts, ...parsed.tts },
@@ -21,7 +22,7 @@ export class SettingsStore {
         },
         system: { ...DEFAULT_CONFIG.system, ...parsed.system },
         logging: { ...DEFAULT_CONFIG.logging, ...parsed.logging },
-        textProcessing: { ...DEFAULT_CONFIG.textProcessing, ...parsed.textProcessing },
+        textProcessing: migratedTextProcessing,
         preprocessing: {
           ...DEFAULT_CONFIG.preprocessing,
           ...parsed.preprocessing,
@@ -46,7 +47,7 @@ export class SettingsStore {
         }
       };
     } catch {
-      return DEFAULT_CONFIG;
+      return this.cloneDefaults();
     }
   }
 
@@ -91,5 +92,45 @@ export class SettingsStore {
 
   private readBoolean(value: unknown, fallback: boolean): boolean {
     return typeof value === "boolean" ? value : fallback;
+  }
+
+  private cloneDefaults(): AppConfig {
+    return JSON.parse(JSON.stringify(DEFAULT_CONFIG)) as AppConfig;
+  }
+
+  private mergeTextProcessing(textProcessing: unknown): AppConfig["textProcessing"] {
+    const defaults = DEFAULT_CONFIG.textProcessing;
+    if (!textProcessing || typeof textProcessing !== "object") {
+      return defaults;
+    }
+
+    const value = textProcessing as Record<string, unknown>;
+    const detectionMode = value.detectionMode;
+    const rapidMode = value.rapidMode;
+    const legacyRapidEnabled = value.rapidEnabled;
+    const detectorProvider = value.detectorProvider;
+    const detectorBaseUrls = (value.detectorBaseUrls as Record<string, unknown> | undefined) ?? {};
+    const legacyRapidBaseUrl = typeof value.rapidBaseUrl === "string" && value.rapidBaseUrl.trim()
+      ? value.rapidBaseUrl
+      : defaults.detectorBaseUrls.rapid;
+
+    return {
+      detectionMode: detectionMode === "off" || detectionMode === "fullscreen_only" || detectionMode === "all"
+        ? detectionMode
+        : (rapidMode === "off" || rapidMode === "fullscreen_only" || rapidMode === "all"
+            ? rapidMode
+            : (legacyRapidEnabled === true ? "all" : defaults.detectionMode)),
+      detectorProvider: detectorProvider === "rapid" || detectorProvider === "paddle"
+        ? detectorProvider
+        : defaults.detectorProvider,
+      detectorBaseUrls: {
+        rapid: typeof detectorBaseUrls.rapid === "string" && detectorBaseUrls.rapid.trim()
+          ? detectorBaseUrls.rapid
+          : legacyRapidBaseUrl,
+        paddle: typeof detectorBaseUrls.paddle === "string" && detectorBaseUrls.paddle.trim()
+          ? detectorBaseUrls.paddle
+          : defaults.detectorBaseUrls.paddle
+      }
+    };
   }
 }

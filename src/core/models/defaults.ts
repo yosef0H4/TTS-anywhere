@@ -71,8 +71,12 @@ export const DEFAULT_CONFIG: AppConfig = {
     enableConsoleLogging: true
   },
   textProcessing: {
-    rapidEnabled: false,
-    rapidBaseUrl: "http://127.0.0.1:8091"
+    detectionMode: "fullscreen_only",
+    detectorProvider: "rapid",
+    detectorBaseUrls: {
+      rapid: "http://127.0.0.1:8091",
+      paddle: "http://127.0.0.1:8093"
+    }
   },
   preprocessing: {
     maxImageDimension: 1080,

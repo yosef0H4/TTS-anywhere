@@ -62,20 +62,31 @@
             </select>
           </div>
           <div class="setting-group"><label>Max Tokens</label><input type="number" id="llm-max-tokens" min="1"></div>
-          <div class="setting-group setting-toggle-row">
-            <label for="rapid-enabled">Enable RapidOCR Boxes</label>
-            <input id="rapid-enabled" type="checkbox">
+          <div class="setting-group">
+            <label for="detector-provider">Detection Provider</label>
+            <select id="detector-provider">
+              <option value="rapid">RapidOCR</option>
+              <option value="paddle">PaddleOCR</option>
+            </select>
+          </div>
+          <div class="setting-group" data-detector-dependent-main>
+            <label for="detector-mode">Text Processing Scope</label>
+            <select id="detector-mode">
+              <option value="off">Off</option>
+              <option value="fullscreen_only">Full screen only</option>
+              <option value="all">All screenshots</option>
+            </select>
           </div>
           <div class="setting-group">
-            <label>RapidOCR Server URL</label>
+            <label>Detection Service URL</label>
             <div class="setting-inline">
-              <input type="text" id="rapid-url">
-              <button id="rapid-health" class="refetch-btn" type="button" title="Check RapidOCR health"><i data-lucide="activity" class="ui-icon"></i></button>
+              <input type="text" id="detector-url">
+              <button id="detector-health" class="refetch-btn" type="button" title="Check detection service health"><i data-lucide="activity" class="ui-icon"></i></button>
             </div>
           </div>
           <div class="setting-group">
-            <label>RapidOCR Health</label>
-            <span class="status-chip" id="rapid-status-chip">Idle</span>
+            <label>Detection Health</label>
+            <span class="status-chip" id="detector-status-chip">Idle</span>
           </div>
         </section>
 
@@ -224,7 +235,7 @@
 
     <div class="main-content">
       <div class="top-actions">
-        <button id="btn-capture" class="icon-pill" title="Capture"><i data-lucide="camera" class="ui-icon"></i></button>
+        <button id="btn-paste-image" class="icon-pill" title="Paste image"><i data-lucide="clipboard-paste" class="ui-icon"></i></button>
         <button id="btn-extract" class="icon-pill" title="Extract OCR"><i data-lucide="scan-text" class="ui-icon"></i></button>
         <label class="upload-btn icon-pill" title="Upload image"><i data-lucide="upload" class="ui-icon"></i><input id="image-upload" type="file" accept="image/*"></label>
         <button id="btn-break" class="icon-pill break-pill" title="Break (stop all)"> <i data-lucide="octagon-x" class="ui-icon"></i></button>

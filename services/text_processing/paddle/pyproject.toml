@@ -1,0 +1,29 @@
+[project]
+name = "paddle-text-processing"
+version = "0.3.0"
+description = "PaddleOCR detect server for preprocessing workflow"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.116.1",
+  "uvicorn[standard]>=0.35.0",
+  "python-multipart>=0.0.20",
+  "pydantic>=2.11.0",
+  "numpy>=2.2.0",
+  "Pillow>=11.3.0",
+  "paddlepaddle==3.2.0",
+  "paddleocr==3.4.0",
+]
+
+[project.scripts]
+paddle-text-processing = "paddle_text_processing.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.4.0",
+  "httpx>=0.28.0"
+]

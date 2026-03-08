@@ -464,7 +464,7 @@ async function finalizeSelection(point: { x: number; y: number }): Promise<void>
     }
 
     const dataUrl = `data:image/png;base64,${pngBuffer.toString("base64")}`;
-    mainWindow?.webContents.send("capture-image", { dataUrl });
+    mainWindow?.webContents.send("capture-image", { dataUrl, isTap });
     diag("capture.image.sent", {
       width: isTap ? frozen.bounds.width : payload.width,
       height: isTap ? frozen.bounds.height : payload.height,

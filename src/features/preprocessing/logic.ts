@@ -176,7 +176,7 @@ export function manualToRaw(box: DrawRect, imageW: number, imageH: number): RawB
 }
 
 export function finalizeOcrBoxes(params: {
-  rapidRawBoxes: RawBox[];
+  rawBoxes: RawBox[];
   manualBoxes: DrawRect[];
   baseState: boolean;
   ops: SelectionOp[];
@@ -186,11 +186,11 @@ export function finalizeOcrBoxes(params: {
   sorting: SortingSettings;
   merge: MergeSettings;
 }): DrawRect[] {
-  const selectedRapid = params.rapidRawBoxes.filter((b) => selectionKeepRatio(b, params.imageW, params.imageH, params.baseState, params.ops) > 0.1);
-  const filteredRapid = filterBySize(selectedRapid, params.imageW, params.imageH, params.filter).filter((f) => f.keep).map((f) => f.box);
+  const selectedBoxes = params.rawBoxes.filter((b) => selectionKeepRatio(b, params.imageW, params.imageH, params.baseState, params.ops) > 0.1);
+  const filteredBoxes = filterBySize(selectedBoxes, params.imageW, params.imageH, params.filter).filter((f) => f.keep).map((f) => f.box);
 
   const manualRaw = params.manualBoxes.map((m) => manualToRaw(m, params.imageW, params.imageH));
-  const input = sortByReadingOrder([...filteredRapid, ...manualRaw], params.sorting);
+  const input = sortByReadingOrder([...filteredBoxes, ...manualRaw], params.sorting);
   const merged = mergeCloseBoxes(input, params.merge, params.imageW, params.imageH);
 
   const boxes = (merged.length ? merged.map((m) => m.rect) : input).map((b) => ({

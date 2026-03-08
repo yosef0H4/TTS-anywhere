@@ -2,7 +2,7 @@ import { applyPreprocessToDataUrl, normalizeImageDataUrl, scaleDataUrlMaxDimensi
 import { filterBySize, manualToRaw, mergeCloseBoxes, sanitizeRect, selectionKeepRatio, sortByReadingOrder } from "./logic";
 import { PREPROCESS_MODAL_TEMPLATE } from "./modal-template";
 import { PreprocPreviewRenderer, type FilterRule, type OverlayMode } from "./preview-renderer";
-import { checkRapidHealth, detectRapidRawBoxes } from "./rapid-client";
+import { checkTextProcessingHealth, detectRawBoxes } from "./text-processing-client";
 import type { DrawRect, FilteredBox, RawBox, SelectionOp, ToolMode } from "./types";
 import type { AppConfig } from "../../core/models/types";
 import { createIcons } from "lucide";
@@ -20,7 +20,7 @@ type ImageGeometry = {
 interface PreprocessResult {
   processedImageDataUrl: string;
   finalBoxes: DrawRect[];
-  rapidRawCount: number;
+  detectorRawCount: number;
 }
 
 interface ModalControllerOptions {
@@ -87,7 +87,7 @@ export class PreprocessModalController {
   private manualBoxes: DrawRect[] = [];
   private selectionBaseState = true;
 
-  private rapidHealthy = false;
+  private detectorHealthy = false;
   private pendingDetect = false;
   private detectSeq = 0;
   private detectAbortController: AbortController | null = null;
@@ -167,8 +167,9 @@ export class PreprocessModalController {
     this.selectionOps = [...cfg.preprocessing.selection.ops];
     this.manualBoxes = [...cfg.preprocessing.selection.manualBoxes];
 
-    this.setInput("preproc-rapid-enabled", cfg.textProcessing.rapidEnabled);
-    this.setValue("preproc-rapid-url", cfg.textProcessing.rapidBaseUrl);
+    this.setValue("preproc-detect-mode", cfg.textProcessing.detectionMode);
+    this.setValue("preproc-detector-provider", cfg.textProcessing.detectorProvider);
+    this.setValue("preproc-detector-url", this.getConfigDetectorUrl(cfg));
 
     this.setValue("preproc-max-dim", cfg.preprocessing.maxImageDimension);
     this.setValue("preproc-threshold", cfg.preprocessing.binaryThreshold);
@@ -219,24 +220,33 @@ export class PreprocessModalController {
       this.close();
     });
 
-    this.mustById<HTMLButtonElement>("preproc-rapid-health").addEventListener("click", async () => {
+    this.mustById<HTMLButtonElement>("preproc-detector-health").addEventListener("click", async () => {
       await this.healthCheck();
     });
     this.mustById<HTMLButtonElement>("preproc-detect-now").addEventListener("click", async () => {
       await this.runPreprocessAndDetect();
     });
 
-    this.mustById<HTMLInputElement>("preproc-rapid-enabled").addEventListener("change", async () => {
-      if (!this.mustById<HTMLInputElement>("preproc-rapid-enabled").checked) {
+    this.mustById<HTMLSelectElement>("preproc-detect-mode").addEventListener("change", async () => {
+      if (this.getDetectionMode() === "off") {
         this.rawBoxes = [];
-        this.rapidHealthy = false;
+        this.detectorHealthy = false;
       }
       this.applyHealthGate();
       await this.runPreprocessAndDetect();
     });
 
-    this.mustById<HTMLInputElement>("preproc-rapid-url").addEventListener("change", () => {
-      this.rapidHealthy = false;
+    this.mustById<HTMLSelectElement>("preproc-detector-provider").addEventListener("change", () => {
+      const cfg = this.opts.getConfig();
+      const provider = this.getDetectorProvider();
+      this.setValue("preproc-detector-url", this.getConfigDetectorUrl(cfg, provider));
+      this.detectorHealthy = false;
+      this.applyHealthGate();
+      this.mustById<HTMLDivElement>("preproc-health-status").textContent = "Idle";
+    });
+
+    this.mustById<HTMLInputElement>("preproc-detector-url").addEventListener("change", () => {
+      this.detectorHealthy = false;
       this.applyHealthGate();
       this.mustById<HTMLDivElement>("preproc-health-status").textContent = "Idle";
     });
@@ -404,32 +414,34 @@ export class PreprocessModalController {
       this.rawBoxes = [];
       this.recomputeLiveBoxes();
 
-      const rapidEnabled = this.mustById<HTMLInputElement>("preproc-rapid-enabled").checked;
-      if (rapidEnabled) {
+      const detectEnabled = this.getDetectionMode() !== "off";
+      if (detectEnabled) {
         try {
-          const detect = await detectRapidRawBoxes(
-            this.getRapidUrl(),
+          const detect = await detectRawBoxes(
+            this.getDetectorUrl(),
             this.processedDataUrl,
-            this.detectAbortController ? { signal: this.detectAbortController.signal } : undefined
+            this.detectAbortController
+              ? { signal: this.detectAbortController.signal, provider: this.getDetectorProvider() }
+              : { provider: this.getDetectorProvider() }
           );
           if (seq !== this.detectSeq) return;
           if (lane && this.opts.isLaneCurrent && !this.opts.isLaneCurrent(lane.token)) return;
           if (this.detectAbortController?.signal.aborted) return;
           this.rawBoxes = detect.boxes ?? [];
-          this.rapidHealthy = true;
-          this.mustById<HTMLDivElement>("preproc-health-status").textContent = "Healthy";
+          this.detectorHealthy = true;
+          this.mustById<HTMLDivElement>("preproc-health-status").textContent = `Healthy (${this.getDetectorProviderLabel()})`;
         } catch (error) {
           if (this.isAbortError(error)) {
             this.mustById<HTMLDivElement>("preproc-health-status").textContent = "Detection cancelled";
           } else {
             this.rawBoxes = [];
-            this.rapidHealthy = false;
-            this.mustById<HTMLDivElement>("preproc-health-status").textContent = `Rapid error: ${String(error)}`;
+            this.detectorHealthy = false;
+            this.mustById<HTMLDivElement>("preproc-health-status").textContent = `${this.getDetectorProviderLabel()} error: ${String(error)}`;
           }
         }
       } else {
         this.rawBoxes = [];
-        this.rapidHealthy = false;
+        this.detectorHealthy = false;
         this.mustById<HTMLDivElement>("preproc-health-status").textContent = "Disabled";
       }
 
@@ -467,17 +479,17 @@ export class PreprocessModalController {
       return;
     }
 
-    const selectedRapid = this.rawBoxes.filter((box) => selectionKeepRatio(box, g.naturalWidth, g.naturalHeight, this.selectionBaseState, this.selectionOps) > 0.1);
-    this.filterResults = filterBySize(selectedRapid, g.naturalWidth, g.naturalHeight, {
+    const selectedBoxes = this.rawBoxes.filter((box) => selectionKeepRatio(box, g.naturalWidth, g.naturalHeight, this.selectionBaseState, this.selectionOps) > 0.1);
+    this.filterResults = filterBySize(selectedBoxes, g.naturalWidth, g.naturalHeight, {
       minWidthRatio: this.getNum("preproc-min-width", 0),
       minHeightRatio: this.getNum("preproc-min-height", 0),
       medianHeightFraction: this.getNum("preproc-median", 0.45)
     });
 
-    const keptRapid = this.filterResults.filter((f) => f.keep).map((f) => f.box);
+    const keptBoxes = this.filterResults.filter((f) => f.keep).map((f) => f.box);
     const manualRaw = this.manualBoxes.map((m) => manualToRaw(m, g.naturalWidth, g.naturalHeight));
 
-    const ordered = sortByReadingOrder([...keptRapid, ...manualRaw], {
+    const ordered = sortByReadingOrder([...keptBoxes, ...manualRaw], {
       direction: this.mustById<HTMLSelectElement>("preproc-direction").value as AppConfig["preprocessing"]["sorting"]["direction"],
       groupTolerance: this.getNum("preproc-group", 0.5)
     });
@@ -499,7 +511,7 @@ export class PreprocessModalController {
     this.renderOverlay();
     const keepCount = this.filterResults.filter((f) => f.keep).length;
     const dropCount = this.filterResults.length - keepCount;
-    this.mustById<HTMLDivElement>("preproc-metrics").textContent = `Rapid raw: ${this.rawBoxes.length}, keep: ${keepCount}, drop: ${dropCount}, final: ${this.finalBoxes.length}`;
+    this.mustById<HTMLDivElement>("preproc-metrics").textContent = `${this.getDetectorProviderLabel()} raw: ${this.rawBoxes.length}, keep: ${keepCount}, drop: ${dropCount}, final: ${this.finalBoxes.length}`;
     this.mustById<HTMLElement>("preproc-debug-state").textContent = JSON.stringify({
       overlayMode: this.overlayMode,
       activeFilterRule: this.activeFilterRule,
@@ -507,7 +519,7 @@ export class PreprocessModalController {
       selectionOpCount: this.selectionOps.length,
       manualBoxCount: this.manualBoxes.length,
       pendingDetect: this.pendingDetect,
-      rapidHealthy: this.rapidHealthy
+      detectorHealthy: this.detectorHealthy
     }, null, 2);
   }
 
@@ -758,26 +770,26 @@ export class PreprocessModalController {
 
   private async healthCheck(): Promise<void> {
     try {
-      const h = await checkRapidHealth(this.getRapidUrl());
-      this.rapidHealthy = h.ok;
-      this.mustById<HTMLDivElement>("preproc-health-status").textContent = h.ok ? `Healthy (${h.detector ?? "rapid"})` : "Unhealthy";
+      const h = await checkTextProcessingHealth(this.getDetectorUrl());
+      this.detectorHealthy = h.ok;
+      this.mustById<HTMLDivElement>("preproc-health-status").textContent = h.ok ? `Healthy (${h.detector ?? this.getDetectorProviderLabel()})` : "Unhealthy";
     } catch {
-      this.rapidHealthy = false;
+      this.detectorHealthy = false;
       this.mustById<HTMLDivElement>("preproc-health-status").textContent = "Unreachable";
     }
     this.applyHealthGate();
   }
 
   private applyHealthGate(): void {
-    const rapidEnabled = this.mustById<HTMLInputElement>("preproc-rapid-enabled").checked;
-    const active = rapidEnabled && this.rapidHealthy;
+    const detectEnabled = this.getDetectionMode() !== "off";
+    const active = detectEnabled && this.detectorHealthy;
 
-    for (const section of Array.from(this.backdrop.querySelectorAll<HTMLElement>("[data-rapid-dependent]"))) {
+    for (const section of Array.from(this.backdrop.querySelectorAll<HTMLElement>("[data-detector-dependent]"))) {
       section.classList.toggle("section-disabled", !active);
       const controls = section.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>("input, button, select");
       for (const control of Array.from(controls)) control.disabled = !active;
     }
-    this.mustById<HTMLButtonElement>("preproc-detect-now").disabled = !rapidEnabled;
+    this.mustById<HTMLButtonElement>("preproc-detect-now").disabled = !detectEnabled;
   }
 
   private bindRangeNumberSync(): void {
@@ -894,8 +906,9 @@ export class PreprocessModalController {
 
   private persistConfigFromControls(): void {
     const cfg = this.opts.getConfig();
-    cfg.textProcessing.rapidEnabled = this.mustById<HTMLInputElement>("preproc-rapid-enabled").checked;
-    cfg.textProcessing.rapidBaseUrl = this.getRapidUrl();
+    cfg.textProcessing.detectionMode = this.getDetectionMode();
+    cfg.textProcessing.detectorProvider = this.getDetectorProvider();
+    cfg.textProcessing.detectorBaseUrls[this.getDetectorProvider()] = this.getDetectorUrl();
 
     cfg.preprocessing.maxImageDimension = this.getNum("preproc-max-dim", 1080);
     cfg.preprocessing.binaryThreshold = this.getNum("preproc-threshold", 0);
@@ -968,8 +981,28 @@ export class PreprocessModalController {
     return this.previewRenderer.pointerToNormalized(clientX, clientY);
   }
 
-  private getRapidUrl(): string {
-    return this.mustById<HTMLInputElement>("preproc-rapid-url").value.trim();
+  private getDetectorProvider(): AppConfig["textProcessing"]["detectorProvider"] {
+    return this.mustById<HTMLSelectElement>("preproc-detector-provider").value === "paddle" ? "paddle" : "rapid";
+  }
+
+  private getDetectionMode(): AppConfig["textProcessing"]["detectionMode"] {
+    const mode = this.mustById<HTMLSelectElement>("preproc-detect-mode").value;
+    return mode === "off" || mode === "fullscreen_only" || mode === "all" ? mode : "off";
+  }
+
+  private getDetectorProviderLabel(): string {
+    return this.getDetectorProvider() === "paddle" ? "PaddleOCR" : "RapidOCR";
+  }
+
+  private getConfigDetectorUrl(
+    cfg: AppConfig,
+    provider: AppConfig["textProcessing"]["detectorProvider"] = cfg.textProcessing.detectorProvider
+  ): string {
+    return cfg.textProcessing.detectorBaseUrls[provider].trim();
+  }
+
+  private getDetectorUrl(): string {
+    return this.mustById<HTMLInputElement>("preproc-detector-url").value.trim();
   }
 
   private getNum(id: string, fallback: number): number {
