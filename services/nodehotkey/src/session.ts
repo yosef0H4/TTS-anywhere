@@ -54,6 +54,7 @@ export class HotkeySession {
   private activeHotkey: HotkeySpec | null;
   private triggerComboDown = false;
   private triggerHeld = false;
+  private triggerDownDispatched = false;
   private keyboardHook: unknown = null;
   private keyboardHookCallback: RegisteredCallback | null = null;
   private tickCount = 0;
@@ -102,6 +103,7 @@ export class HotkeySession {
     this.uninstallKeyboardHook();
     this.triggerComboDown = false;
     this.triggerHeld = false;
+    this.triggerDownDispatched = false;
     this.tickCount = 0;
     sessionDiag("session.stop.end", { hotkey: this.getHotkey() });
   }
@@ -121,6 +123,9 @@ export class HotkeySession {
         this.tryRegisterHotkey(next);
       }
       this.activeHotkey = next;
+      this.triggerComboDown = false;
+      this.triggerHeld = false;
+      this.triggerDownDispatched = false;
       this.events?.onHotkeySwitched?.(next?.label ?? "");
     } catch (error) {
       if (previous) {
@@ -196,8 +201,26 @@ export class HotkeySession {
     const isKeyMessage = wParam === WM_KEYDOWN || wParam === WM_KEYUP || wParam === WM_SYSKEYDOWN || wParam === WM_SYSKEYUP;
     if (!isKeyMessage) return CallNextHookEx(this.keyboardHook, nCode, wParam, info);
 
+    this.syncTriggerStateFromHook(wParam, info.vkCode);
+
     if (this.shouldSuppressVk(info.vkCode)) return 1;
     return CallNextHookEx(this.keyboardHook, nCode, wParam, info);
+  }
+
+  private syncTriggerStateFromHook(wParam: number, vkCode: number): void {
+    if (!this.activeHotkey) return;
+    const isKeyDownMessage = wParam === WM_KEYDOWN || wParam === WM_SYSKEYDOWN;
+    const isKeyUpMessage = wParam === WM_KEYUP || wParam === WM_SYSKEYUP;
+    const isTriggerKey = vkCode === this.activeHotkey.vk;
+
+    if (isKeyDownMessage && isTriggerKey && this.areRequiredModifiersDown()) {
+      this.triggerHeld = true;
+      this.triggerComboDown = true;
+    }
+
+    if (isKeyUpMessage && isTriggerKey) {
+      this.triggerComboDown = false;
+    }
   }
 
   private shouldSuppressVk(vkCode: number): boolean {
@@ -241,23 +264,26 @@ export class HotkeySession {
     while (PeekMessageW(msg, null, WM_HOTKEY, WM_HOTKEY, PM_REMOVE)) {
       if (msg.message === WM_HOTKEY && Number(msg.wParam) === HOTKEY_ID) {
         startedByMessage = true;
-        if (!this.triggerHeld) {
-          this.triggerHeld = true;
-          const point = this.getCursorPos();
-          if (point) this.events?.onTriggerDown?.(point);
-        }
+        this.triggerHeld = true;
       }
     }
 
     const comboDown = this.isTriggerComboDown();
     if (!startedByMessage && comboDown && !this.triggerComboDown && !this.triggerHeld) {
       this.triggerHeld = true;
+    }
+
+    if (this.triggerHeld && !this.triggerDownDispatched) {
       const point = this.getCursorPos();
-      if (point) this.events?.onTriggerDown?.(point);
+      if (point) {
+        this.triggerDownDispatched = true;
+        this.events?.onTriggerDown?.(point);
+      }
     }
 
     if (this.triggerHeld && !this.isKeyDown(this.activeHotkey.releaseVk)) {
       this.triggerHeld = false;
+      this.triggerDownDispatched = false;
       const point = this.getCursorPos();
       if (point) this.events?.onTriggerUp?.(point);
     }
