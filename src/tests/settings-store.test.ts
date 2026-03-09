@@ -151,4 +151,21 @@ describe("settings store", () => {
     expect(restored.system.captureHotkey).toBe(DEFAULT_CONFIG.system.captureHotkey);
     expect(restored.system.fullCaptureHotkey).toBe(DEFAULT_CONFIG.system.fullCaptureHotkey);
   });
+
+  it("preserves cleared hotkeys instead of restoring defaults", () => {
+    const cfg = {
+      ...DEFAULT_CONFIG,
+      system: {
+        ...DEFAULT_CONFIG.system,
+        captureHotkey: "",
+        playPauseHotkey: ""
+      }
+    };
+
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(cfg));
+    const restored = new SettingsStore().load();
+
+    expect(restored.system.captureHotkey).toBe("");
+    expect(restored.system.playPauseHotkey).toBe("");
+  });
 });

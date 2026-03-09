@@ -13,6 +13,7 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { syncBundledServicesToRuntime as syncBundledServicesToRuntimeHelper } from "./runtime-services.js";
 
 type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -130,9 +131,17 @@ let startupWatchdogDomReady: NodeJS.Timeout | null = null;
 let startupWatchdogRendererMount: NodeJS.Timeout | null = null;
 let startupDomReadySeen = false;
 let startupRendererMountSeen = false;
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 function processUptimeMs(): number {
   return Date.now() - processStartAt;
+}
+
+function focusMainWindow(targetWindow: BrowserWindow | null): void {
+  if (!targetWindow || targetWindow.isDestroyed()) return;
+  if (targetWindow.isMinimized()) targetWindow.restore();
+  if (!targetWindow.isVisible()) targetWindow.show();
+  targetWindow.focus();
 }
 
 function prefsPath(): string {
@@ -282,79 +291,21 @@ function ensureDir(dirPath: string): void {
   fs.mkdirSync(dirPath, { recursive: true });
 }
 
-function runtimeCopyShouldSkipName(name: string): boolean {
-  return [
-    ".venv",
-    ".venv-cpu",
-    ".venv-gpu",
-    "__pycache__",
-    ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
-    ".cache",
-    ".hf-cache",
-    ".paddlex-cache"
-  ].includes(name);
-}
-
-function runtimeCopyShouldSkipFile(name: string): boolean {
-  return name.endsWith(".pyc") || name.endsWith(".pyo");
-}
-
-function copyBundledServiceTree(sourceDir: string, targetDir: string): void {
-  ensureDir(targetDir);
-  const entries = fs.readdirSync(sourceDir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (runtimeCopyShouldSkipName(entry.name)) continue;
-    const sourcePath = path.join(sourceDir, entry.name);
-    const targetPath = path.join(targetDir, entry.name);
-    if (entry.isDirectory()) {
-      copyBundledServiceTree(sourcePath, targetPath);
-      continue;
-    }
-    if (!entry.isFile() || runtimeCopyShouldSkipFile(entry.name)) continue;
-    ensureDir(path.dirname(targetPath));
-    fs.copyFileSync(sourcePath, targetPath);
-  }
-}
-
-function readRuntimeServicesVersion(): string | null {
-  try {
-    return fs.readFileSync(runtimeSyncVersionFile(), "utf-8").trim() || null;
-  } catch {
-    return null;
-  }
-}
-
-function writeRuntimeServicesVersion(version: string): void {
-  ensureDir(path.dirname(runtimeSyncVersionFile()));
-  fs.writeFileSync(runtimeSyncVersionFile(), version, "utf-8");
-}
-
 function syncBundledServicesToRuntime(): string {
-  if (!app.isPackaged) {
-    return servicesBasePath();
-  }
-  const sourceRoot = servicesBasePath();
-  const targetRoot = runtimeServicesRoot();
-  const currentVersion = app.getVersion();
-  if (readRuntimeServicesVersion() === currentVersion && fs.existsSync(targetRoot)) {
-    return targetRoot;
-  }
-
-  ensureDir(targetRoot);
-  const topLevelEntries = fs.readdirSync(sourceRoot, { withFileTypes: true });
-  for (const entry of topLevelEntries) {
-    if (!entry.isDirectory() || runtimeCopyShouldSkipName(entry.name)) continue;
-    copyBundledServiceTree(path.join(sourceRoot, entry.name), path.join(targetRoot, entry.name));
-  }
-  writeRuntimeServicesVersion(currentVersion);
-  writeBackendLog("info", "stack", "runtime.services.synced", {
-    version: currentVersion,
-    sourceRoot,
-    targetRoot
+  return syncBundledServicesToRuntimeHelper({
+    appVersion: app.getVersion(),
+    isPackaged: app.isPackaged,
+    sourceRoot: servicesBasePath(),
+    targetRoot: runtimeServicesRoot(),
+    versionFile: runtimeSyncVersionFile(),
+    logSync: ({ version, sourceRoot, targetRoot }) => {
+      writeBackendLog("info", "stack", "runtime.services.synced", {
+        version,
+        sourceRoot,
+        targetRoot
+      });
+    }
   });
-  return targetRoot;
 }
 
 function envPythonPath(envDir: string): string {
@@ -1359,6 +1310,10 @@ function normalizeHotkeyLabel(hotkey: string): string {
   return String(hotkey ?? "").trim().toLowerCase();
 }
 
+function readStoredHotkey(value: string | undefined, fallback: string): string {
+  return typeof value === "string" ? value : fallback;
+}
+
 function getAllActiveHotkeys(): Array<{ name: string; hotkey: string }> {
   return [
     { name: "capture", hotkey: activeCaptureHotkey },
@@ -1376,9 +1331,10 @@ function getAllActiveHotkeys(): Array<{ name: string; hotkey: string }> {
 
 function assertHotkeyDistinct(candidate: string, selfName: string): string {
   const normalized = normalizeHotkeyLabel(candidate);
-  if (!normalized) throw new Error("Hotkey is required");
+  if (!normalized) return normalized;
   for (const entry of getAllActiveHotkeys()) {
     if (entry.name === selfName) continue;
+    if (!normalizeHotkeyLabel(entry.hotkey)) continue;
     if (normalized === normalizeHotkeyLabel(entry.hotkey)) {
       throw new Error(`${selfName} hotkey cannot match ${entry.name} hotkey`);
     }
@@ -1411,6 +1367,7 @@ function applyEditableHotkey(
 ): string {
   if (!session) return fallback;
   const normalized = assertHotkeyDistinct(hotkey, selfName);
+  if (!normalized) throw new Error("Hotkey is required");
   session.setHotkey(normalized);
   const next = session.getHotkey();
   setActiveHotkey(next);
@@ -1419,6 +1376,25 @@ function applyEditableHotkey(
   saveNativePrefs(toPersist(next));
   diag(logEvent, { activeHotkey: next });
   return next;
+}
+
+function clearEditableHotkey(
+  session: HotkeySession | null,
+  toPersist: (value: string) => Partial<NativePrefs>,
+  setActiveHotkey: (value: string) => void,
+  setBeforeEdit: (value: string | null) => void,
+  logEvent: string,
+  fallback: string
+): string {
+  if (!session) return fallback;
+  session.stop();
+  session.setHotkey("");
+  setActiveHotkey("");
+  setBeforeEdit(null);
+  session.start();
+  saveNativePrefs(toPersist(""));
+  diag(logEvent, { activeHotkey: "" });
+  return "";
 }
 
 function cancelEditableHotkey(
@@ -1473,200 +1449,212 @@ function emitPlaybackHotkey(action: "toggle_play_pause" | "next_chunk" | "previo
   diag("playback.hotkey.triggered", { action });
 }
 
-app.whenReady().then(() => {
-  flushStartupPhaseBuffer();
-  migrateLegacyUserData();
-  diag("app.ready");
-  const nativePrefs = loadNativePrefs();
-  isPinned = nativePrefs.alwaysOnTop ?? false;
-  activeCaptureHotkey = nativePrefs.captureHotkey ?? activeCaptureHotkey;
-  activeFullCaptureHotkey = nativePrefs.fullCaptureHotkey ?? activeFullCaptureHotkey;
-  activeCopyHotkey = nativePrefs.copyPlayHotkey ?? activeCopyHotkey;
-  activeAbortHotkey = nativePrefs.abortHotkey ?? activeAbortHotkey;
-  activePlaybackToggleHotkey = nativePrefs.playPauseHotkey ?? activePlaybackToggleHotkey;
-  activePlaybackNextHotkey = nativePrefs.nextChunkHotkey ?? activePlaybackNextHotkey;
-  activePlaybackPreviousHotkey = nativePrefs.previousChunkHotkey ?? activePlaybackPreviousHotkey;
-  activeVolumeUpHotkey = nativePrefs.volumeUpHotkey ?? activeVolumeUpHotkey;
-  activeVolumeDownHotkey = nativePrefs.volumeDownHotkey ?? activeVolumeDownHotkey;
-  activeReplayCaptureHotkey = nativePrefs.replayCaptureHotkey ?? activeReplayCaptureHotkey;
-  lastSavedCaptureRect = isValidStoredRect(nativePrefs.lastCaptureRect) ? nativePrefs.lastCaptureRect : null;
-  drawSelectionRectangle = nativePrefs.captureDrawRectangle ?? drawSelectionRectangle;
-  diag("app.native-prefs.loaded", {
-    isPinned,
-    activeCaptureHotkey,
-    activeFullCaptureHotkey,
-    activeCopyHotkey,
-    activeAbortHotkey,
-    activePlaybackToggleHotkey,
-    activePlaybackNextHotkey,
-    activePlaybackPreviousHotkey,
-    activeVolumeUpHotkey,
-    activeVolumeDownHotkey,
-    activeReplayCaptureHotkey,
-    lastSavedCaptureRect,
-    drawSelectionRectangle
+if (!hasSingleInstanceLock) {
+  diag("app.single-instance.lock.failed");
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    diag("app.second-instance");
+    focusMainWindow(mainWindow);
   });
-  diag("app.main-window.create.begin");
-  mainWindow = createMainWindow();
-  diag("app.main-window.create.end", { hasWindow: Boolean(mainWindow) });
-  overlay = new BorderOverlay(2);
-  diag("app.overlay.created");
-  diag("app.capture-session.create.begin", { hotkey: activeCaptureHotkey });
-  captureHotkeySession = new HotkeySession({
-    initialHotkey: activeCaptureHotkey,
-    events: {
-      onHotkeyRegistered: (label) => diag("capture.hotkey.registered", { label }),
-      onHotkeySwitched: (label) => diag("capture.hotkey.switched", { label }),
-      onTriggerDown: (point) => startSelection(point),
-      onTriggerUp: (point) => {
-        void finalizeSelection(point);
-      }
-    }
-  });
-  diag("app.capture-session.create.end");
-  diag("app.fullscreen-capture-session.create.begin", { hotkey: activeFullCaptureHotkey });
-  fullCaptureHotkeySession = new HotkeySession({
-    initialHotkey: activeFullCaptureHotkey,
-    events: {
-      onHotkeyRegistered: (label) => diag("capture.fullscreen.hotkey.registered", { label }),
-      onHotkeySwitched: (label) => diag("capture.fullscreen.hotkey.switched", { label }),
-      onTriggerUp: (point) => {
-        void captureFullScreenAtPoint(point);
-      }
-    }
-  });
-  diag("app.fullscreen-capture-session.create.end");
-  diag("app.copy-session.create.begin", { hotkey: activeCopyHotkey });
-  copyHotkeySession = new HotkeySession({
-    initialHotkey: activeCopyHotkey,
-    events: {
-      onHotkeyRegistered: (label) => diag("copy.hotkey.registered", { label }),
-      onHotkeySwitched: (label) => diag("copy.hotkey.switched", { label }),
-      onTriggerUp: () => {
-        void runCopyPlayCapture();
-      }
-    }
-  });
-  diag("app.copy-session.create.end");
-  diag("app.replay-capture-session.create.begin", { hotkey: activeReplayCaptureHotkey });
-  replayCaptureHotkeySession = new HotkeySession({
-    initialHotkey: activeReplayCaptureHotkey,
-    events: {
-      onHotkeyRegistered: (label) => diag("capture.replay.hotkey.registered", { label }),
-      onHotkeySwitched: (label) => diag("capture.replay.hotkey.switched", { label }),
-      onTriggerUp: () => {
-        void replayLastCaptureRect();
-      }
-    }
-  });
-  diag("app.replay-capture-session.create.end");
-  diag("app.abort-session.create.begin", { hotkey: activeAbortHotkey });
-  abortHotkeySession = new HotkeySession({
-    initialHotkey: activeAbortHotkey,
-    events: {
-      onHotkeyRegistered: (label) => diag("abort.hotkey.registered", { label }),
-      onHotkeySwitched: (label) => diag("abort.hotkey.switched", { label }),
-      onTriggerUp: () => {
-        mainWindow?.webContents.send("abort-requested");
-        diag("abort.hotkey.triggered");
-      }
-    }
-  });
-  diag("app.abort-session.create.end");
-  diag("app.playback-toggle-session.create.begin", { hotkey: activePlaybackToggleHotkey });
-  playbackToggleHotkeySession = new HotkeySession({
-    initialHotkey: activePlaybackToggleHotkey,
-    events: {
-      onHotkeyRegistered: (label) => diag("playback.toggle.hotkey.registered", { label }),
-      onHotkeySwitched: (label) => diag("playback.toggle.hotkey.switched", { label }),
-      onTriggerUp: () => emitPlaybackHotkey("toggle_play_pause")
-    }
-  });
-  diag("app.playback-toggle-session.create.end");
-  diag("app.playback-next-session.create.begin", { hotkey: activePlaybackNextHotkey });
-  playbackNextHotkeySession = new HotkeySession({
-    initialHotkey: activePlaybackNextHotkey,
-    events: {
-      onHotkeyRegistered: (label) => diag("playback.next.hotkey.registered", { label }),
-      onHotkeySwitched: (label) => diag("playback.next.hotkey.switched", { label }),
-      onTriggerUp: () => emitPlaybackHotkey("next_chunk")
-    }
-  });
-  diag("app.playback-next-session.create.end");
-  diag("app.playback-previous-session.create.begin", { hotkey: activePlaybackPreviousHotkey });
-  playbackPreviousHotkeySession = new HotkeySession({
-    initialHotkey: activePlaybackPreviousHotkey,
-    events: {
-      onHotkeyRegistered: (label) => diag("playback.previous.hotkey.registered", { label }),
-      onHotkeySwitched: (label) => diag("playback.previous.hotkey.switched", { label }),
-      onTriggerUp: () => emitPlaybackHotkey("previous_chunk")
-    }
-  });
-  diag("app.playback-previous-session.create.end");
-  diag("app.volume-up-session.create.begin", { hotkey: activeVolumeUpHotkey });
-  volumeUpHotkeySession = new HotkeySession({
-    initialHotkey: activeVolumeUpHotkey,
-    events: {
-      onHotkeyRegistered: (label) => diag("volume.up.hotkey.registered", { label }),
-      onHotkeySwitched: (label) => diag("volume.up.hotkey.switched", { label }),
-      onTriggerUp: () => emitPlaybackHotkey("volume_up")
-    }
-  });
-  diag("app.volume-up-session.create.end");
-  diag("app.volume-down-session.create.begin", { hotkey: activeVolumeDownHotkey });
-  volumeDownHotkeySession = new HotkeySession({
-    initialHotkey: activeVolumeDownHotkey,
-    events: {
-      onHotkeyRegistered: (label) => diag("volume.down.hotkey.registered", { label }),
-      onHotkeySwitched: (label) => diag("volume.down.hotkey.switched", { label }),
-      onTriggerUp: () => emitPlaybackHotkey("volume_down")
-    }
-  });
-  diag("app.volume-down-session.create.end");
-  diag("app.capture-session.start.begin");
-  captureHotkeySession.start();
-  diag("app.capture-session.start.end");
-  diag("app.fullscreen-capture-session.start.begin");
-  fullCaptureHotkeySession.start();
-  diag("app.fullscreen-capture-session.start.end");
-  diag("app.copy-session.start.begin");
-  copyHotkeySession.start();
-  diag("app.copy-session.start.end");
-  diag("app.replay-capture-session.start.begin");
-  replayCaptureHotkeySession.start();
-  diag("app.replay-capture-session.start.end");
-  diag("app.abort-session.start.begin");
-  abortHotkeySession.start();
-  diag("app.abort-session.start.end");
-  diag("app.playback-toggle-session.start.begin");
-  playbackToggleHotkeySession.start();
-  diag("app.playback-toggle-session.start.end");
-  diag("app.playback-next-session.start.begin");
-  playbackNextHotkeySession.start();
-  diag("app.playback-next-session.start.end");
-  diag("app.playback-previous-session.start.begin");
-  playbackPreviousHotkeySession.start();
-  diag("app.playback-previous-session.start.end");
-  diag("app.volume-up-session.start.begin");
-  volumeUpHotkeySession.start();
-  diag("app.volume-up-session.start.end");
-  diag("app.volume-down-session.start.begin");
-  volumeDownHotkeySession.start();
-  diag("app.volume-down-session.start.end");
-  diag("app.selection-ticker.start.begin");
-  startSelectionTicker();
-  diag("app.selection-ticker.start.end");
 
-  app.on("activate", () => {
-    if (appCloseInFlight) {
-      diag("app.activate.ignored", { reason: "close-in-flight" });
-      return;
-    }
-    if (BrowserWindow.getAllWindows().length === 0) {
-      mainWindow = createMainWindow();
-    }
+  app.whenReady().then(() => {
+    flushStartupPhaseBuffer();
+    migrateLegacyUserData();
+    diag("app.ready");
+    const nativePrefs = loadNativePrefs();
+    isPinned = nativePrefs.alwaysOnTop ?? false;
+    activeCaptureHotkey = readStoredHotkey(nativePrefs.captureHotkey, activeCaptureHotkey);
+    activeFullCaptureHotkey = readStoredHotkey(nativePrefs.fullCaptureHotkey, activeFullCaptureHotkey);
+    activeCopyHotkey = readStoredHotkey(nativePrefs.copyPlayHotkey, activeCopyHotkey);
+    activeAbortHotkey = readStoredHotkey(nativePrefs.abortHotkey, activeAbortHotkey);
+    activePlaybackToggleHotkey = readStoredHotkey(nativePrefs.playPauseHotkey, activePlaybackToggleHotkey);
+    activePlaybackNextHotkey = readStoredHotkey(nativePrefs.nextChunkHotkey, activePlaybackNextHotkey);
+    activePlaybackPreviousHotkey = readStoredHotkey(nativePrefs.previousChunkHotkey, activePlaybackPreviousHotkey);
+    activeVolumeUpHotkey = readStoredHotkey(nativePrefs.volumeUpHotkey, activeVolumeUpHotkey);
+    activeVolumeDownHotkey = readStoredHotkey(nativePrefs.volumeDownHotkey, activeVolumeDownHotkey);
+    activeReplayCaptureHotkey = readStoredHotkey(nativePrefs.replayCaptureHotkey, activeReplayCaptureHotkey);
+    lastSavedCaptureRect = isValidStoredRect(nativePrefs.lastCaptureRect) ? nativePrefs.lastCaptureRect : null;
+    drawSelectionRectangle = nativePrefs.captureDrawRectangle ?? drawSelectionRectangle;
+    diag("app.native-prefs.loaded", {
+      isPinned,
+      activeCaptureHotkey,
+      activeFullCaptureHotkey,
+      activeCopyHotkey,
+      activeAbortHotkey,
+      activePlaybackToggleHotkey,
+      activePlaybackNextHotkey,
+      activePlaybackPreviousHotkey,
+      activeVolumeUpHotkey,
+      activeVolumeDownHotkey,
+      activeReplayCaptureHotkey,
+      lastSavedCaptureRect,
+      drawSelectionRectangle
+    });
+    diag("app.main-window.create.begin");
+    mainWindow = createMainWindow();
+    diag("app.main-window.create.end", { hasWindow: Boolean(mainWindow) });
+    overlay = new BorderOverlay(2);
+    diag("app.overlay.created");
+    diag("app.capture-session.create.begin", { hotkey: activeCaptureHotkey });
+    captureHotkeySession = new HotkeySession({
+      initialHotkey: activeCaptureHotkey,
+      events: {
+        onHotkeyRegistered: (label) => diag("capture.hotkey.registered", { label }),
+        onHotkeySwitched: (label) => diag("capture.hotkey.switched", { label }),
+        onTriggerDown: (point) => startSelection(point),
+        onTriggerUp: (point) => {
+          void finalizeSelection(point);
+        }
+      }
+    });
+    diag("app.capture-session.create.end");
+    diag("app.fullscreen-capture-session.create.begin", { hotkey: activeFullCaptureHotkey });
+    fullCaptureHotkeySession = new HotkeySession({
+      initialHotkey: activeFullCaptureHotkey,
+      events: {
+        onHotkeyRegistered: (label) => diag("capture.fullscreen.hotkey.registered", { label }),
+        onHotkeySwitched: (label) => diag("capture.fullscreen.hotkey.switched", { label }),
+        onTriggerUp: (point) => {
+          void captureFullScreenAtPoint(point);
+        }
+      }
+    });
+    diag("app.fullscreen-capture-session.create.end");
+    diag("app.copy-session.create.begin", { hotkey: activeCopyHotkey });
+    copyHotkeySession = new HotkeySession({
+      initialHotkey: activeCopyHotkey,
+      events: {
+        onHotkeyRegistered: (label) => diag("copy.hotkey.registered", { label }),
+        onHotkeySwitched: (label) => diag("copy.hotkey.switched", { label }),
+        onTriggerUp: () => {
+          void runCopyPlayCapture();
+        }
+      }
+    });
+    diag("app.copy-session.create.end");
+    diag("app.replay-capture-session.create.begin", { hotkey: activeReplayCaptureHotkey });
+    replayCaptureHotkeySession = new HotkeySession({
+      initialHotkey: activeReplayCaptureHotkey,
+      events: {
+        onHotkeyRegistered: (label) => diag("capture.replay.hotkey.registered", { label }),
+        onHotkeySwitched: (label) => diag("capture.replay.hotkey.switched", { label }),
+        onTriggerUp: () => {
+          void replayLastCaptureRect();
+        }
+      }
+    });
+    diag("app.replay-capture-session.create.end");
+    diag("app.abort-session.create.begin", { hotkey: activeAbortHotkey });
+    abortHotkeySession = new HotkeySession({
+      initialHotkey: activeAbortHotkey,
+      events: {
+        onHotkeyRegistered: (label) => diag("abort.hotkey.registered", { label }),
+        onHotkeySwitched: (label) => diag("abort.hotkey.switched", { label }),
+        onTriggerUp: () => {
+          mainWindow?.webContents.send("abort-requested");
+          diag("abort.hotkey.triggered");
+        }
+      }
+    });
+    diag("app.abort-session.create.end");
+    diag("app.playback-toggle-session.create.begin", { hotkey: activePlaybackToggleHotkey });
+    playbackToggleHotkeySession = new HotkeySession({
+      initialHotkey: activePlaybackToggleHotkey,
+      events: {
+        onHotkeyRegistered: (label) => diag("playback.toggle.hotkey.registered", { label }),
+        onHotkeySwitched: (label) => diag("playback.toggle.hotkey.switched", { label }),
+        onTriggerUp: () => emitPlaybackHotkey("toggle_play_pause")
+      }
+    });
+    diag("app.playback-toggle-session.create.end");
+    diag("app.playback-next-session.create.begin", { hotkey: activePlaybackNextHotkey });
+    playbackNextHotkeySession = new HotkeySession({
+      initialHotkey: activePlaybackNextHotkey,
+      events: {
+        onHotkeyRegistered: (label) => diag("playback.next.hotkey.registered", { label }),
+        onHotkeySwitched: (label) => diag("playback.next.hotkey.switched", { label }),
+        onTriggerUp: () => emitPlaybackHotkey("next_chunk")
+      }
+    });
+    diag("app.playback-next-session.create.end");
+    diag("app.playback-previous-session.create.begin", { hotkey: activePlaybackPreviousHotkey });
+    playbackPreviousHotkeySession = new HotkeySession({
+      initialHotkey: activePlaybackPreviousHotkey,
+      events: {
+        onHotkeyRegistered: (label) => diag("playback.previous.hotkey.registered", { label }),
+        onHotkeySwitched: (label) => diag("playback.previous.hotkey.switched", { label }),
+        onTriggerUp: () => emitPlaybackHotkey("previous_chunk")
+      }
+    });
+    diag("app.playback-previous-session.create.end");
+    diag("app.volume-up-session.create.begin", { hotkey: activeVolumeUpHotkey });
+    volumeUpHotkeySession = new HotkeySession({
+      initialHotkey: activeVolumeUpHotkey,
+      events: {
+        onHotkeyRegistered: (label) => diag("volume.up.hotkey.registered", { label }),
+        onHotkeySwitched: (label) => diag("volume.up.hotkey.switched", { label }),
+        onTriggerUp: () => emitPlaybackHotkey("volume_up")
+      }
+    });
+    diag("app.volume-up-session.create.end");
+    diag("app.volume-down-session.create.begin", { hotkey: activeVolumeDownHotkey });
+    volumeDownHotkeySession = new HotkeySession({
+      initialHotkey: activeVolumeDownHotkey,
+      events: {
+        onHotkeyRegistered: (label) => diag("volume.down.hotkey.registered", { label }),
+        onHotkeySwitched: (label) => diag("volume.down.hotkey.switched", { label }),
+        onTriggerUp: () => emitPlaybackHotkey("volume_down")
+      }
+    });
+    diag("app.volume-down-session.create.end");
+    diag("app.capture-session.start.begin");
+    captureHotkeySession.start();
+    diag("app.capture-session.start.end");
+    diag("app.fullscreen-capture-session.start.begin");
+    fullCaptureHotkeySession.start();
+    diag("app.fullscreen-capture-session.start.end");
+    diag("app.copy-session.start.begin");
+    copyHotkeySession.start();
+    diag("app.copy-session.start.end");
+    diag("app.replay-capture-session.start.begin");
+    replayCaptureHotkeySession.start();
+    diag("app.replay-capture-session.start.end");
+    diag("app.abort-session.start.begin");
+    abortHotkeySession.start();
+    diag("app.abort-session.start.end");
+    diag("app.playback-toggle-session.start.begin");
+    playbackToggleHotkeySession.start();
+    diag("app.playback-toggle-session.start.end");
+    diag("app.playback-next-session.start.begin");
+    playbackNextHotkeySession.start();
+    diag("app.playback-next-session.start.end");
+    diag("app.playback-previous-session.start.begin");
+    playbackPreviousHotkeySession.start();
+    diag("app.playback-previous-session.start.end");
+    diag("app.volume-up-session.start.begin");
+    volumeUpHotkeySession.start();
+    diag("app.volume-up-session.start.end");
+    diag("app.volume-down-session.start.begin");
+    volumeDownHotkeySession.start();
+    diag("app.volume-down-session.start.end");
+    diag("app.selection-ticker.start.begin");
+    startSelectionTicker();
+    diag("app.selection-ticker.start.end");
+
+    app.on("activate", () => {
+      if (appCloseInFlight) {
+        diag("app.activate.ignored", { reason: "close-in-flight" });
+        return;
+      }
+      if (BrowserWindow.getAllWindows().length === 0) {
+        mainWindow = createMainWindow();
+        return;
+      }
+      focusMainWindow(mainWindow);
+    });
   });
-});
+}
 
 app.on("before-quit", (_event) => {
   diag("app.before-quit");
@@ -1690,6 +1678,17 @@ ipcMain.handle("capture:apply-hotkey", (_event, hotkey: string) => {
     (value) => { activeCaptureHotkey = value; },
     (value) => { captureHotkeyBeforeEdit = value; },
     "capture.hotkey.edit.applied",
+    activeCaptureHotkey
+  );
+});
+
+ipcMain.handle("capture:clear-hotkey", () => {
+  return clearEditableHotkey(
+    captureHotkeySession,
+    (value) => ({ captureHotkey: value }),
+    (value) => { activeCaptureHotkey = value; },
+    (value) => { captureHotkeyBeforeEdit = value; },
+    "capture.hotkey.edit.cleared",
     activeCaptureHotkey
   );
 });
@@ -1731,6 +1730,17 @@ ipcMain.handle("capture-fullscreen:apply-hotkey", (_event, hotkey: string) => {
   );
 });
 
+ipcMain.handle("capture-fullscreen:clear-hotkey", () => {
+  return clearEditableHotkey(
+    fullCaptureHotkeySession,
+    (value) => ({ fullCaptureHotkey: value }),
+    (value) => { activeFullCaptureHotkey = value; },
+    (value) => { fullCaptureHotkeyBeforeEdit = value; },
+    "capture.fullscreen.hotkey.edit.cleared",
+    activeFullCaptureHotkey
+  );
+});
+
 ipcMain.handle("capture-fullscreen:cancel-hotkey-edit", () => {
   return cancelEditableHotkey(
     fullCaptureHotkeySession,
@@ -1764,6 +1774,17 @@ ipcMain.handle("copy:apply-hotkey", (_event, hotkey: string) => {
     (value) => { activeCopyHotkey = value; },
     (value) => { copyHotkeyBeforeEdit = value; },
     "copy.hotkey.edit.applied",
+    activeCopyHotkey
+  );
+});
+
+ipcMain.handle("copy:clear-hotkey", () => {
+  return clearEditableHotkey(
+    copyHotkeySession,
+    (value) => ({ copyPlayHotkey: value }),
+    (value) => { activeCopyHotkey = value; },
+    (value) => { copyHotkeyBeforeEdit = value; },
+    "copy.hotkey.edit.cleared",
     activeCopyHotkey
   );
 });
@@ -1805,6 +1826,17 @@ ipcMain.handle("abort:apply-hotkey", (_event, hotkey: string) => {
   );
 });
 
+ipcMain.handle("abort:clear-hotkey", () => {
+  return clearEditableHotkey(
+    abortHotkeySession,
+    (value) => ({ abortHotkey: value }),
+    (value) => { activeAbortHotkey = value; },
+    (value) => { abortHotkeyBeforeEdit = value; },
+    "abort.hotkey.edit.cleared",
+    activeAbortHotkey
+  );
+});
+
 ipcMain.handle("abort:cancel-hotkey-edit", () => {
   return cancelEditableHotkey(
     abortHotkeySession,
@@ -1838,6 +1870,17 @@ ipcMain.handle("playback-toggle:apply-hotkey", (_event, hotkey: string) => {
     (value) => { activePlaybackToggleHotkey = value; },
     (value) => { playbackToggleHotkeyBeforeEdit = value; },
     "playback.toggle.hotkey.edit.applied",
+    activePlaybackToggleHotkey
+  );
+});
+
+ipcMain.handle("playback-toggle:clear-hotkey", () => {
+  return clearEditableHotkey(
+    playbackToggleHotkeySession,
+    (value) => ({ playPauseHotkey: value }),
+    (value) => { activePlaybackToggleHotkey = value; },
+    (value) => { playbackToggleHotkeyBeforeEdit = value; },
+    "playback.toggle.hotkey.edit.cleared",
     activePlaybackToggleHotkey
   );
 });
@@ -1879,6 +1922,17 @@ ipcMain.handle("playback-next:apply-hotkey", (_event, hotkey: string) => {
   );
 });
 
+ipcMain.handle("playback-next:clear-hotkey", () => {
+  return clearEditableHotkey(
+    playbackNextHotkeySession,
+    (value) => ({ nextChunkHotkey: value }),
+    (value) => { activePlaybackNextHotkey = value; },
+    (value) => { playbackNextHotkeyBeforeEdit = value; },
+    "playback.next.hotkey.edit.cleared",
+    activePlaybackNextHotkey
+  );
+});
+
 ipcMain.handle("playback-next:cancel-hotkey-edit", () => {
   return cancelEditableHotkey(
     playbackNextHotkeySession,
@@ -1912,6 +1966,17 @@ ipcMain.handle("playback-previous:apply-hotkey", (_event, hotkey: string) => {
     (value) => { activePlaybackPreviousHotkey = value; },
     (value) => { playbackPreviousHotkeyBeforeEdit = value; },
     "playback.previous.hotkey.edit.applied",
+    activePlaybackPreviousHotkey
+  );
+});
+
+ipcMain.handle("playback-previous:clear-hotkey", () => {
+  return clearEditableHotkey(
+    playbackPreviousHotkeySession,
+    (value) => ({ previousChunkHotkey: value }),
+    (value) => { activePlaybackPreviousHotkey = value; },
+    (value) => { playbackPreviousHotkeyBeforeEdit = value; },
+    "playback.previous.hotkey.edit.cleared",
     activePlaybackPreviousHotkey
   );
 });
@@ -1953,6 +2018,17 @@ ipcMain.handle("volume-up:apply-hotkey", (_event, hotkey: string) => {
   );
 });
 
+ipcMain.handle("volume-up:clear-hotkey", () => {
+  return clearEditableHotkey(
+    volumeUpHotkeySession,
+    (value) => ({ volumeUpHotkey: value }),
+    (value) => { activeVolumeUpHotkey = value; },
+    (value) => { volumeUpHotkeyBeforeEdit = value; },
+    "volume.up.hotkey.edit.cleared",
+    activeVolumeUpHotkey
+  );
+});
+
 ipcMain.handle("volume-up:cancel-hotkey-edit", () => {
   return cancelEditableHotkey(
     volumeUpHotkeySession,
@@ -1990,6 +2066,17 @@ ipcMain.handle("volume-down:apply-hotkey", (_event, hotkey: string) => {
   );
 });
 
+ipcMain.handle("volume-down:clear-hotkey", () => {
+  return clearEditableHotkey(
+    volumeDownHotkeySession,
+    (value) => ({ volumeDownHotkey: value }),
+    (value) => { activeVolumeDownHotkey = value; },
+    (value) => { volumeDownHotkeyBeforeEdit = value; },
+    "volume.down.hotkey.edit.cleared",
+    activeVolumeDownHotkey
+  );
+});
+
 ipcMain.handle("volume-down:cancel-hotkey-edit", () => {
   return cancelEditableHotkey(
     volumeDownHotkeySession,
@@ -2023,6 +2110,17 @@ ipcMain.handle("capture-replay:apply-hotkey", (_event, hotkey: string) => {
     (value) => { activeReplayCaptureHotkey = value; },
     (value) => { replayCaptureHotkeyBeforeEdit = value; },
     "capture.replay.hotkey.edit.applied",
+    activeReplayCaptureHotkey
+  );
+});
+
+ipcMain.handle("capture-replay:clear-hotkey", () => {
+  return clearEditableHotkey(
+    replayCaptureHotkeySession,
+    (value) => ({ replayCaptureHotkey: value }),
+    (value) => { activeReplayCaptureHotkey = value; },
+    (value) => { replayCaptureHotkeyBeforeEdit = value; },
+    "capture.replay.hotkey.edit.cleared",
     activeReplayCaptureHotkey
   );
 });

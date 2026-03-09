@@ -18,3 +18,9 @@
 19. abort hotkey x
 20. installer
 21. fix rapid and paddle selection x
+22. fix tts start up x
+23. clear button
+24. window screenshot
+25. fix screenshot button 
+26. remove Roaming\TTS Anywhere x
+27. only one instant x

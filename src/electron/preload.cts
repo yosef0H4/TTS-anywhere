@@ -56,6 +56,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   applyCaptureHotkey: (hotkey: string) => {
     return ipcRenderer.invoke("capture:apply-hotkey", hotkey) as Promise<string>;
   },
+  clearCaptureHotkey: () => {
+    return ipcRenderer.invoke("capture:clear-hotkey") as Promise<string>;
+  },
   cancelCaptureHotkeyEdit: () => {
     return ipcRenderer.invoke("capture:cancel-hotkey-edit") as Promise<string>;
   },
@@ -67,6 +70,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   applyFullCaptureHotkey: (hotkey: string) => {
     return ipcRenderer.invoke("capture-fullscreen:apply-hotkey", hotkey) as Promise<string>;
+  },
+  clearFullCaptureHotkey: () => {
+    return ipcRenderer.invoke("capture-fullscreen:clear-hotkey") as Promise<string>;
   },
   cancelFullCaptureHotkeyEdit: () => {
     return ipcRenderer.invoke("capture-fullscreen:cancel-hotkey-edit") as Promise<string>;
@@ -80,6 +86,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   applyCopyHotkey: (hotkey: string) => {
     return ipcRenderer.invoke("copy:apply-hotkey", hotkey) as Promise<string>;
   },
+  clearCopyHotkey: () => {
+    return ipcRenderer.invoke("copy:clear-hotkey") as Promise<string>;
+  },
   cancelCopyHotkeyEdit: () => {
     return ipcRenderer.invoke("copy:cancel-hotkey-edit") as Promise<string>;
   },
@@ -91,6 +100,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   applyAbortHotkey: (hotkey: string) => {
     return ipcRenderer.invoke("abort:apply-hotkey", hotkey) as Promise<string>;
+  },
+  clearAbortHotkey: () => {
+    return ipcRenderer.invoke("abort:clear-hotkey") as Promise<string>;
   },
   cancelAbortHotkeyEdit: () => {
     return ipcRenderer.invoke("abort:cancel-hotkey-edit") as Promise<string>;
@@ -104,6 +116,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   applyPlayPauseHotkey: (hotkey: string) => {
     return ipcRenderer.invoke("playback-toggle:apply-hotkey", hotkey) as Promise<string>;
   },
+  clearPlayPauseHotkey: () => {
+    return ipcRenderer.invoke("playback-toggle:clear-hotkey") as Promise<string>;
+  },
   cancelPlayPauseHotkeyEdit: () => {
     return ipcRenderer.invoke("playback-toggle:cancel-hotkey-edit") as Promise<string>;
   },
@@ -115,6 +130,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   applyNextChunkHotkey: (hotkey: string) => {
     return ipcRenderer.invoke("playback-next:apply-hotkey", hotkey) as Promise<string>;
+  },
+  clearNextChunkHotkey: () => {
+    return ipcRenderer.invoke("playback-next:clear-hotkey") as Promise<string>;
   },
   cancelNextChunkHotkeyEdit: () => {
     return ipcRenderer.invoke("playback-next:cancel-hotkey-edit") as Promise<string>;
@@ -128,6 +146,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   applyPreviousChunkHotkey: (hotkey: string) => {
     return ipcRenderer.invoke("playback-previous:apply-hotkey", hotkey) as Promise<string>;
   },
+  clearPreviousChunkHotkey: () => {
+    return ipcRenderer.invoke("playback-previous:clear-hotkey") as Promise<string>;
+  },
   cancelPreviousChunkHotkeyEdit: () => {
     return ipcRenderer.invoke("playback-previous:cancel-hotkey-edit") as Promise<string>;
   },
@@ -139,6 +160,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   applyVolumeUpHotkey: (hotkey: string) => {
     return ipcRenderer.invoke("volume-up:apply-hotkey", hotkey) as Promise<string>;
+  },
+  clearVolumeUpHotkey: () => {
+    return ipcRenderer.invoke("volume-up:clear-hotkey") as Promise<string>;
   },
   cancelVolumeUpHotkeyEdit: () => {
     return ipcRenderer.invoke("volume-up:cancel-hotkey-edit") as Promise<string>;
@@ -152,6 +176,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   applyVolumeDownHotkey: (hotkey: string) => {
     return ipcRenderer.invoke("volume-down:apply-hotkey", hotkey) as Promise<string>;
   },
+  clearVolumeDownHotkey: () => {
+    return ipcRenderer.invoke("volume-down:clear-hotkey") as Promise<string>;
+  },
   cancelVolumeDownHotkeyEdit: () => {
     return ipcRenderer.invoke("volume-down:cancel-hotkey-edit") as Promise<string>;
   },
@@ -163,6 +190,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   applyReplayCaptureHotkey: (hotkey: string) => {
     return ipcRenderer.invoke("capture-replay:apply-hotkey", hotkey) as Promise<string>;
+  },
+  clearReplayCaptureHotkey: () => {
+    return ipcRenderer.invoke("capture-replay:clear-hotkey") as Promise<string>;
   },
   cancelReplayCaptureHotkeyEdit: () => {
     return ipcRenderer.invoke("capture-replay:cancel-hotkey-edit") as Promise<string>;

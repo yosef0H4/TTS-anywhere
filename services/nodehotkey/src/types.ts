@@ -13,7 +13,7 @@ export type HotkeySessionEvents = {
 };
 
 export type HotkeySessionOptions = {
-  initialHotkey?: string;
+  initialHotkey?: string | null;
   pollMs?: number;
   events?: HotkeySessionEvents;
 };

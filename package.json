@@ -98,6 +98,9 @@
       "target": [
         "nsis"
       ]
+    },
+    "nsis": {
+      "include": "build/installer.nsh"
     }
   }
 }

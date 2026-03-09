@@ -20,6 +20,7 @@ import {
   type ChunkRecord,
   type ChunkStatus
 } from "../core/playback/chunking";
+import { canResumePlayback } from "../core/playback/session";
 import { AppPipeline } from "../core/pipeline/app-pipeline";
 import { LEGACY_SETTINGS_KEYS, SettingsStore, SETTINGS_KEY } from "../core/services/settings-store";
 import type { ManagedServiceId, ManagedServiceStatus, ManagedServicesStatus } from "../core/services/platform";
@@ -84,10 +85,12 @@ interface HotkeyBindingConfig {
   inputId: string;
   statusId: string;
   recordButtonId: string;
+  clearButtonId: string;
   applyButtonId: string;
   cancelButtonId: string;
   beginEdit: (() => Promise<string>) | undefined;
   apply: ((hotkey: string) => Promise<string>) | undefined;
+  clear: (() => Promise<string>) | undefined;
   cancelEdit: (() => Promise<string>) | undefined;
 }
 
@@ -215,10 +218,12 @@ export class WebApp {
           inputId: "capture-hotkey",
           statusId: "hotkey-recording-status",
           recordButtonId: "btn-hotkey-record",
+          clearButtonId: "btn-hotkey-clear",
           applyButtonId: "btn-hotkey-apply",
           cancelButtonId: "btn-hotkey-cancel",
           beginEdit: api?.beginCaptureHotkeyEdit,
           apply: api?.applyCaptureHotkey,
+          clear: api?.clearCaptureHotkey,
           cancelEdit: api?.cancelCaptureHotkeyEdit
         };
       case "fullCapture":
@@ -227,10 +232,12 @@ export class WebApp {
           inputId: "full-capture-hotkey",
           statusId: "full-capture-hotkey-recording-status",
           recordButtonId: "btn-full-capture-hotkey-record",
+          clearButtonId: "btn-full-capture-hotkey-clear",
           applyButtonId: "btn-full-capture-hotkey-apply",
           cancelButtonId: "btn-full-capture-hotkey-cancel",
           beginEdit: api?.beginFullCaptureHotkeyEdit,
           apply: api?.applyFullCaptureHotkey,
+          clear: api?.clearFullCaptureHotkey,
           cancelEdit: api?.cancelFullCaptureHotkeyEdit
         };
       case "copyPlay":
@@ -239,10 +246,12 @@ export class WebApp {
           inputId: "copy-play-hotkey",
           statusId: "copy-hotkey-recording-status",
           recordButtonId: "btn-copy-hotkey-record",
+          clearButtonId: "btn-copy-hotkey-clear",
           applyButtonId: "btn-copy-hotkey-apply",
           cancelButtonId: "btn-copy-hotkey-cancel",
           beginEdit: api?.beginCopyHotkeyEdit,
           apply: api?.applyCopyHotkey,
+          clear: api?.clearCopyHotkey,
           cancelEdit: api?.cancelCopyHotkeyEdit
         };
       case "abort":
@@ -251,10 +260,12 @@ export class WebApp {
           inputId: "abort-hotkey",
           statusId: "abort-hotkey-recording-status",
           recordButtonId: "btn-abort-hotkey-record",
+          clearButtonId: "btn-abort-hotkey-clear",
           applyButtonId: "btn-abort-hotkey-apply",
           cancelButtonId: "btn-abort-hotkey-cancel",
           beginEdit: api?.beginAbortHotkeyEdit,
           apply: api?.applyAbortHotkey,
+          clear: api?.clearAbortHotkey,
           cancelEdit: api?.cancelAbortHotkeyEdit
         };
       case "playPause":
@@ -263,10 +274,12 @@ export class WebApp {
           inputId: "play-pause-hotkey",
           statusId: "play-pause-hotkey-recording-status",
           recordButtonId: "btn-play-pause-hotkey-record",
+          clearButtonId: "btn-play-pause-hotkey-clear",
           applyButtonId: "btn-play-pause-hotkey-apply",
           cancelButtonId: "btn-play-pause-hotkey-cancel",
           beginEdit: api?.beginPlayPauseHotkeyEdit,
           apply: api?.applyPlayPauseHotkey,
+          clear: api?.clearPlayPauseHotkey,
           cancelEdit: api?.cancelPlayPauseHotkeyEdit
         };
       case "nextChunk":
@@ -275,10 +288,12 @@ export class WebApp {
           inputId: "next-chunk-hotkey",
           statusId: "next-chunk-hotkey-recording-status",
           recordButtonId: "btn-next-chunk-hotkey-record",
+          clearButtonId: "btn-next-chunk-hotkey-clear",
           applyButtonId: "btn-next-chunk-hotkey-apply",
           cancelButtonId: "btn-next-chunk-hotkey-cancel",
           beginEdit: api?.beginNextChunkHotkeyEdit,
           apply: api?.applyNextChunkHotkey,
+          clear: api?.clearNextChunkHotkey,
           cancelEdit: api?.cancelNextChunkHotkeyEdit
         };
       case "previousChunk":
@@ -287,10 +302,12 @@ export class WebApp {
           inputId: "previous-chunk-hotkey",
           statusId: "previous-chunk-hotkey-recording-status",
           recordButtonId: "btn-previous-chunk-hotkey-record",
+          clearButtonId: "btn-previous-chunk-hotkey-clear",
           applyButtonId: "btn-previous-chunk-hotkey-apply",
           cancelButtonId: "btn-previous-chunk-hotkey-cancel",
           beginEdit: api?.beginPreviousChunkHotkeyEdit,
           apply: api?.applyPreviousChunkHotkey,
+          clear: api?.clearPreviousChunkHotkey,
           cancelEdit: api?.cancelPreviousChunkHotkeyEdit
         };
       case "volumeUp":
@@ -299,10 +316,12 @@ export class WebApp {
           inputId: "volume-up-hotkey",
           statusId: "volume-up-hotkey-recording-status",
           recordButtonId: "btn-volume-up-hotkey-record",
+          clearButtonId: "btn-volume-up-hotkey-clear",
           applyButtonId: "btn-volume-up-hotkey-apply",
           cancelButtonId: "btn-volume-up-hotkey-cancel",
           beginEdit: api?.beginVolumeUpHotkeyEdit,
           apply: api?.applyVolumeUpHotkey,
+          clear: api?.clearVolumeUpHotkey,
           cancelEdit: api?.cancelVolumeUpHotkeyEdit
         };
       case "volumeDown":
@@ -311,10 +330,12 @@ export class WebApp {
           inputId: "volume-down-hotkey",
           statusId: "volume-down-hotkey-recording-status",
           recordButtonId: "btn-volume-down-hotkey-record",
+          clearButtonId: "btn-volume-down-hotkey-clear",
           applyButtonId: "btn-volume-down-hotkey-apply",
           cancelButtonId: "btn-volume-down-hotkey-cancel",
           beginEdit: api?.beginVolumeDownHotkeyEdit,
           apply: api?.applyVolumeDownHotkey,
+          clear: api?.clearVolumeDownHotkey,
           cancelEdit: api?.cancelVolumeDownHotkeyEdit
         };
       case "replayCapture":
@@ -323,10 +344,12 @@ export class WebApp {
           inputId: "replay-capture-hotkey",
           statusId: "replay-capture-hotkey-recording-status",
           recordButtonId: "btn-replay-capture-hotkey-record",
+          clearButtonId: "btn-replay-capture-hotkey-clear",
           applyButtonId: "btn-replay-capture-hotkey-apply",
           cancelButtonId: "btn-replay-capture-hotkey-cancel",
           beginEdit: api?.beginReplayCaptureHotkeyEdit,
           apply: api?.applyReplayCaptureHotkey,
+          clear: api?.clearReplayCaptureHotkey,
           cancelEdit: api?.cancelReplayCaptureHotkeyEdit
         };
     }
@@ -1329,6 +1352,9 @@ export class WebApp {
     this.must<HTMLButtonElement>("btn-hotkey-record").addEventListener("click", () => {
       void this.beginHotkeyRecording("capture");
     });
+    this.must<HTMLButtonElement>("btn-hotkey-clear").addEventListener("click", () => {
+      void this.clearHotkey("capture");
+    });
     this.must<HTMLButtonElement>("btn-hotkey-apply").addEventListener("click", () => {
       void this.applyRecordedHotkey("capture");
     });
@@ -1337,6 +1363,9 @@ export class WebApp {
     });
     this.must<HTMLButtonElement>("btn-full-capture-hotkey-record").addEventListener("click", () => {
       void this.beginHotkeyRecording("fullCapture");
+    });
+    this.must<HTMLButtonElement>("btn-full-capture-hotkey-clear").addEventListener("click", () => {
+      void this.clearHotkey("fullCapture");
     });
     this.must<HTMLButtonElement>("btn-full-capture-hotkey-apply").addEventListener("click", () => {
       void this.applyRecordedHotkey("fullCapture");
@@ -1347,6 +1376,9 @@ export class WebApp {
     this.must<HTMLButtonElement>("btn-copy-hotkey-record").addEventListener("click", () => {
       void this.beginHotkeyRecording("copyPlay");
     });
+    this.must<HTMLButtonElement>("btn-copy-hotkey-clear").addEventListener("click", () => {
+      void this.clearHotkey("copyPlay");
+    });
     this.must<HTMLButtonElement>("btn-copy-hotkey-apply").addEventListener("click", () => {
       void this.applyRecordedHotkey("copyPlay");
     });
@@ -1355,6 +1387,9 @@ export class WebApp {
     });
     this.must<HTMLButtonElement>("btn-abort-hotkey-record").addEventListener("click", () => {
       void this.beginHotkeyRecording("abort");
+    });
+    this.must<HTMLButtonElement>("btn-abort-hotkey-clear").addEventListener("click", () => {
+      void this.clearHotkey("abort");
     });
     this.must<HTMLButtonElement>("btn-abort-hotkey-apply").addEventListener("click", () => {
       void this.applyRecordedHotkey("abort");
@@ -1365,6 +1400,9 @@ export class WebApp {
     this.must<HTMLButtonElement>("btn-play-pause-hotkey-record").addEventListener("click", () => {
       void this.beginHotkeyRecording("playPause");
     });
+    this.must<HTMLButtonElement>("btn-play-pause-hotkey-clear").addEventListener("click", () => {
+      void this.clearHotkey("playPause");
+    });
     this.must<HTMLButtonElement>("btn-play-pause-hotkey-apply").addEventListener("click", () => {
       void this.applyRecordedHotkey("playPause");
     });
@@ -1373,6 +1411,9 @@ export class WebApp {
     });
     this.must<HTMLButtonElement>("btn-next-chunk-hotkey-record").addEventListener("click", () => {
       void this.beginHotkeyRecording("nextChunk");
+    });
+    this.must<HTMLButtonElement>("btn-next-chunk-hotkey-clear").addEventListener("click", () => {
+      void this.clearHotkey("nextChunk");
     });
     this.must<HTMLButtonElement>("btn-next-chunk-hotkey-apply").addEventListener("click", () => {
       void this.applyRecordedHotkey("nextChunk");
@@ -1383,6 +1424,9 @@ export class WebApp {
     this.must<HTMLButtonElement>("btn-previous-chunk-hotkey-record").addEventListener("click", () => {
       void this.beginHotkeyRecording("previousChunk");
     });
+    this.must<HTMLButtonElement>("btn-previous-chunk-hotkey-clear").addEventListener("click", () => {
+      void this.clearHotkey("previousChunk");
+    });
     this.must<HTMLButtonElement>("btn-previous-chunk-hotkey-apply").addEventListener("click", () => {
       void this.applyRecordedHotkey("previousChunk");
     });
@@ -1391,6 +1435,9 @@ export class WebApp {
     });
     this.must<HTMLButtonElement>("btn-volume-up-hotkey-record").addEventListener("click", () => {
       void this.beginHotkeyRecording("volumeUp");
+    });
+    this.must<HTMLButtonElement>("btn-volume-up-hotkey-clear").addEventListener("click", () => {
+      void this.clearHotkey("volumeUp");
     });
     this.must<HTMLButtonElement>("btn-volume-up-hotkey-apply").addEventListener("click", () => {
       void this.applyRecordedHotkey("volumeUp");
@@ -1401,6 +1448,9 @@ export class WebApp {
     this.must<HTMLButtonElement>("btn-volume-down-hotkey-record").addEventListener("click", () => {
       void this.beginHotkeyRecording("volumeDown");
     });
+    this.must<HTMLButtonElement>("btn-volume-down-hotkey-clear").addEventListener("click", () => {
+      void this.clearHotkey("volumeDown");
+    });
     this.must<HTMLButtonElement>("btn-volume-down-hotkey-apply").addEventListener("click", () => {
       void this.applyRecordedHotkey("volumeDown");
     });
@@ -1409,6 +1459,9 @@ export class WebApp {
     });
     this.must<HTMLButtonElement>("btn-replay-capture-hotkey-record").addEventListener("click", () => {
       void this.beginHotkeyRecording("replayCapture");
+    });
+    this.must<HTMLButtonElement>("btn-replay-capture-hotkey-clear").addEventListener("click", () => {
+      void this.clearHotkey("replayCapture");
     });
     this.must<HTMLButtonElement>("btn-replay-capture-hotkey-apply").addEventListener("click", () => {
       void this.applyRecordedHotkey("replayCapture");
@@ -1518,7 +1571,14 @@ export class WebApp {
     this.must<HTMLInputElement>("diagnostics-enabled").checked = this.config.system.diagnosticsEnabled;
     this.must<HTMLInputElement>("capture-draw-rectangle").checked = this.config.system.captureDrawRectangle;
     this.renderHotkeyInputs();
-    this.setAllHotkeyRecordingStatuses(window.electronAPI ? this.t("hotkey.currentActive") : this.t("hotkey.electronOnly"));
+    if (window.electronAPI) {
+      for (const key of this.getConfigurableHotkeyKeys()) {
+        const binding = this.getHotkeyBindingConfig(key);
+        this.setHotkeyRecordingStatus(key, this.getHotkeyStatus(this.config.system[binding.systemKey]));
+      }
+    } else {
+      this.setAllHotkeyRecordingStatuses(this.t("hotkey.electronOnly"));
+    }
     this.renderHotkeyButtonState();
     this.must<HTMLInputElement>("show-chunk-diagnostics").checked = this.config.ui.showChunkDiagnostics;
     this.must<HTMLSelectElement>("log-level").value = this.config.logging.level;
@@ -1835,6 +1895,7 @@ export class WebApp {
     this.ocrStreamSession += 1;
     this.activeRunId += 1;
     this.runInProgress = false;
+    this.abortPlaybackAndSynthesis();
     loggers.pipeline.info("Vision work preempted", { reason });
     this.updateBreakButtonState();
   }
@@ -2040,10 +2101,23 @@ export class WebApp {
     for (const key of this.getConfigurableHotkeyKeys()) {
       const binding = this.getHotkeyBindingConfig(key);
       const available = Boolean(binding.beginEdit);
-      this.must<HTMLButtonElement>(binding.recordButtonId).disabled = !available || this.hotkeyRecordingState[key];
-      this.must<HTMLButtonElement>(binding.applyButtonId).disabled = !available || !this.pendingHotkeys[key];
-      this.must<HTMLButtonElement>(binding.cancelButtonId).disabled =
-        !available || (!this.hotkeyRecordingState[key] && !this.pendingHotkeys[key]);
+      const editing = this.hotkeyRecordingState[key];
+      const recordButton = this.must<HTMLButtonElement>(binding.recordButtonId);
+      const clearButton = this.must<HTMLButtonElement>(binding.clearButtonId);
+      const applyButton = this.must<HTMLButtonElement>(binding.applyButtonId);
+      const cancelButton = this.must<HTMLButtonElement>(binding.cancelButtonId);
+      recordButton.hidden = editing;
+      clearButton.hidden = editing;
+      applyButton.hidden = !editing;
+      cancelButton.hidden = !editing;
+      recordButton.style.display = editing ? "none" : "";
+      clearButton.style.display = editing ? "none" : "";
+      applyButton.style.display = editing ? "" : "none";
+      cancelButton.style.display = editing ? "" : "none";
+      recordButton.disabled = !available || this.hotkeyRecordingState[key];
+      clearButton.disabled = !available || editing;
+      applyButton.disabled = !available || !this.pendingHotkeys[key];
+      cancelButton.disabled = !available || !editing;
     }
   }
 
@@ -2063,7 +2137,7 @@ export class WebApp {
       this.hotkeyRecordingState[key] = false;
       this.stopHotkeyRecordingListener(key);
       this.must<HTMLInputElement>(binding.inputId).value = applied;
-      this.setHotkeyRecordingStatus(key, this.t("hotkey.currentActive"));
+      this.setHotkeyRecordingStatus(key, this.getHotkeyStatus(applied));
       this.renderHotkeyButtonState();
       this.store.save(this.config);
     } catch (error) {
@@ -2144,6 +2218,7 @@ export class WebApp {
       await binding.beginEdit?.();
     } catch (error) {
       this.hotkeyRecordingState[key] = false;
+      this.must<HTMLInputElement>(binding.inputId).value = this.config.system[binding.systemKey];
       this.setHotkeyRecordingStatus(key, this.t("hotkey.startFailed", { error: String(error) }));
       this.renderHotkeyButtonState();
       return;
@@ -2159,8 +2234,8 @@ export class WebApp {
       this.must<HTMLInputElement>(binding.inputId).value = normalized;
       this.setHotkeyRecordingStatus(key, this.t("hotkey.captured", { hotkey: normalized }));
       this.stopHotkeyRecordingListener(key);
-      this.hotkeyRecordingState[key] = false;
       this.renderHotkeyButtonState();
+      void this.applyRecordedHotkey(key);
     };
 
     window.addEventListener("keydown", this.hotkeyKeydownHandlers[key], true);
@@ -2185,10 +2260,28 @@ export class WebApp {
       this.hotkeyRecordingState[key] = false;
       this.stopHotkeyRecordingListener(key);
       this.must<HTMLInputElement>(binding.inputId).value = next;
-      this.setHotkeyRecordingStatus(key, this.t("hotkey.active", { hotkey: next }));
+      this.setHotkeyRecordingStatus(key, this.getHotkeyAppliedStatus(next));
       this.store.save(this.config);
     } catch (error) {
       this.setHotkeyRecordingStatus(key, this.t("hotkey.applyFailed", { error: String(error) }));
+      this.hotkeyRecordingState[key] = true;
+      if (!this.hotkeyKeydownHandlers[key]) {
+        this.hotkeyKeydownHandlers[key] = (event: KeyboardEvent) => {
+          if (!this.hotkeyRecordingState[key]) return;
+          const normalized = this.normalizeKeyboardHotkey(event);
+          if (!normalized) return;
+          event.preventDefault();
+          event.stopPropagation();
+          this.pendingHotkeys[key] = normalized;
+          this.must<HTMLInputElement>(binding.inputId).value = normalized;
+          this.setHotkeyRecordingStatus(key, this.t("hotkey.captured", { hotkey: normalized }));
+          this.stopHotkeyRecordingListener(key);
+          this.renderHotkeyButtonState();
+          void this.applyRecordedHotkey(key);
+        };
+        window.addEventListener("keydown", this.hotkeyKeydownHandlers[key], true);
+      }
+      this.renderHotkeyButtonState();
       return;
     }
     this.renderHotkeyButtonState();
@@ -2211,9 +2304,36 @@ export class WebApp {
       }));
     }
     this.must<HTMLInputElement>(binding.inputId).value = this.config.system[binding.systemKey];
-    this.setHotkeyRecordingStatus(key, this.t("hotkey.currentActive"));
+    this.setHotkeyRecordingStatus(key, this.getHotkeyStatus(this.config.system[binding.systemKey]));
     this.renderHotkeyButtonState();
     this.store.save(this.config);
+  }
+
+  private async clearHotkey(key: ConfigurableHotkeyKey): Promise<void> {
+    const binding = this.getHotkeyBindingConfig(key);
+    this.hotkeyRecordingState[key] = false;
+    this.pendingHotkeys[key] = null;
+    this.stopHotkeyRecordingListener(key);
+    try {
+      const cleared = await binding.clear?.();
+      const next = cleared ?? "";
+      this.config.system[binding.systemKey] = next;
+      this.must<HTMLInputElement>(binding.inputId).value = next;
+      this.setHotkeyRecordingStatus(key, this.getHotkeyStatus(next));
+      this.store.save(this.config);
+    } catch (error) {
+      this.setHotkeyRecordingStatus(key, this.t("hotkey.clearFailed", { error: String(error) }));
+      return;
+    }
+    this.renderHotkeyButtonState();
+  }
+
+  private getHotkeyStatus(value: string): string {
+    return value ? this.t("hotkey.currentActive") : this.t("hotkey.none");
+  }
+
+  private getHotkeyAppliedStatus(value: string): string {
+    return value ? this.t("hotkey.active", { hotkey: value }) : this.t("hotkey.none");
   }
 
   private bindPlayback(): void {
@@ -2277,6 +2397,8 @@ export class WebApp {
       });
       if (nextIndex >= this.timeline.chunks.length) {
         this.chunkPlaybackMode = false;
+        this.audio.src = "";
+        this.audio.currentTime = 0;
         this.setStatus(this.t("playback.ready"));
         this.renderPlayState();
         return;
@@ -2427,7 +2549,6 @@ export class WebApp {
       this.setRawTextLock(false);
       this.setRawTextValuePreservingScroll(result.text);
       this.reconcileText(this.getPlaybackText(), { source: "llm", finalizeTail: true });
-      void this.startOrResumePlayback();
       return { text: result.text };
     } catch (error) {
       this.ocrStreaming = false;
@@ -2665,7 +2786,11 @@ export class WebApp {
       return;
     }
 
-    if (this.chunkPlaybackMode && this.audio.src) {
+    if (canResumePlayback({
+      chunkPlaybackMode: this.chunkPlaybackMode,
+      audioSrc: this.audio.src,
+      speakingChunkId: this.speakingChunkId
+    })) {
       await this.audio.play();
       loggers.playback.info("Playback resumed");
       return;

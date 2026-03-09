@@ -51,7 +51,7 @@ export class HotkeySession {
 
   private running = false;
   private timer: NodeJS.Timeout | null = null;
-  private activeHotkey: HotkeySpec;
+  private activeHotkey: HotkeySpec | null;
   private triggerComboDown = false;
   private triggerHeld = false;
   private keyboardHook: unknown = null;
@@ -62,13 +62,20 @@ export class HotkeySession {
     if (process.platform !== "win32") throw new Error("nodehotkey is Windows-only");
     this.pollMs = options.pollMs ?? 16;
     this.events = options.events;
-    this.activeHotkey = parseHotkeySpec(options.initialHotkey ?? DEFAULT_HOTKEY);
+    this.activeHotkey = this.parseOptionalHotkey(options.initialHotkey ?? DEFAULT_HOTKEY);
   }
 
   start(): void {
     if (this.running) return;
     const startedAt = Date.now();
-    sessionDiag("session.start.begin", { hotkey: this.activeHotkey.label, pollMs: this.pollMs });
+    sessionDiag("session.start.begin", { hotkey: this.getHotkey(), pollMs: this.pollMs });
+    if (!this.activeHotkey) {
+      this.running = true;
+      this.tickCount = 0;
+      this.timer = setInterval(() => this.tick(), this.pollMs);
+      sessionDiag("session.start.disabled", { elapsedMs: Date.now() - startedAt });
+      return;
+    }
     ensureDpiAwareness();
     sessionDiag("session.start.dpi-ready", { hotkey: this.activeHotkey.label, elapsedMs: Date.now() - startedAt });
     this.tryRegisterHotkey(this.activeHotkey);
@@ -85,7 +92,7 @@ export class HotkeySession {
 
   stop(): void {
     if (!this.running) return;
-    sessionDiag("session.stop.begin", { hotkey: this.activeHotkey.label });
+    sessionDiag("session.stop.begin", { hotkey: this.getHotkey() });
     this.running = false;
     if (this.timer) {
       clearInterval(this.timer);
@@ -96,34 +103,39 @@ export class HotkeySession {
     this.triggerComboDown = false;
     this.triggerHeld = false;
     this.tickCount = 0;
-    sessionDiag("session.stop.end", { hotkey: this.activeHotkey.label });
+    sessionDiag("session.stop.end", { hotkey: this.getHotkey() });
   }
 
   setHotkey(hotkey: string): void {
-    const next = parseHotkeySpec(hotkey);
+    const next = this.parseOptionalHotkey(hotkey);
     if (!this.running) {
       this.activeHotkey = next;
-      this.events?.onHotkeySwitched?.(next.label);
+      this.events?.onHotkeySwitched?.(next?.label ?? "");
       return;
     }
 
     const previous = this.activeHotkey;
     UnregisterHotKey(null, HOTKEY_ID);
     try {
-      this.tryRegisterHotkey(next);
+      if (next) {
+        this.tryRegisterHotkey(next);
+      }
       this.activeHotkey = next;
-      this.events?.onHotkeySwitched?.(next.label);
+      this.events?.onHotkeySwitched?.(next?.label ?? "");
     } catch (error) {
-      this.tryRegisterHotkey(previous);
+      if (previous) {
+        this.tryRegisterHotkey(previous);
+      }
       throw error;
     }
   }
 
   getHotkey(): string {
-    return this.activeHotkey.label;
+    return this.activeHotkey?.label ?? "";
   }
 
   getHotkeySpec(): HotkeySpec {
+    if (!this.activeHotkey) throw new Error("Hotkey session is disabled");
     return this.activeHotkey;
   }
 
@@ -141,9 +153,16 @@ export class HotkeySession {
     if (!ok) throw new Error(`RegisterHotKey failed for ${spec.label}`);
   }
 
+  private parseOptionalHotkey(hotkey: string | null | undefined): HotkeySpec | null {
+    const normalized = String(hotkey ?? "").trim();
+    if (!normalized) return null;
+    return parseHotkeySpec(normalized);
+  }
+
   private installKeyboardHook(): void {
     if (this.keyboardHook) return;
     const startedAt = Date.now();
+    if (!this.activeHotkey) return;
     this.keyboardHookCallback = registerLowLevelKeyboardProc((nCode, wParam, info) => this.handleKeyboardHook(nCode, wParam, info));
     sessionDiag("session.hook.callback-registered", { hotkey: this.activeHotkey.label, elapsedMs: Date.now() - startedAt });
     const module = GetModuleHandleW(null);
@@ -172,6 +191,7 @@ export class HotkeySession {
     if (nCode !== HC_ACTION) return CallNextHookEx(this.keyboardHook, nCode, wParam, info);
     if ((info.flags & LLKHF_INJECTED) !== 0) return CallNextHookEx(this.keyboardHook, nCode, wParam, info);
     if (!this.running) return CallNextHookEx(this.keyboardHook, nCode, wParam, info);
+    if (!this.activeHotkey) return CallNextHookEx(this.keyboardHook, nCode, wParam, info);
 
     const isKeyMessage = wParam === WM_KEYDOWN || wParam === WM_KEYUP || wParam === WM_SYSKEYDOWN || wParam === WM_SYSKEYUP;
     if (!isKeyMessage) return CallNextHookEx(this.keyboardHook, nCode, wParam, info);
@@ -181,6 +201,7 @@ export class HotkeySession {
   }
 
   private shouldSuppressVk(vkCode: number): boolean {
+    if (!this.activeHotkey) return false;
     if (vkCode === this.activeHotkey.vk && this.areRequiredModifiersDown()) return true;
     if (!this.triggerHeld) return false;
     if (vkCode === this.activeHotkey.releaseVk) return true;
@@ -192,6 +213,7 @@ export class HotkeySession {
   }
 
   private areRequiredModifiersDown(): boolean {
+    if (!this.activeHotkey) return false;
     const mods = this.activeHotkey.modifiers;
     if ((mods & MOD_CONTROL) !== 0 && !this.isKeyDown(VK_CONTROL)) return false;
     if ((mods & MOD_SHIFT) !== 0 && !this.isKeyDown(VK_SHIFT)) return false;
@@ -208,8 +230,9 @@ export class HotkeySession {
     if (!this.running) return;
     this.tickCount += 1;
     if (this.tickCount === 1) {
-      sessionDiag("session.tick.first", { hotkey: this.activeHotkey.label });
+      sessionDiag("session.tick.first", { hotkey: this.getHotkey() });
     }
+    if (!this.activeHotkey) return;
 
     let startedByMessage = false;
     const msg: WinMsg = {};
@@ -243,6 +266,7 @@ export class HotkeySession {
   }
 
   private isTriggerComboDown(): boolean {
+    if (!this.activeHotkey) return false;
     if (!this.areRequiredModifiersDown()) return false;
     return (GetAsyncKeyState(this.activeHotkey.vk) & 0x8000) !== 0;
   }
