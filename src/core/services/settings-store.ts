@@ -132,9 +132,9 @@ export class SettingsStore {
       : null;
 
     return {
-      detectionMode: detectionMode === "off" || detectionMode === "fullscreen_only" || detectionMode === "all"
+      detectionMode: detectionMode === "off" || detectionMode === "fullscreen_only" || detectionMode === "fullscreen_and_window" || detectionMode === "all"
         ? detectionMode
-        : (rapidMode === "off" || rapidMode === "fullscreen_only" || rapidMode === "all"
+        : (rapidMode === "off" || rapidMode === "fullscreen_only" || rapidMode === "fullscreen_and_window" || rapidMode === "all"
             ? rapidMode
             : (legacyRapidEnabled === true ? "all" : defaults.detectionMode)),
       detectorBaseUrl: explicitBaseUrl ?? migratedProviderUrl ?? legacyRapidBaseUrl

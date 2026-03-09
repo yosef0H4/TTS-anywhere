@@ -49,7 +49,9 @@ describe("settings store", () => {
     cfg.system.abortHotkey = "ctrl+shift+alt+z";
     cfg.system.playPauseHotkey = "ctrl+shift+alt+space";
     cfg.system.replayCaptureHotkey = "ctrl+shift+alt+d";
-    cfg.textProcessing.detectionMode = "fullscreen_only";
+    cfg.system.activeWindowCaptureHotkey = "ctrl+shift+alt+w";
+    cfg.system.ocrClipboardHotkey = "ctrl+shift+alt+c";
+    cfg.textProcessing.detectionMode = "fullscreen_and_window";
     cfg.textProcessing.detectorBaseUrl = "http://127.0.0.1:8093";
     store.save(cfg);
 
@@ -61,8 +63,10 @@ describe("settings store", () => {
     expect(store.load().system.abortHotkey).toBe("ctrl+shift+alt+z");
     expect(store.load().system.playPauseHotkey).toBe("ctrl+shift+alt+space");
     expect(store.load().system.replayCaptureHotkey).toBe("ctrl+shift+alt+d");
+    expect(store.load().system.activeWindowCaptureHotkey).toBe("ctrl+shift+alt+w");
+    expect(store.load().system.ocrClipboardHotkey).toBe("ctrl+shift+alt+c");
     expect(store.load().system.fullCaptureHotkey).toBe(DEFAULT_CONFIG.system.fullCaptureHotkey);
-    expect(store.load().textProcessing.detectionMode).toBe("fullscreen_only");
+    expect(store.load().textProcessing.detectionMode).toBe("fullscreen_and_window");
     expect(store.load().textProcessing.detectorBaseUrl).toBe("http://127.0.0.1:8093");
   });
 
@@ -150,6 +154,36 @@ describe("settings store", () => {
 
     expect(restored.system.captureHotkey).toBe(DEFAULT_CONFIG.system.captureHotkey);
     expect(restored.system.fullCaptureHotkey).toBe(DEFAULT_CONFIG.system.fullCaptureHotkey);
+  });
+
+  it("fills missing active window capture hotkey from defaults", () => {
+    const legacy = {
+      ...DEFAULT_CONFIG,
+      system: {
+        ...DEFAULT_CONFIG.system
+      }
+    };
+    delete (legacy.system as Partial<typeof legacy.system>).activeWindowCaptureHotkey;
+
+    localStorage.setItem(LEGACY_SETTINGS_KEYS[0], JSON.stringify(legacy));
+    const restored = new SettingsStore().load();
+
+    expect(restored.system.activeWindowCaptureHotkey).toBe(DEFAULT_CONFIG.system.activeWindowCaptureHotkey);
+  });
+
+  it("fills missing OCR clipboard hotkey from defaults", () => {
+    const legacy = {
+      ...DEFAULT_CONFIG,
+      system: {
+        ...DEFAULT_CONFIG.system
+      }
+    };
+    delete (legacy.system as Partial<typeof legacy.system>).ocrClipboardHotkey;
+
+    localStorage.setItem(LEGACY_SETTINGS_KEYS[0], JSON.stringify(legacy));
+    const restored = new SettingsStore().load();
+
+    expect(restored.system.ocrClipboardHotkey).toBe(DEFAULT_CONFIG.system.ocrClipboardHotkey);
   });
 
   it("preserves cleared hotkeys instead of restoring defaults", () => {

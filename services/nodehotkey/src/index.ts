@@ -18,6 +18,13 @@ export type {
 export { parseHotkeySpec } from "./hotkey-parser.js";
 export { parseSendSpec, sendHotkey } from "./send.js";
 export { snapshotClipboard, restoreClipboard, clearClipboard, readClipboardText, waitForClipboardChange, captureCopyToText } from "./clipboard.js";
-export { captureMonitorAtPoint, beginFrozenMonitorCaptureAtPoint, cropFrozenCapture, disposeFrozenCapture, getMonitorBoundsAtPoint } from "./capture.js";
+export {
+  captureMonitorAtPoint,
+  beginFrozenMonitorCaptureAtPoint,
+  cropFrozenCapture,
+  disposeFrozenCapture,
+  getMonitorBoundsAtPoint,
+  getForegroundWindowBounds
+} from "./capture.js";
 export { BorderOverlay } from "./overlay.js";
 export { HotkeySession } from "./session.js";

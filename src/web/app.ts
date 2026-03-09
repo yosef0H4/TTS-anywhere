@@ -58,7 +58,9 @@ interface PlaybackMetrics {
 
 type ConfigurableHotkeyKey =
   | "capture"
+  | "ocrClipboard"
   | "fullCapture"
+  | "activeWindowCapture"
   | "copyPlay"
   | "abort"
   | "playPause"
@@ -73,7 +75,9 @@ type PlaybackHotkeyAction = "toggle_play_pause" | "next_chunk" | "previous_chunk
 interface HotkeyBindingConfig {
   systemKey:
     | "captureHotkey"
+    | "ocrClipboardHotkey"
     | "fullCaptureHotkey"
+    | "activeWindowCaptureHotkey"
     | "copyPlayHotkey"
     | "abortHotkey"
     | "playPauseHotkey"
@@ -96,7 +100,8 @@ interface HotkeyBindingConfig {
 
 type CaptureContext = {
   source: "hotkey" | "clipboard" | "upload" | "paste" | "drop";
-  captureKind?: "selection" | "fullscreen";
+  captureKind?: "selection" | "fullscreen" | "window";
+  resultMode?: "editor" | "clipboard";
 };
 
 const rendererBootAt = performance.now();
@@ -133,7 +138,9 @@ export class WebApp {
   private consoleTransport: ConsoleTransport | null = null;
   private hotkeyRecordingState: Record<ConfigurableHotkeyKey, boolean> = {
     capture: false,
+    ocrClipboard: false,
     fullCapture: false,
+    activeWindowCapture: false,
     copyPlay: false,
     abort: false,
     playPause: false,
@@ -145,7 +152,9 @@ export class WebApp {
   };
   private pendingHotkeys: Record<ConfigurableHotkeyKey, string | null> = {
     capture: null,
+    ocrClipboard: null,
     fullCapture: null,
+    activeWindowCapture: null,
     copyPlay: null,
     abort: null,
     playPause: null,
@@ -157,7 +166,9 @@ export class WebApp {
   };
   private hotkeyKeydownHandlers: Record<ConfigurableHotkeyKey, ((event: KeyboardEvent) => void) | null> = {
     capture: null,
+    ocrClipboard: null,
     fullCapture: null,
+    activeWindowCapture: null,
     copyPlay: null,
     abort: null,
     playPause: null,
@@ -226,6 +237,20 @@ export class WebApp {
           clear: api?.clearCaptureHotkey,
           cancelEdit: api?.cancelCaptureHotkeyEdit
         };
+      case "ocrClipboard":
+        return {
+          systemKey: "ocrClipboardHotkey",
+          inputId: "ocr-clipboard-hotkey",
+          statusId: "ocr-clipboard-hotkey-recording-status",
+          recordButtonId: "btn-ocr-clipboard-hotkey-record",
+          clearButtonId: "btn-ocr-clipboard-hotkey-clear",
+          applyButtonId: "btn-ocr-clipboard-hotkey-apply",
+          cancelButtonId: "btn-ocr-clipboard-hotkey-cancel",
+          beginEdit: api?.beginOcrClipboardHotkeyEdit,
+          apply: api?.applyOcrClipboardHotkey,
+          clear: api?.clearOcrClipboardHotkey,
+          cancelEdit: api?.cancelOcrClipboardHotkeyEdit
+        };
       case "fullCapture":
         return {
           systemKey: "fullCaptureHotkey",
@@ -239,6 +264,20 @@ export class WebApp {
           apply: api?.applyFullCaptureHotkey,
           clear: api?.clearFullCaptureHotkey,
           cancelEdit: api?.cancelFullCaptureHotkeyEdit
+        };
+      case "activeWindowCapture":
+        return {
+          systemKey: "activeWindowCaptureHotkey",
+          inputId: "active-window-capture-hotkey",
+          statusId: "active-window-capture-hotkey-recording-status",
+          recordButtonId: "btn-active-window-capture-hotkey-record",
+          clearButtonId: "btn-active-window-capture-hotkey-clear",
+          applyButtonId: "btn-active-window-capture-hotkey-apply",
+          cancelButtonId: "btn-active-window-capture-hotkey-cancel",
+          beginEdit: api?.beginActiveWindowCaptureHotkeyEdit,
+          apply: api?.applyActiveWindowCaptureHotkey,
+          clear: api?.clearActiveWindowCaptureHotkey,
+          cancelEdit: api?.cancelActiveWindowCaptureHotkeyEdit
         };
       case "copyPlay":
         return {
@@ -1361,6 +1400,18 @@ export class WebApp {
     this.must<HTMLButtonElement>("btn-hotkey-cancel").addEventListener("click", () => {
       void this.cancelHotkeyRecording("capture");
     });
+    this.must<HTMLButtonElement>("btn-ocr-clipboard-hotkey-record").addEventListener("click", () => {
+      void this.beginHotkeyRecording("ocrClipboard");
+    });
+    this.must<HTMLButtonElement>("btn-ocr-clipboard-hotkey-clear").addEventListener("click", () => {
+      void this.clearHotkey("ocrClipboard");
+    });
+    this.must<HTMLButtonElement>("btn-ocr-clipboard-hotkey-apply").addEventListener("click", () => {
+      void this.applyRecordedHotkey("ocrClipboard");
+    });
+    this.must<HTMLButtonElement>("btn-ocr-clipboard-hotkey-cancel").addEventListener("click", () => {
+      void this.cancelHotkeyRecording("ocrClipboard");
+    });
     this.must<HTMLButtonElement>("btn-full-capture-hotkey-record").addEventListener("click", () => {
       void this.beginHotkeyRecording("fullCapture");
     });
@@ -1372,6 +1423,18 @@ export class WebApp {
     });
     this.must<HTMLButtonElement>("btn-full-capture-hotkey-cancel").addEventListener("click", () => {
       void this.cancelHotkeyRecording("fullCapture");
+    });
+    this.must<HTMLButtonElement>("btn-active-window-capture-hotkey-record").addEventListener("click", () => {
+      void this.beginHotkeyRecording("activeWindowCapture");
+    });
+    this.must<HTMLButtonElement>("btn-active-window-capture-hotkey-clear").addEventListener("click", () => {
+      void this.clearHotkey("activeWindowCapture");
+    });
+    this.must<HTMLButtonElement>("btn-active-window-capture-hotkey-apply").addEventListener("click", () => {
+      void this.applyRecordedHotkey("activeWindowCapture");
+    });
+    this.must<HTMLButtonElement>("btn-active-window-capture-hotkey-cancel").addEventListener("click", () => {
+      void this.cancelHotkeyRecording("activeWindowCapture");
     });
     this.must<HTMLButtonElement>("btn-copy-hotkey-record").addEventListener("click", () => {
       void this.beginHotkeyRecording("copyPlay");
@@ -1497,7 +1560,10 @@ export class WebApp {
     const maxTokens = Number(this.must<HTMLInputElement>("llm-max-tokens").value);
     this.config.llm.maxTokens = Number.isFinite(maxTokens) && maxTokens > 0 ? Math.floor(maxTokens) : 4096;
     const detectionMode = this.must<HTMLSelectElement>("detector-mode").value;
-    this.config.textProcessing.detectionMode = detectionMode === "off" || detectionMode === "fullscreen_only" || detectionMode === "all"
+    this.config.textProcessing.detectionMode = detectionMode === "off"
+      || detectionMode === "fullscreen_only"
+      || detectionMode === "fullscreen_and_window"
+      || detectionMode === "all"
       ? detectionMode
       : "off";
     this.config.textProcessing.detectorBaseUrl = this.must<HTMLInputElement>("detector-url").value;
@@ -1661,6 +1727,8 @@ export class WebApp {
     switch (mode) {
       case "fullscreen_only":
         return this.t("detection.mode.fullscreen_only");
+      case "fullscreen_and_window":
+        return this.t("detection.mode.fullscreen_and_window");
       case "all":
         return this.t("detection.mode.all");
       default:
@@ -1694,9 +1762,9 @@ export class WebApp {
       : undefined;
 
     return {
-      detectionMode: detectionMode === "off" || detectionMode === "fullscreen_only" || detectionMode === "all"
+      detectionMode: detectionMode === "off" || detectionMode === "fullscreen_only" || detectionMode === "fullscreen_and_window" || detectionMode === "all"
         ? detectionMode
-        : (rapidMode === "off" || rapidMode === "fullscreen_only" || rapidMode === "all"
+        : (rapidMode === "off" || rapidMode === "fullscreen_only" || rapidMode === "fullscreen_and_window" || rapidMode === "all"
             ? rapidMode
             : (legacyRapidEnabled === true ? "all" : defaults.detectionMode)),
       detectorBaseUrl: explicitDetectorBaseUrl ?? migratedProviderUrl ?? legacyRapidBaseUrl
@@ -1707,7 +1775,9 @@ export class WebApp {
     const mode = this.config.textProcessing.detectionMode;
     if (mode === "off") return false;
     if (mode === "all") return true;
-    return captureContext?.source === "hotkey" && captureContext.captureKind === "fullscreen";
+    if (captureContext?.source !== "hotkey") return false;
+    if (mode === "fullscreen_only") return captureContext.captureKind === "fullscreen";
+    return captureContext.captureKind === "fullscreen" || captureContext.captureKind === "window";
   }
 
   private applyDetectorHealthGate(): void {
@@ -1984,10 +2054,10 @@ export class WebApp {
       await this.runPipeline(await this.fileToDataUrl(file), { source: "drop" });
     });
 
-    window.electronAPI?.onCapturedImage(async ({ dataUrl, captureKind }) => {
+    window.electronAPI?.onCapturedImage(async ({ dataUrl, captureKind, resultMode }) => {
       loggers.capture.info("Hotkey capture image received");
       await this.abortVisionWork("new_image");
-      await this.runPipeline(dataUrl, { source: "hotkey", captureKind });
+      await this.runPipeline(dataUrl, { source: "hotkey", captureKind, resultMode });
     });
 
     window.electronAPI?.onCopiedTextForPlayback(async (text: string) => {
@@ -2052,6 +2122,10 @@ export class WebApp {
       isLaneCurrent: (token: number) => this.requestPreemptor.isCurrent("detect_modal", token)
     });
 
+    this.must<HTMLButtonElement>("btn-preprocess-lab").addEventListener("click", async () => {
+      await this.preprocessModal?.open();
+    });
+
     this.must<HTMLDivElement>("preview-viewer").addEventListener("click", async () => {
       if (!this.lastOriginalImageDataUrl) return;
       await this.preprocessModal?.open();
@@ -2094,7 +2168,7 @@ export class WebApp {
   }
 
   private getConfigurableHotkeyKeys(): ConfigurableHotkeyKey[] {
-    return ["capture", "fullCapture", "copyPlay", "abort", "playPause", "nextChunk", "previousChunk", "volumeUp", "volumeDown", "replayCapture"];
+    return ["capture", "ocrClipboard", "fullCapture", "activeWindowCapture", "copyPlay", "abort", "playPause", "nextChunk", "previousChunk", "volumeUp", "volumeDown", "replayCapture"];
   }
 
   private renderHotkeyButtonState(): void {
@@ -2194,7 +2268,9 @@ export class WebApp {
   private getHotkeyLabelKey(key: ConfigurableHotkeyKey): TranslationKey {
     switch (key) {
       case "capture": return "system.captureHotkey";
+      case "ocrClipboard": return "system.ocrClipboardHotkey";
       case "fullCapture": return "system.fullCaptureHotkey";
+      case "activeWindowCapture": return "system.activeWindowCaptureHotkey";
       case "copyPlay": return "system.copyPlayHotkey";
       case "abort": return "system.abortHotkey";
       case "playPause": return "system.playPauseHotkey";
@@ -2450,6 +2526,18 @@ export class WebApp {
     }
   }
 
+  private async copyTextToClipboard(text: string): Promise<void> {
+    if (window.electronAPI?.writeTextToClipboard) {
+      await window.electronAPI.writeTextToClipboard(text);
+      return;
+    }
+    if ("clipboard" in navigator && typeof navigator.clipboard.writeText === "function") {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    throw new Error("Clipboard write is unavailable");
+  }
+
   private async runPipeline(dataUrl: string, captureContext: CaptureContext): Promise<void> {
     const { runId, signal } = this.startRun();
     this.setStatus(this.t("status.runningPipeline"));
@@ -2472,7 +2560,8 @@ export class WebApp {
       this.currentOcrRegions = ocrInput.regions;
       this.setPreviewImage(ocrInput.imageDataUrl);
       this.renderMainPreviewOverlay();
-      const streamingEnabled = this.config.llm.ocrStreamingEnabled;
+      const resultMode = captureContext.resultMode === "clipboard" ? "clipboard" : "editor";
+      const streamingEnabled = resultMode === "editor" && this.config.llm.ocrStreamingEnabled;
       let result: { text: string };
       if (streamingEnabled) {
         result = await this.runStreamingOcr(ocrInput.imageDataUrl, ocrInput.regions, signal);
@@ -2482,7 +2571,10 @@ export class WebApp {
       this.throwIfStale(runId);
       done();
       loggers.pipeline.info("Pipeline completed", { textLength: result.text.length });
-      if (!streamingEnabled) {
+      if (resultMode === "clipboard") {
+        await this.copyTextToClipboard(result.text);
+        this.setStatus(this.t("status.ocrCopiedToClipboard"));
+      } else if (!streamingEnabled) {
         this.must<HTMLTextAreaElement>("raw-text").value = result.text;
         this.updateTimelineFromRawText();
         this.resetPlaybackForTextChange();
@@ -2493,7 +2585,11 @@ export class WebApp {
         loggers.pipeline.info("Pipeline cancelled", { runId });
       } else {
         loggers.pipeline.error("Pipeline failed", { error: String(error) });
-        this.setStatus(this.t("status.pipelineError", { error: String(error) }));
+        this.setStatus(
+          captureContext.resultMode === "clipboard"
+            ? this.t("status.ocrCopyToClipboardFailed", { error: String(error) })
+            : this.t("status.pipelineError", { error: String(error) })
+        );
       }
     } finally {
       this.finishRun(runId);

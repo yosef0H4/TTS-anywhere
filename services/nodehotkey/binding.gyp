@@ -21,6 +21,7 @@
             "libraries": [
               "-ld3d11",
               "-ldxgi",
+              "-ldwmapi",
               "-lole32",
               "-lwindowscodecs",
               "-luser32"

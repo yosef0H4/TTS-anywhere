@@ -64,7 +64,9 @@ export const DEFAULT_CONFIG: AppConfig = {
     diagnosticsEnabled: true,
     lastImportAt: "",
     captureHotkey: "ctrl+shift+alt+s",
+    ocrClipboardHotkey: "ctrl+shift+alt+c",
     fullCaptureHotkey: "ctrl+shift+alt+a",
+    activeWindowCaptureHotkey: "ctrl+shift+alt+w",
     copyPlayHotkey: "ctrl+shift+alt+x",
     abortHotkey: "ctrl+shift+alt+z",
     playPauseHotkey: "ctrl+shift+alt+space",
@@ -81,7 +83,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     enableConsoleLogging: true
   },
   textProcessing: {
-    detectionMode: "fullscreen_only",
+    detectionMode: "fullscreen_and_window",
     detectorBaseUrl: "http://127.0.0.1:8091"
   },
   preprocessing: {

@@ -76,7 +76,9 @@ export interface SystemConfig {
   diagnosticsEnabled: boolean;
   lastImportAt: string;
   captureHotkey: string;
+  ocrClipboardHotkey: string;
   fullCaptureHotkey: string;
+  activeWindowCaptureHotkey: string;
   copyPlayHotkey: string;
   abortHotkey: string;
   playPauseHotkey: string;
@@ -89,7 +91,7 @@ export interface SystemConfig {
 }
 
 export interface TextProcessingConfig {
-  detectionMode: "off" | "fullscreen_only" | "all";
+  detectionMode: "off" | "fullscreen_only" | "fullscreen_and_window" | "all";
   detectorBaseUrl: string;
 }
 

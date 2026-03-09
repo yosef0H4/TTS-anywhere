@@ -6,6 +6,7 @@
 #include <wincodec.h>
 #include <d3d11.h>
 #include <dxgi1_2.h>
+#include <dwmapi.h>
 #include <wrl/client.h>
 
 #include <cstdint>
@@ -368,12 +369,35 @@ Napi::Value GetMonitorBoundsAtPointWrapped(const Napi::CallbackInfo& info) {
   return BoundsToObject(env, selection.bounds);
 }
 
+Napi::Value GetForegroundWindowBoundsWrapped(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  HWND hwnd = GetForegroundWindow();
+  if (!hwnd) throw std::runtime_error("No foreground window found");
+
+  RECT rect{};
+  const HRESULT dwm_hr = DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &rect, sizeof(rect));
+  if (FAILED(dwm_hr)) {
+    if (!GetWindowRect(hwnd, &rect)) {
+      throw std::runtime_error("Failed to read foreground window bounds");
+    }
+  }
+
+  const LONG width = rect.right - rect.left;
+  const LONG height = rect.bottom - rect.top;
+  if (width <= 0 || height <= 0) {
+    throw std::runtime_error("Foreground window has empty bounds");
+  }
+
+  return BoundsToObject(env, Bounds{ rect.left, rect.top, width, height });
+}
+
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("captureMonitorAtPoint", Napi::Function::New(env, CaptureMonitorAtPointWrapped));
   exports.Set("beginFrozenMonitorCaptureAtPoint", Napi::Function::New(env, BeginFrozenMonitorCaptureAtPointWrapped));
   exports.Set("cropFrozenCapture", Napi::Function::New(env, CropFrozenCaptureWrapped));
   exports.Set("disposeFrozenCapture", Napi::Function::New(env, DisposeFrozenCaptureWrapped));
   exports.Set("getMonitorBoundsAtPoint", Napi::Function::New(env, GetMonitorBoundsAtPointWrapped));
+  exports.Set("getForegroundWindowBounds", Napi::Function::New(env, GetForegroundWindowBoundsWrapped));
   return exports;
 }
 

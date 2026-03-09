@@ -66,6 +66,7 @@ export class PreprocessModalController {
   private readonly opts: ModalControllerOptions;
   private readonly backdrop: HTMLElement;
   private readonly viewer: HTMLDivElement;
+  private readonly emptyState: HTMLDivElement;
   private readonly preview: HTMLImageElement;
   private readonly overlay: HTMLDivElement;
   private readonly overlaySvg: SVGSVGElement;
@@ -113,6 +114,7 @@ export class PreprocessModalController {
     createIcons({ icons: APP_ICONS, attrs: { "stroke-width": 2 } });
     this.backdrop = this.mustQuery<HTMLElement>("[data-preproc-modal]");
     this.viewer = this.mustById<HTMLDivElement>("preproc-viewer");
+    this.emptyState = this.mustById<HTMLDivElement>("preproc-empty-state");
     this.preview = this.mustById<HTMLImageElement>("preproc-preview");
     this.overlay = this.mustById<HTMLDivElement>("preproc-overlay");
     this.overlaySvg = this.mustById<SVGSVGElement>("preproc-overlay-svg");
@@ -161,16 +163,11 @@ export class PreprocessModalController {
   async open(): Promise<void> {
     const cfg = this.opts.getConfig();
     const source = this.opts.getCurrentImageDataUrl();
-    if (!source) {
-      this.opts.setStatus(this.t("status.loadImageFirst"));
-      return;
-    }
-
-    this.originalDataUrl = await normalizeImageDataUrl(source);
 
     this.selectionBaseState = cfg.preprocessing.selection.baseState;
     this.selectionOps = [...cfg.preprocessing.selection.ops];
     this.manualBoxes = [...cfg.preprocessing.selection.manualBoxes];
+    this.setTool("none");
 
     this.setValue("preproc-detect-mode", cfg.textProcessing.detectionMode);
     this.setValue("preproc-detector-url", cfg.textProcessing.detectorBaseUrl);
@@ -201,7 +198,17 @@ export class PreprocessModalController {
     this.backdrop.style.display = "flex";
     this.backdrop.style.pointerEvents = "auto";
     this.previewRenderer.startAutoSync();
-    void this.runPreprocessAndDetect();
+
+    if (source) {
+      this.originalDataUrl = await normalizeImageDataUrl(source);
+      void this.runPreprocessAndDetect();
+      return;
+    }
+
+    this.resetPreviewState();
+    this.mustById<HTMLDivElement>("preproc-health-status").textContent = this.t("common.idle");
+    this.applyInteractionGates();
+    this.renderOverlay();
   }
 
   close(): void {
@@ -237,13 +244,13 @@ export class PreprocessModalController {
         this.rawBoxes = [];
         this.detectorHealthy = false;
       }
-      this.applyHealthGate();
+      this.applyInteractionGates();
       await this.runPreprocessAndDetect();
     });
 
     this.mustById<HTMLInputElement>("preproc-detector-url").addEventListener("change", () => {
       this.detectorHealthy = false;
-      this.applyHealthGate();
+      this.applyInteractionGates();
       this.mustById<HTMLDivElement>("preproc-health-status").textContent = this.t("common.idle");
     });
 
@@ -378,7 +385,12 @@ export class PreprocessModalController {
   }
 
   private async runPreprocessAndDetect(): Promise<void> {
-    if (!this.originalDataUrl) return;
+    if (!this.originalDataUrl) {
+      this.resetPreviewState();
+      this.applyInteractionGates();
+      this.renderOverlay();
+      return;
+    }
     this.abortRunningWork();
     const seq = ++this.detectSeq;
     const lane = this.opts.beginLane?.();
@@ -404,6 +416,8 @@ export class PreprocessModalController {
       if (this.detectAbortController?.signal.aborted) return;
 
       this.processedDataUrl = await scaleDataUrlMaxDimension(processed, this.getNum("preproc-max-dim", 1080));
+      this.viewer.dataset.empty = "false";
+      this.emptyState.hidden = true;
       this.preview.src = this.processedDataUrl;
       await this.preview.decode();
       // Phase 1 render: show image immediately; boxes update after detect.
@@ -441,7 +455,7 @@ export class PreprocessModalController {
         this.mustById<HTMLDivElement>("preproc-health-status").textContent = this.t("preproc.health.disabled");
       }
 
-      this.applyHealthGate();
+      this.applyInteractionGates();
       this.setOverlayMode("committed");
       this.recomputeLiveBoxes();
     } finally {
@@ -784,19 +798,43 @@ export class PreprocessModalController {
       this.detectorHealthy = false;
       this.mustById<HTMLDivElement>("preproc-health-status").textContent = this.t("statuschip.unreachable");
     }
-    this.applyHealthGate();
+    this.applyInteractionGates();
   }
 
-  private applyHealthGate(): void {
-    const detectEnabled = this.getDetectionMode() !== "off";
-    const active = detectEnabled && this.detectorHealthy;
+  private applyInteractionGates(): void {
+    const hasImage = Boolean(this.originalDataUrl);
+    const detectEnabled = hasImage && this.getDetectionMode() !== "off";
+    const detectorControlsActive = detectEnabled && this.detectorHealthy;
+
+    for (const section of Array.from(this.backdrop.querySelectorAll<HTMLElement>("[data-image-dependent]"))) {
+      section.classList.toggle("section-disabled", !hasImage);
+      const controls = section.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>("input, button, select");
+      for (const control of Array.from(controls)) control.disabled = !hasImage;
+    }
 
     for (const section of Array.from(this.backdrop.querySelectorAll<HTMLElement>("[data-detector-dependent]"))) {
-      section.classList.toggle("section-disabled", !active);
+      section.classList.toggle("section-disabled", !detectorControlsActive);
       const controls = section.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>("input, button, select");
-      for (const control of Array.from(controls)) control.disabled = !active;
+      for (const control of Array.from(controls)) control.disabled = !detectorControlsActive;
     }
     this.mustById<HTMLButtonElement>("preproc-detect-now").disabled = !detectEnabled;
+  }
+
+  private resetPreviewState(): void {
+    this.originalDataUrl = null;
+    this.processedDataUrl = null;
+    this.rawBoxes = [];
+    this.filterResults = [];
+    this.mergedGroups = [];
+    this.finalBoxes = [];
+    this.overlayMode = "committed";
+    this.activeFilterRule = null;
+    this.viewer.dataset.empty = "true";
+    this.preview.removeAttribute("src");
+    this.preview.alt = "";
+    this.emptyState.hidden = false;
+    this.mustById<HTMLDivElement>("preproc-metrics").textContent = this.t("preproc.noDetectionYet");
+    this.mustById<HTMLElement>("preproc-debug-state").textContent = this.t("preproc.noDebugYet");
   }
 
   private bindRangeNumberSync(): void {
@@ -997,7 +1035,7 @@ export class PreprocessModalController {
 
   private getDetectionMode(): AppConfig["textProcessing"]["detectionMode"] {
     const mode = this.mustById<HTMLSelectElement>("preproc-detect-mode").value;
-    return mode === "off" || mode === "fullscreen_only" || mode === "all" ? mode : "off";
+    return mode === "off" || mode === "fullscreen_only" || mode === "fullscreen_and_window" || mode === "all" ? mode : "off";
   }
 
   private getDetectorUrl(): string {

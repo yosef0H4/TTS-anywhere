@@ -1,5 +1,9 @@
 export interface PlatformBridge {
-  onCapturedImage(handler: (payload: { dataUrl: string; captureKind: "selection" | "fullscreen" }) => void): void;
+  onCapturedImage(handler: (payload: {
+    dataUrl: string;
+    captureKind: "selection" | "fullscreen" | "window";
+    resultMode: "editor" | "clipboard";
+  }) => void): void;
   onCopiedTextForPlayback(handler: (text: string) => void): void;
   onAbortRequested(handler: () => void): void;
   onPlaybackHotkey(handler: (action: "toggle_play_pause" | "next_chunk" | "previous_chunk" | "volume_up" | "volume_down") => void): void;
@@ -26,7 +30,11 @@ export interface ManagedServicesStatus {
 }
 
 export interface ElectronApi {
-  onCapturedImage: (handler: (payload: { dataUrl: string; captureKind: "selection" | "fullscreen" }) => void) => void;
+  onCapturedImage: (handler: (payload: {
+    dataUrl: string;
+    captureKind: "selection" | "fullscreen" | "window";
+    resultMode: "editor" | "clipboard";
+  }) => void) => void;
   onCopiedTextForPlayback: (handler: (text: string) => void) => void;
   onAbortRequested: (handler: () => void) => void;
   onPlaybackHotkey: (handler: (action: "toggle_play_pause" | "next_chunk" | "previous_chunk" | "volume_up" | "volume_down") => void) => void;
@@ -37,11 +45,21 @@ export interface ElectronApi {
   clearCaptureHotkey: () => Promise<string>;
   cancelCaptureHotkeyEdit: () => Promise<string>;
   getCaptureHotkey: () => Promise<string>;
+  beginOcrClipboardHotkeyEdit: () => Promise<string>;
+  applyOcrClipboardHotkey: (hotkey: string) => Promise<string>;
+  clearOcrClipboardHotkey: () => Promise<string>;
+  cancelOcrClipboardHotkeyEdit: () => Promise<string>;
+  getOcrClipboardHotkey: () => Promise<string>;
   beginFullCaptureHotkeyEdit: () => Promise<string>;
   applyFullCaptureHotkey: (hotkey: string) => Promise<string>;
   clearFullCaptureHotkey: () => Promise<string>;
   cancelFullCaptureHotkeyEdit: () => Promise<string>;
   getFullCaptureHotkey: () => Promise<string>;
+  beginActiveWindowCaptureHotkeyEdit: () => Promise<string>;
+  applyActiveWindowCaptureHotkey: (hotkey: string) => Promise<string>;
+  clearActiveWindowCaptureHotkey: () => Promise<string>;
+  cancelActiveWindowCaptureHotkeyEdit: () => Promise<string>;
+  getActiveWindowCaptureHotkey: () => Promise<string>;
   beginCopyHotkeyEdit: () => Promise<string>;
   applyCopyHotkey: (hotkey: string) => Promise<string>;
   clearCopyHotkey: () => Promise<string>;
@@ -94,6 +112,7 @@ export interface ElectronApi {
   setLogLevel: (level: string) => Promise<void>;
   getLogFilePath: () => Promise<string>;
   clearLogs: () => Promise<void>;
+  writeTextToClipboard: (text: string) => Promise<void>;
 }
 
 declare global {

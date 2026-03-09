@@ -20,6 +20,7 @@
               <select id="preproc-detect-mode" data-i18n-title="preproc.selectScope">
                 <option value="off" data-i18n="detection.scope.off">Off</option>
                 <option value="fullscreen_only" data-i18n="detection.scope.fullscreen_only">Full screen only</option>
+                <option value="fullscreen_and_window" data-i18n="detection.scope.fullscreen_and_window">Full screen + window</option>
                 <option value="all" data-i18n="detection.scope.all">All screenshots</option>
               </select>
             </div>
@@ -54,7 +55,7 @@
           </div>
         </section>
 
-        <section class="preproc-section">
+        <section class="preproc-section" data-image-dependent>
           <div class="preproc-section-head">
             <i data-lucide="mouse-pointer-2" class="ui-icon"></i>
             <h4 data-i18n="preproc.selectionTools">Selection Tools</h4>
@@ -231,6 +232,11 @@
 
       <main class="preproc-canvas-wrap">
         <div class="preproc-viewer" id="preproc-viewer">
+          <div id="preproc-empty-state" class="preproc-empty-state" hidden>
+            <i data-lucide="scan-search" class="ui-icon"></i>
+            <strong data-i18n="preproc.noImageTitle">Open the lab before you capture</strong>
+            <p data-i18n="preproc.noImageHint">Tune detection and preprocessing settings now. Load or paste an image when you want to preview boxes and run detection.</p>
+          </div>
           <img id="preproc-preview" data-i18n-alt="preproc.previewAlt" alt="Preprocessed preview" />
           <canvas id="preproc-selection-mask" class="preproc-selection-mask"></canvas>
           <svg id="preproc-overlay-svg" class="preproc-overlay-svg"></svg>

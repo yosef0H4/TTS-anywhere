@@ -208,8 +208,8 @@ body {
     left: 68px;
     top: 0;
     bottom: 0;
-    width: 660px;
-    max-width: calc(100vw - 40px);
+    width: clamp(760px, 52vw, 900px);
+    max-width: calc(100vw - 32px);
     background: color-mix(in srgb, var(--panel) 96%, #fff 4%);
     border-right: 1px solid var(--line);
     z-index: 35;
@@ -255,16 +255,18 @@ body {
     overflow-x: hidden;
     min-height: 0;
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
     padding-right: 6px;
     padding-bottom: 20px;
 }
 
-.setting-section[data-section="appearance"],
-.setting-section[data-section="reading"],
-.setting-section[data-section="system"] {
-    grid-column: span 2;
+.setting-section--half {
+    grid-column: span 1;
+}
+
+.setting-section--full {
+    grid-column: 1 / -1;
 }
 
 .settings-layout::-webkit-scrollbar {
@@ -671,8 +673,67 @@ body {
 
 .preproc-viewer {
     position: relative;
+    width: min(100%, 1000px);
+    min-height: 420px;
     max-width: 100%;
     max-height: 100%;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background:
+        radial-gradient(circle at top, color-mix(in srgb, var(--accent) 6%, transparent), transparent 42%),
+        color-mix(in srgb, var(--panel) 82%, var(--panel-2) 18%);
+    overflow: hidden;
+}
+
+.preproc-empty-state {
+    position: absolute;
+    inset: 24px;
+    display: grid;
+    place-items: center;
+    align-content: center;
+    justify-items: center;
+    gap: 12px;
+    padding: 36px;
+    text-align: center;
+    border: 1px dashed var(--line);
+    border-radius: 16px;
+    background: color-mix(in srgb, var(--panel-2) 88%, var(--panel) 12%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    color: var(--muted-fg);
+    z-index: 2;
+}
+
+.preproc-empty-state[hidden] {
+    display: none;
+}
+
+.preproc-empty-state .ui-icon {
+    width: 32px;
+    height: 32px;
+    color: var(--accent);
+}
+
+.preproc-empty-state strong {
+    color: var(--fg);
+    font-size: 22px;
+    line-height: 1.1;
+    max-width: 260px;
+}
+
+.preproc-empty-state p {
+    margin: 0;
+    max-width: 340px;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.preproc-viewer[data-empty="true"] #preproc-preview,
+.preproc-viewer[data-empty="true"] .preproc-selection-mask,
+.preproc-viewer[data-empty="true"] .preproc-overlay-svg,
+.preproc-viewer[data-empty="true"] .preproc-overlay,
+.preproc-viewer[data-empty="true"] .preproc-manual-layer,
+.preproc-viewer[data-empty="true"] .preproc-draw-preview {
+    display: none;
 }
 
 #preproc-preview {
@@ -1103,10 +1164,82 @@ body {
     justify-content: space-between;
 }
 
+.setting-switch {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    width: 46px;
+    min-width: 46px;
+    cursor: pointer;
+}
+
+.setting-switch input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+.setting-switch-track {
+    position: relative;
+    width: 46px;
+    height: 26px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--panel) 55%, var(--panel-2) 45%);
+    box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.08);
+    transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.setting-switch-thumb {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--panel-2);
+    border: 1px solid color-mix(in srgb, var(--line) 70%, #fff 30%);
+    box-shadow: 0 2px 4px rgba(15, 23, 42, 0.16);
+    transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+}
+
+.setting-switch input:checked + .setting-switch-track {
+    background: color-mix(in srgb, var(--accent) 24%, var(--panel) 76%);
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--line) 55%);
+}
+
+.setting-switch input:checked + .setting-switch-track .setting-switch-thumb {
+    transform: translateX(20px);
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.setting-switch input:focus-visible + .setting-switch-track {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+    border-color: var(--accent);
+}
+
+.setting-switch input:disabled + .setting-switch-track {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
 .settings-actions-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
+}
+
+.settings-actions-grid--triple {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .settings-actions-grid button {
@@ -1787,11 +1920,16 @@ body {
 
 @media (max-width: 1200px) {
     .settings-drawer {
-        width: clamp(420px, 90vw, 660px);
+        width: clamp(460px, 92vw, 760px);
     }
 
     .settings-layout {
         grid-template-columns: 1fr;
+    }
+
+    .setting-section--half,
+    .setting-section--full {
+        grid-column: 1;
     }
 }
 

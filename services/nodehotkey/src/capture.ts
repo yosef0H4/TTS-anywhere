@@ -12,6 +12,7 @@ type NativeCaptureModule = {
   cropFrozenCapture(id: number, rect: CaptureCropRect): Buffer;
   disposeFrozenCapture(id: number): void;
   getMonitorBoundsAtPoint(x: number, y: number): MonitorBounds;
+  getForegroundWindowBounds(): MonitorBounds;
 };
 
 let captureModule: NativeCaptureModule | null | undefined;
@@ -76,4 +77,8 @@ export function disposeFrozenCapture(id: number): void {
 
 export function getMonitorBoundsAtPoint(x: number, y: number): MonitorBounds {
   return loadCaptureModule().getMonitorBoundsAtPoint(x, y);
+}
+
+export function getForegroundWindowBounds(): MonitorBounds {
+  return loadCaptureModule().getForegroundWindowBounds();
 }

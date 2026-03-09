@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, clipboard, ipcMain, shell } from "electron";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
   beginFrozenMonitorCaptureAtPoint,
@@ -6,6 +6,7 @@ import {
   captureCopyToText,
   cropFrozenCapture,
   disposeFrozenCapture,
+  getForegroundWindowBounds,
   HotkeySession,
   type FrozenCaptureHandle
 } from "nodehotkey";
@@ -65,7 +66,9 @@ let mainWindow: BrowserWindow | null = null;
 let isPinned = false;
 let currentLogLevel: LogLevel = "info";
 let captureHotkeySession: HotkeySession | null = null;
+let ocrClipboardHotkeySession: HotkeySession | null = null;
 let fullCaptureHotkeySession: HotkeySession | null = null;
+let activeWindowCaptureHotkeySession: HotkeySession | null = null;
 let copyHotkeySession: HotkeySession | null = null;
 let abortHotkeySession: HotkeySession | null = null;
 let playbackToggleHotkeySession: HotkeySession | null = null;
@@ -75,7 +78,9 @@ let volumeUpHotkeySession: HotkeySession | null = null;
 let volumeDownHotkeySession: HotkeySession | null = null;
 let replayCaptureHotkeySession: HotkeySession | null = null;
 let activeCaptureHotkey = "ctrl+shift+alt+s";
+let activeOcrClipboardHotkey = "ctrl+shift+alt+c";
 let activeFullCaptureHotkey = "ctrl+shift+alt+a";
+let activeActiveWindowCaptureHotkey = "ctrl+shift+alt+w";
 let activeCopyHotkey = "ctrl+shift+alt+x";
 let activeAbortHotkey = "ctrl+shift+alt+z";
 let activePlaybackToggleHotkey = "ctrl+shift+alt+space";
@@ -85,7 +90,9 @@ let activeVolumeUpHotkey = "ctrl+shift+alt+up";
 let activeVolumeDownHotkey = "ctrl+shift+alt+down";
 let activeReplayCaptureHotkey = "ctrl+shift+alt+d";
 let captureHotkeyBeforeEdit: string | null = null;
+let ocrClipboardHotkeyBeforeEdit: string | null = null;
 let fullCaptureHotkeyBeforeEdit: string | null = null;
+let activeWindowCaptureHotkeyBeforeEdit: string | null = null;
 let copyHotkeyBeforeEdit: string | null = null;
 let abortHotkeyBeforeEdit: string | null = null;
 let playbackToggleHotkeyBeforeEdit: string | null = null;
@@ -99,6 +106,8 @@ let overlay: BorderOverlay | null = null;
 let selectionTicker: NodeJS.Timeout | null = null;
 let selectionActive = false;
 let selectionStart: { x: number; y: number } | null = null;
+let selectionResultMode: "editor" | "clipboard" = "editor";
+let selectionSession: HotkeySession | null = null;
 let lastCursor: { x: number; y: number } | null = null;
 let lastRect: { left: number; top: number; right: number; bottom: number } | null = null;
 let lastSavedCaptureRect: { left: number; top: number; width: number; height: number } | null = null;
@@ -151,7 +160,9 @@ function prefsPath(): string {
 interface NativePrefs {
   alwaysOnTop?: boolean;
   captureHotkey?: string;
+  ocrClipboardHotkey?: string;
   fullCaptureHotkey?: string;
+  activeWindowCaptureHotkey?: string;
   copyPlayHotkey?: string;
   captureDrawRectangle?: boolean;
   abortHotkey?: string;
@@ -851,8 +862,12 @@ function disposeNativeResources(): void {
   }
   captureHotkeySession?.stop();
   captureHotkeySession = null;
+  ocrClipboardHotkeySession?.stop();
+  ocrClipboardHotkeySession = null;
   fullCaptureHotkeySession?.stop();
   fullCaptureHotkeySession = null;
+  activeWindowCaptureHotkeySession?.stop();
+  activeWindowCaptureHotkeySession = null;
   copyHotkeySession?.stop();
   copyHotkeySession = null;
   abortHotkeySession?.stop();
@@ -1118,20 +1133,28 @@ function beginFrozenCaptureSession(): void {
     });
 }
 
-function startSelection(point: { x: number; y: number }): void {
+function startSelection(
+  point: { x: number; y: number },
+  resultMode: "editor" | "clipboard",
+  session: HotkeySession | null
+): void {
   selectionStart = { x: point.x, y: point.y };
+  selectionResultMode = resultMode;
+  selectionSession = session;
   lastCursor = { x: point.x, y: point.y };
   lastRect = null;
   selectionActive = true;
   beginFrozenCaptureSession();
   if (drawSelectionRectangle) overlay?.hide();
-  diag("capture.start", { x: point.x, y: point.y, hotkey: captureHotkeySession?.getHotkey() });
+  diag("capture.start", { x: point.x, y: point.y, hotkey: session?.getHotkey(), resultMode });
 }
 
 async function finalizeSelection(point: { x: number; y: number }): Promise<void> {
   if (!selectionActive || !selectionStart) {
     selectionActive = false;
     selectionStart = null;
+    selectionResultMode = "editor";
+    selectionSession = null;
     lastCursor = null;
     lastRect = null;
     if (drawSelectionRectangle) overlay?.hide();
@@ -1151,6 +1174,9 @@ async function finalizeSelection(point: { x: number; y: number }): Promise<void>
 
   selectionActive = false;
   selectionStart = null;
+  const resultMode = selectionResultMode;
+  selectionResultMode = "editor";
+  selectionSession = null;
   lastCursor = null;
   lastRect = null;
   if (drawSelectionRectangle) overlay?.hide();
@@ -1179,11 +1205,12 @@ async function finalizeSelection(point: { x: number; y: number }): Promise<void>
     });
 
     const dataUrl = `data:image/png;base64,${pngBuffer.toString("base64")}`;
-    mainWindow?.webContents.send("capture-image", { dataUrl, captureKind: "selection" });
+    mainWindow?.webContents.send("capture-image", { dataUrl, captureKind: "selection", resultMode });
     diag("capture.image.sent", {
       width: payload.width,
       height: payload.height,
       captureKind: "selection",
+      resultMode,
       frozenAgeMs: Date.now() - frozen.capturedAt
     });
   } catch (error) {
@@ -1287,11 +1314,62 @@ async function captureFullScreenAtPoint(point: { x: number; y: number }): Promis
   }
 }
 
+async function captureActiveWindow(): Promise<void> {
+  let frozen: FrozenCaptureHandle | null = null;
+  try {
+    const bounds = getForegroundWindowBounds();
+    const anchorX = bounds.left + Math.floor(bounds.width / 2);
+    const anchorY = bounds.top + Math.floor(bounds.height / 2);
+    frozen = await beginFrozenMonitorCaptureAtPoint(anchorX, anchorY);
+
+    const windowRight = bounds.left + bounds.width;
+    const windowBottom = bounds.top + bounds.height;
+    const frozenRight = frozen.bounds.left + frozen.bounds.width;
+    const frozenBottom = frozen.bounds.top + frozen.bounds.height;
+    const fitsSingleMonitor =
+      bounds.left >= frozen.bounds.left &&
+      bounds.top >= frozen.bounds.top &&
+      windowRight <= frozenRight &&
+      windowBottom <= frozenBottom;
+    if (!fitsSingleMonitor) {
+      throw new Error("Active window spans multiple monitors");
+    }
+
+    const pngBuffer = await cropFrozenCapture(frozen.id, {
+      x: bounds.left - frozen.bounds.left,
+      y: bounds.top - frozen.bounds.top,
+      width: bounds.width,
+      height: bounds.height
+    });
+
+    const dataUrl = `data:image/png;base64,${pngBuffer.toString("base64")}`;
+    mainWindow?.webContents.send("capture-image", { dataUrl, captureKind: "window" });
+    diag("capture.window.sent", {
+      left: bounds.left,
+      top: bounds.top,
+      width: bounds.width,
+      height: bounds.height,
+      hotkey: activeWindowCaptureHotkeySession?.getHotkey(),
+      frozenAgeMs: Date.now() - frozen.capturedAt
+    });
+  } catch (error) {
+    diag("capture.window.error", { error: String(error) });
+  } finally {
+    if (frozen) {
+      try {
+        disposeFrozenCapture(frozen.id);
+      } catch {
+        // best effort
+      }
+    }
+  }
+}
+
 function startSelectionTicker(): void {
   if (selectionTicker) return;
   selectionTicker = setInterval(() => {
-    if (!selectionActive || !captureHotkeySession || !selectionStart) return;
-    const point = captureHotkeySession.getCursorPos();
+    if (!selectionActive || !selectionSession || !selectionStart) return;
+    const point = selectionSession.getCursorPos();
     if (!point) return;
 
     lastCursor = { x: point.x, y: point.y };
@@ -1317,7 +1395,9 @@ function readStoredHotkey(value: string | undefined, fallback: string): string {
 function getAllActiveHotkeys(): Array<{ name: string; hotkey: string }> {
   return [
     { name: "capture", hotkey: activeCaptureHotkey },
+    { name: "ocr to clipboard", hotkey: activeOcrClipboardHotkey },
     { name: "full screen capture", hotkey: activeFullCaptureHotkey },
+    { name: "active window capture", hotkey: activeActiveWindowCaptureHotkey },
     { name: "copy & play", hotkey: activeCopyHotkey },
     { name: "abort", hotkey: activeAbortHotkey },
     { name: "play/pause", hotkey: activePlaybackToggleHotkey },
@@ -1465,7 +1545,9 @@ if (!hasSingleInstanceLock) {
     const nativePrefs = loadNativePrefs();
     isPinned = nativePrefs.alwaysOnTop ?? false;
     activeCaptureHotkey = readStoredHotkey(nativePrefs.captureHotkey, activeCaptureHotkey);
+    activeOcrClipboardHotkey = readStoredHotkey(nativePrefs.ocrClipboardHotkey, activeOcrClipboardHotkey);
     activeFullCaptureHotkey = readStoredHotkey(nativePrefs.fullCaptureHotkey, activeFullCaptureHotkey);
+    activeActiveWindowCaptureHotkey = readStoredHotkey(nativePrefs.activeWindowCaptureHotkey, activeActiveWindowCaptureHotkey);
     activeCopyHotkey = readStoredHotkey(nativePrefs.copyPlayHotkey, activeCopyHotkey);
     activeAbortHotkey = readStoredHotkey(nativePrefs.abortHotkey, activeAbortHotkey);
     activePlaybackToggleHotkey = readStoredHotkey(nativePrefs.playPauseHotkey, activePlaybackToggleHotkey);
@@ -1479,7 +1561,9 @@ if (!hasSingleInstanceLock) {
     diag("app.native-prefs.loaded", {
       isPinned,
       activeCaptureHotkey,
+      activeOcrClipboardHotkey,
       activeFullCaptureHotkey,
+      activeActiveWindowCaptureHotkey,
       activeCopyHotkey,
       activeAbortHotkey,
       activePlaybackToggleHotkey,
@@ -1502,13 +1586,26 @@ if (!hasSingleInstanceLock) {
       events: {
         onHotkeyRegistered: (label) => diag("capture.hotkey.registered", { label }),
         onHotkeySwitched: (label) => diag("capture.hotkey.switched", { label }),
-        onTriggerDown: (point) => startSelection(point),
+        onTriggerDown: (point) => startSelection(point, "editor", captureHotkeySession),
         onTriggerUp: (point) => {
           void finalizeSelection(point);
         }
       }
     });
     diag("app.capture-session.create.end");
+    diag("app.capture-ocr-clipboard-session.create.begin", { hotkey: activeOcrClipboardHotkey });
+    ocrClipboardHotkeySession = new HotkeySession({
+      initialHotkey: activeOcrClipboardHotkey,
+      events: {
+        onHotkeyRegistered: (label) => diag("capture.ocr-clipboard.hotkey.registered", { label }),
+        onHotkeySwitched: (label) => diag("capture.ocr-clipboard.hotkey.switched", { label }),
+        onTriggerDown: (point) => startSelection(point, "clipboard", ocrClipboardHotkeySession),
+        onTriggerUp: (point) => {
+          void finalizeSelection(point);
+        }
+      }
+    });
+    diag("app.capture-ocr-clipboard-session.create.end");
     diag("app.fullscreen-capture-session.create.begin", { hotkey: activeFullCaptureHotkey });
     fullCaptureHotkeySession = new HotkeySession({
       initialHotkey: activeFullCaptureHotkey,
@@ -1521,6 +1618,18 @@ if (!hasSingleInstanceLock) {
       }
     });
     diag("app.fullscreen-capture-session.create.end");
+    diag("app.window-capture-session.create.begin", { hotkey: activeActiveWindowCaptureHotkey });
+    activeWindowCaptureHotkeySession = new HotkeySession({
+      initialHotkey: activeActiveWindowCaptureHotkey,
+      events: {
+        onHotkeyRegistered: (label) => diag("capture.window.hotkey.registered", { label }),
+        onHotkeySwitched: (label) => diag("capture.window.hotkey.switched", { label }),
+        onTriggerUp: () => {
+          void captureActiveWindow();
+        }
+      }
+    });
+    diag("app.window-capture-session.create.end");
     diag("app.copy-session.create.begin", { hotkey: activeCopyHotkey });
     copyHotkeySession = new HotkeySession({
       initialHotkey: activeCopyHotkey,
@@ -1611,9 +1720,15 @@ if (!hasSingleInstanceLock) {
     diag("app.capture-session.start.begin");
     captureHotkeySession.start();
     diag("app.capture-session.start.end");
+    diag("app.capture-ocr-clipboard-session.start.begin");
+    ocrClipboardHotkeySession.start();
+    diag("app.capture-ocr-clipboard-session.start.end");
     diag("app.fullscreen-capture-session.start.begin");
     fullCaptureHotkeySession.start();
     diag("app.fullscreen-capture-session.start.end");
+    diag("app.window-capture-session.start.begin");
+    activeWindowCaptureHotkeySession.start();
+    diag("app.window-capture-session.start.end");
     diag("app.copy-session.start.begin");
     copyHotkeySession.start();
     diag("app.copy-session.start.end");
@@ -1708,6 +1823,54 @@ ipcMain.handle("capture:get-hotkey", () => {
   return getEditableHotkey(captureHotkeySession, activeCaptureHotkey, (value) => { activeCaptureHotkey = value; });
 });
 
+ipcMain.handle("capture-ocr-clipboard:begin-hotkey-edit", () => {
+  return beginEditableHotkey(
+    ocrClipboardHotkeySession,
+    activeOcrClipboardHotkey,
+    (value) => { ocrClipboardHotkeyBeforeEdit = value; },
+    "capture.ocr-clipboard.hotkey.edit.begin"
+  );
+});
+
+ipcMain.handle("capture-ocr-clipboard:apply-hotkey", (_event, hotkey: string) => {
+  return applyEditableHotkey(
+    ocrClipboardHotkeySession,
+    hotkey,
+    "ocr to clipboard",
+    (value) => ({ ocrClipboardHotkey: value }),
+    (value) => { activeOcrClipboardHotkey = value; },
+    (value) => { ocrClipboardHotkeyBeforeEdit = value; },
+    "capture.ocr-clipboard.hotkey.edit.applied",
+    activeOcrClipboardHotkey
+  );
+});
+
+ipcMain.handle("capture-ocr-clipboard:clear-hotkey", () => {
+  return clearEditableHotkey(
+    ocrClipboardHotkeySession,
+    (value) => ({ ocrClipboardHotkey: value }),
+    (value) => { activeOcrClipboardHotkey = value; },
+    (value) => { ocrClipboardHotkeyBeforeEdit = value; },
+    "capture.ocr-clipboard.hotkey.edit.cleared",
+    activeOcrClipboardHotkey
+  );
+});
+
+ipcMain.handle("capture-ocr-clipboard:cancel-hotkey-edit", () => {
+  return cancelEditableHotkey(
+    ocrClipboardHotkeySession,
+    ocrClipboardHotkeyBeforeEdit,
+    (value) => { activeOcrClipboardHotkey = value; },
+    (value) => { ocrClipboardHotkeyBeforeEdit = value; },
+    "capture.ocr-clipboard.hotkey.edit.cancelled",
+    activeOcrClipboardHotkey
+  );
+});
+
+ipcMain.handle("capture-ocr-clipboard:get-hotkey", () => {
+  return getEditableHotkey(ocrClipboardHotkeySession, activeOcrClipboardHotkey, (value) => { activeOcrClipboardHotkey = value; });
+});
+
 ipcMain.handle("capture-fullscreen:begin-hotkey-edit", () => {
   return beginEditableHotkey(
     fullCaptureHotkeySession,
@@ -1754,6 +1917,56 @@ ipcMain.handle("capture-fullscreen:cancel-hotkey-edit", () => {
 
 ipcMain.handle("capture-fullscreen:get-hotkey", () => {
   return getEditableHotkey(fullCaptureHotkeySession, activeFullCaptureHotkey, (value) => { activeFullCaptureHotkey = value; });
+});
+
+ipcMain.handle("capture-window:begin-hotkey-edit", () => {
+  return beginEditableHotkey(
+    activeWindowCaptureHotkeySession,
+    activeActiveWindowCaptureHotkey,
+    (value) => { activeWindowCaptureHotkeyBeforeEdit = value; },
+    "capture.window.hotkey.edit.begin"
+  );
+});
+
+ipcMain.handle("capture-window:apply-hotkey", (_event, hotkey: string) => {
+  return applyEditableHotkey(
+    activeWindowCaptureHotkeySession,
+    hotkey,
+    "active window capture",
+    (value) => ({ activeWindowCaptureHotkey: value }),
+    (value) => { activeActiveWindowCaptureHotkey = value; },
+    (value) => { activeWindowCaptureHotkeyBeforeEdit = value; },
+    "capture.window.hotkey.edit.applied",
+    activeActiveWindowCaptureHotkey
+  );
+});
+
+ipcMain.handle("capture-window:clear-hotkey", () => {
+  return clearEditableHotkey(
+    activeWindowCaptureHotkeySession,
+    (value) => ({ activeWindowCaptureHotkey: value }),
+    (value) => { activeActiveWindowCaptureHotkey = value; },
+    (value) => { activeWindowCaptureHotkeyBeforeEdit = value; },
+    "capture.window.hotkey.edit.cleared",
+    activeActiveWindowCaptureHotkey
+  );
+});
+
+ipcMain.handle("capture-window:cancel-hotkey-edit", () => {
+  return cancelEditableHotkey(
+    activeWindowCaptureHotkeySession,
+    activeWindowCaptureHotkeyBeforeEdit,
+    (value) => { activeActiveWindowCaptureHotkey = value; },
+    (value) => { activeWindowCaptureHotkeyBeforeEdit = value; },
+    "capture.window.hotkey.edit.cancelled",
+    activeActiveWindowCaptureHotkey
+  );
+});
+
+ipcMain.handle("capture-window:get-hotkey", () => {
+  return getEditableHotkey(activeWindowCaptureHotkeySession, activeActiveWindowCaptureHotkey, (value) => {
+    activeActiveWindowCaptureHotkey = value;
+  });
 });
 
 ipcMain.handle("copy:begin-hotkey-edit", () => {
@@ -2151,6 +2364,9 @@ ipcMain.handle("capture:set-draw-rectangle", (_event, enabled: boolean) => {
 });
 
 ipcMain.handle("capture:get-draw-rectangle", () => drawSelectionRectangle);
+ipcMain.handle("clipboard:write-text", (_event, text: string) => {
+  clipboard.writeText(String(text ?? ""));
+});
 ipcMain.handle("window:get-always-on-top", () => isPinned);
 ipcMain.handle("window:set-always-on-top", (_event, enabled: boolean) => setAlwaysOnTopState(enabled));
 ipcMain.handle("stack:get-services-status", () => managedServicesStatusSnapshot());

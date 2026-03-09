@@ -22,7 +22,7 @@
       </div>
 
       <div class="settings-layout" id="settings-layout">
-        <section class="setting-section" data-section="appearance">
+        <section class="setting-section setting-section--half" data-section="appearance">
           <div class="setting-section-head">
             <h3 data-i18n="appearance.title">Appearance</h3>
             <span class="advanced-hint" data-i18n="appearance.hint">Theme and UI comfort</span>
@@ -46,7 +46,46 @@
           </div>
         </section>
 
-        <section class="setting-section" data-section="ocr">
+        <section class="setting-section setting-section--half" data-section="logging">
+          <div class="setting-section-head">
+            <h3 data-i18n="logging.title">Logging</h3>
+            <span class="advanced-hint" data-i18n="logging.hint">Debug and crash analysis</span>
+          </div>
+          <div class="setting-group">
+            <label data-i18n="logging.level">Log Level</label>
+            <select id="log-level">
+              <option value="debug" data-i18n="logging.level.debug">Debug (verbose)</option>
+              <option value="info" data-i18n="logging.level.info">Info (default)</option>
+              <option value="warn" data-i18n="logging.level.warn">Warn</option>
+              <option value="error" data-i18n="logging.level.error">Error</option>
+            </select>
+          </div>
+          <div class="setting-group setting-toggle-row">
+            <label for="log-console-enabled" data-i18n="logging.console">Console Logging</label>
+            <label class="setting-switch" for="log-console-enabled">
+              <input id="log-console-enabled" type="checkbox">
+              <span class="setting-switch-track" aria-hidden="true">
+                <span class="setting-switch-thumb"></span>
+              </span>
+            </label>
+          </div>
+          <div class="setting-group setting-toggle-row">
+            <label for="log-file-enabled" data-i18n="logging.file">File Logging</label>
+            <label class="setting-switch" for="log-file-enabled">
+              <input id="log-file-enabled" type="checkbox">
+              <span class="setting-switch-track" aria-hidden="true">
+                <span class="setting-switch-thumb"></span>
+              </span>
+            </label>
+          </div>
+          <div class="settings-actions-grid">
+            <button type="button" id="btn-view-logs"><i data-lucide="file-text" class="ui-icon"></i><span data-i18n="logging.view">View Logs</span></button>
+            <button type="button" id="btn-clear-logs" class="danger"><i data-lucide="trash-2" class="ui-icon"></i><span data-i18n="logging.clear">Clear Logs</span></button>
+          </div>
+          <div class="setting-footnote" id="log-path-display" data-i18n="logging.path.unavailable">Log path: not available</div>
+        </section>
+
+        <section class="setting-section setting-section--full" data-section="ocr">
           <div class="setting-section-head">
             <h3 data-i18n="ocr.title">OCR</h3>
             <span class="status-chip" id="llm-status-chip" data-i18n="common.idle">Idle</span>
@@ -80,6 +119,7 @@
             <select id="detector-mode">
               <option value="off" data-i18n="detection.scope.off">Off</option>
               <option value="fullscreen_only" data-i18n="detection.scope.fullscreen_only">Full screen only</option>
+              <option value="fullscreen_and_window" data-i18n="detection.scope.fullscreen_and_window">Full screen + window</option>
               <option value="all" data-i18n="detection.scope.all">All screenshots</option>
             </select>
           </div>
@@ -106,7 +146,7 @@
           </div>
         </section>
 
-        <section class="setting-section" data-section="tts">
+        <section class="setting-section setting-section--full" data-section="tts">
           <div class="setting-section-head">
             <h3 data-i18n="tts.title">TTS</h3>
             <span class="status-chip" id="tts-status-chip" data-i18n="common.idle">Idle</span>
@@ -138,7 +178,7 @@
           </div>
         </section>
 
-        <section class="setting-section" data-section="reading">
+        <section class="setting-section setting-section--full" data-section="reading">
           <div class="setting-section-head">
             <h3 data-i18n="reading.title">Reading & Highlight</h3>
             <span class="advanced-hint" data-i18n="reading.hint">Sentence-aware chunking</span>
@@ -149,7 +189,12 @@
           </div>
           <div class="setting-group setting-toggle-row">
             <label for="clean-text-before-tts" data-i18n="reading.cleanText">Clean Text Before Chunking/TTS</label>
-            <input id="clean-text-before-tts" type="checkbox">
+            <label class="setting-switch" for="clean-text-before-tts">
+              <input id="clean-text-before-tts" type="checkbox">
+              <span class="setting-switch-track" aria-hidden="true">
+                <span class="setting-switch-thumb"></span>
+              </span>
+            </label>
           </div>
           <div class="setting-grid">
             <div class="setting-group"><label data-i18n="reading.wpm">WPM</label><input type="number" id="wpm" min="1"></div>
@@ -181,11 +226,16 @@
           </div>
           <div class="setting-group setting-toggle-row">
             <label for="show-chunk-diagnostics" data-i18n="reading.showChunkDiagnostics">Show Chunk Diagnostics</label>
-            <input id="show-chunk-diagnostics" type="checkbox">
+            <label class="setting-switch" for="show-chunk-diagnostics">
+              <input id="show-chunk-diagnostics" type="checkbox">
+              <span class="setting-switch-track" aria-hidden="true">
+                <span class="setting-switch-thumb"></span>
+              </span>
+            </label>
           </div>
         </section>
 
-        <section class="setting-section" data-section="system">
+        <section class="setting-section setting-section--full" data-section="system">
           <div class="setting-section-head">
             <h3 data-i18n="system.title">System & Data</h3>
             <span class="advanced-hint" data-i18n="system.hint">Persistence and diagnostics</span>
@@ -202,6 +252,17 @@
           </div>
           <div class="setting-footnote" id="hotkey-recording-status"></div>
           <div class="setting-group">
+            <label data-i18n="system.ocrClipboardHotkey">OCR to Clipboard Hotkey</label>
+            <input type="text" id="ocr-clipboard-hotkey" readonly>
+          </div>
+          <div class="settings-actions-grid">
+            <button type="button" id="btn-ocr-clipboard-hotkey-record"><i data-lucide="keyboard" class="ui-icon"></i><span data-i18n="action.record">Record</span></button>
+            <button type="button" id="btn-ocr-clipboard-hotkey-clear"><i data-lucide="eraser" class="ui-icon"></i><span data-i18n="action.clear">Clear</span></button>
+            <button type="button" id="btn-ocr-clipboard-hotkey-apply"><i data-lucide="check" class="ui-icon"></i><span data-i18n="action.apply">Apply</span></button>
+            <button type="button" id="btn-ocr-clipboard-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
+          </div>
+          <div class="setting-footnote" id="ocr-clipboard-hotkey-recording-status"></div>
+          <div class="setting-group">
             <label data-i18n="system.fullCaptureHotkey">Full Screen Capture Hotkey</label>
             <input type="text" id="full-capture-hotkey" readonly>
           </div>
@@ -212,6 +273,17 @@
             <button type="button" id="btn-full-capture-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
           </div>
           <div class="setting-footnote" id="full-capture-hotkey-recording-status"></div>
+          <div class="setting-group">
+            <label data-i18n="system.activeWindowCaptureHotkey">Active Window Capture Hotkey</label>
+            <input type="text" id="active-window-capture-hotkey" readonly>
+          </div>
+          <div class="settings-actions-grid">
+            <button type="button" id="btn-active-window-capture-hotkey-record"><i data-lucide="keyboard" class="ui-icon"></i><span data-i18n="action.record">Record</span></button>
+            <button type="button" id="btn-active-window-capture-hotkey-clear"><i data-lucide="eraser" class="ui-icon"></i><span data-i18n="action.clear">Clear</span></button>
+            <button type="button" id="btn-active-window-capture-hotkey-apply"><i data-lucide="check" class="ui-icon"></i><span data-i18n="action.apply">Apply</span></button>
+            <button type="button" id="btn-active-window-capture-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
+          </div>
+          <div class="setting-footnote" id="active-window-capture-hotkey-recording-status"></div>
           <div class="setting-group">
             <label data-i18n="system.copyPlayHotkey">Copy & Play Hotkey</label>
             <input type="text" id="copy-play-hotkey" readonly>
@@ -302,13 +374,23 @@
           <div class="setting-footnote" id="replay-capture-hotkey-recording-status"></div>
           <div class="setting-group setting-toggle-row">
             <label for="capture-draw-rectangle" data-i18n="system.drawSelectionRectangle">Draw Selection Rectangle</label>
-            <input id="capture-draw-rectangle" type="checkbox">
+            <label class="setting-switch" for="capture-draw-rectangle">
+              <input id="capture-draw-rectangle" type="checkbox">
+              <span class="setting-switch-track" aria-hidden="true">
+                <span class="setting-switch-thumb"></span>
+              </span>
+            </label>
           </div>
           <div class="setting-group setting-toggle-row">
             <label for="diagnostics-enabled" data-i18n="system.diagnosticsEnabled">Diagnostics Enabled</label>
-            <input id="diagnostics-enabled" type="checkbox">
+            <label class="setting-switch" for="diagnostics-enabled">
+              <input id="diagnostics-enabled" type="checkbox">
+              <span class="setting-switch-track" aria-hidden="true">
+                <span class="setting-switch-thumb"></span>
+              </span>
+            </label>
           </div>
-          <div class="settings-actions-grid">
+          <div class="settings-actions-grid settings-actions-grid--triple">
             <button type="button" id="btn-export-settings"><i data-lucide="download" class="ui-icon"></i><span data-i18n="action.export">Export</span></button>
             <button type="button" id="btn-import-settings"><i data-lucide="upload" class="ui-icon"></i><span data-i18n="action.import">Import</span></button>
             <button type="button" id="btn-reset-settings" class="danger"><i data-lucide="rotate-ccw" class="ui-icon"></i><span data-i18n="action.reset">Reset</span></button>
@@ -317,34 +399,6 @@
           <div class="setting-footnote" id="settings-last-import"></div>
         </section>
 
-        <section class="setting-section" data-section="logging">
-          <div class="setting-section-head">
-            <h3 data-i18n="logging.title">Logging</h3>
-            <span class="advanced-hint" data-i18n="logging.hint">Debug and crash analysis</span>
-          </div>
-          <div class="setting-group">
-            <label data-i18n="logging.level">Log Level</label>
-            <select id="log-level">
-              <option value="debug" data-i18n="logging.level.debug">Debug (verbose)</option>
-              <option value="info" data-i18n="logging.level.info">Info (default)</option>
-              <option value="warn" data-i18n="logging.level.warn">Warn</option>
-              <option value="error" data-i18n="logging.level.error">Error</option>
-            </select>
-          </div>
-          <div class="setting-group setting-toggle-row">
-            <label for="log-console-enabled" data-i18n="logging.console">Console Logging</label>
-            <input id="log-console-enabled" type="checkbox">
-          </div>
-          <div class="setting-group setting-toggle-row">
-            <label for="log-file-enabled" data-i18n="logging.file">File Logging</label>
-            <input id="log-file-enabled" type="checkbox">
-          </div>
-          <div class="settings-actions-grid">
-            <button type="button" id="btn-view-logs"><i data-lucide="file-text" class="ui-icon"></i><span data-i18n="logging.view">View Logs</span></button>
-            <button type="button" id="btn-clear-logs" class="danger"><i data-lucide="trash-2" class="ui-icon"></i><span data-i18n="logging.clear">Clear Logs</span></button>
-          </div>
-          <div class="setting-footnote" id="log-path-display" data-i18n="logging.path.unavailable">Log path: not available</div>
-        </section>
       </div>
     </aside>
 
@@ -352,6 +406,7 @@
       <div class="top-actions">
         <button id="btn-paste-image" class="icon-pill" data-i18n-title="actions.pasteImage"><i data-lucide="clipboard-paste" class="ui-icon"></i></button>
         <button id="btn-always-on-top" class="icon-pill" type="button" aria-pressed="false" data-i18n-title="actions.alwaysOnTop"><i data-lucide="pin" class="ui-icon"></i></button>
+        <button id="btn-preprocess-lab" class="icon-pill" type="button" data-i18n-title="actions.openPreprocessingLab"><i data-lucide="scan" class="ui-icon"></i></button>
         <button id="btn-extract" class="icon-pill" data-i18n-title="actions.extractOcr"><i data-lucide="scan-text" class="ui-icon"></i></button>
         <label class="upload-btn icon-pill" data-i18n-title="actions.uploadImage"><i data-lucide="upload" class="ui-icon"></i><input id="image-upload" type="file" accept="image/*"></label>
         <button id="btn-break" class="icon-pill break-pill" data-i18n-title="actions.break"><i data-lucide="octagon-x" class="ui-icon"></i></button>

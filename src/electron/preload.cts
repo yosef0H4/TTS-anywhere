@@ -19,9 +19,22 @@ recordStartupPhase("preload.evaluate.end", {
 });
 
 contextBridge.exposeInMainWorld("electronAPI", {
-  onCapturedImage: (handler: (payload: { dataUrl: string; captureKind: "selection" | "fullscreen" }) => void) => {
-    ipcRenderer.on("capture-image", (_event, payload: { dataUrl?: string; captureKind?: "selection" | "fullscreen" }) => {
-      if (payload?.dataUrl) handler({ dataUrl: payload.dataUrl, captureKind: payload.captureKind === "fullscreen" ? "fullscreen" : "selection" });
+  onCapturedImage: (handler: (payload: {
+    dataUrl: string;
+    captureKind: "selection" | "fullscreen" | "window";
+    resultMode: "editor" | "clipboard";
+  }) => void) => {
+    ipcRenderer.on("capture-image", (_event, payload: {
+      dataUrl?: string;
+      captureKind?: "selection" | "fullscreen" | "window";
+      resultMode?: "editor" | "clipboard";
+    }) => {
+      if (!payload?.dataUrl) return;
+      const captureKind = payload.captureKind === "fullscreen" || payload.captureKind === "window"
+        ? payload.captureKind
+        : "selection";
+      const resultMode = payload.resultMode === "clipboard" ? "clipboard" : "editor";
+      handler({ dataUrl: payload.dataUrl, captureKind, resultMode });
     });
   },
   onCopiedTextForPlayback: (handler: (text: string) => void) => {
@@ -65,6 +78,21 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getCaptureHotkey: () => {
     return ipcRenderer.invoke("capture:get-hotkey") as Promise<string>;
   },
+  beginOcrClipboardHotkeyEdit: () => {
+    return ipcRenderer.invoke("capture-ocr-clipboard:begin-hotkey-edit") as Promise<string>;
+  },
+  applyOcrClipboardHotkey: (hotkey: string) => {
+    return ipcRenderer.invoke("capture-ocr-clipboard:apply-hotkey", hotkey) as Promise<string>;
+  },
+  clearOcrClipboardHotkey: () => {
+    return ipcRenderer.invoke("capture-ocr-clipboard:clear-hotkey") as Promise<string>;
+  },
+  cancelOcrClipboardHotkeyEdit: () => {
+    return ipcRenderer.invoke("capture-ocr-clipboard:cancel-hotkey-edit") as Promise<string>;
+  },
+  getOcrClipboardHotkey: () => {
+    return ipcRenderer.invoke("capture-ocr-clipboard:get-hotkey") as Promise<string>;
+  },
   beginFullCaptureHotkeyEdit: () => {
     return ipcRenderer.invoke("capture-fullscreen:begin-hotkey-edit") as Promise<string>;
   },
@@ -79,6 +107,21 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   getFullCaptureHotkey: () => {
     return ipcRenderer.invoke("capture-fullscreen:get-hotkey") as Promise<string>;
+  },
+  beginActiveWindowCaptureHotkeyEdit: () => {
+    return ipcRenderer.invoke("capture-window:begin-hotkey-edit") as Promise<string>;
+  },
+  applyActiveWindowCaptureHotkey: (hotkey: string) => {
+    return ipcRenderer.invoke("capture-window:apply-hotkey", hotkey) as Promise<string>;
+  },
+  clearActiveWindowCaptureHotkey: () => {
+    return ipcRenderer.invoke("capture-window:clear-hotkey") as Promise<string>;
+  },
+  cancelActiveWindowCaptureHotkeyEdit: () => {
+    return ipcRenderer.invoke("capture-window:cancel-hotkey-edit") as Promise<string>;
+  },
+  getActiveWindowCaptureHotkey: () => {
+    return ipcRenderer.invoke("capture-window:get-hotkey") as Promise<string>;
   },
   beginCopyHotkeyEdit: () => {
     return ipcRenderer.invoke("copy:begin-hotkey-edit") as Promise<string>;
@@ -233,5 +276,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   clearLogs: () => {
     return ipcRenderer.invoke("log:clear") as Promise<void>;
+  },
+  writeTextToClipboard: (text: string) => {
+    return ipcRenderer.invoke("clipboard:write-text", text) as Promise<void>;
   }
 });
