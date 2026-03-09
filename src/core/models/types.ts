@@ -76,6 +76,7 @@ export interface SystemConfig {
   diagnosticsEnabled: boolean;
   lastImportAt: string;
   captureHotkey: string;
+  fullCaptureHotkey: string;
   copyPlayHotkey: string;
   abortHotkey: string;
   playPauseHotkey: string;

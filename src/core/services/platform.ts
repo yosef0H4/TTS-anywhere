@@ -1,25 +1,32 @@
 export interface PlatformBridge {
-  onCapturedImage(handler: (payload: { dataUrl: string; isTap: boolean }) => void): void;
+  onCapturedImage(handler: (payload: { dataUrl: string; captureKind: "selection" | "fullscreen" }) => void): void;
   onCopiedTextForPlayback(handler: (text: string) => void): void;
   onAbortRequested(handler: () => void): void;
   onPlaybackHotkey(handler: (action: "toggle_play_pause" | "next_chunk" | "previous_chunk" | "volume_up" | "volume_down") => void): void;
 }
 
-export interface RecommendedCpuStackUrls {
+export interface ManagedRapidServiceUrls {
   detectionBaseUrl: string;
   ocrBaseUrl: string;
-  ttsBaseUrl: string;
 }
 
-export interface RecommendedCpuStackStatus {
+export type ManagedServiceId = "rapid" | "edge";
+
+export interface ManagedServiceStatus {
   state: "stopped" | "starting" | "running" | "failed";
   managed: boolean;
-  urls: RecommendedCpuStackUrls | null;
+  url: string | null;
   error: string | null;
+  urls: ManagedRapidServiceUrls | null;
+}
+
+export interface ManagedServicesStatus {
+  rapid: ManagedServiceStatus;
+  edge: ManagedServiceStatus;
 }
 
 export interface ElectronApi {
-  onCapturedImage: (handler: (payload: { dataUrl: string; isTap: boolean }) => void) => void;
+  onCapturedImage: (handler: (payload: { dataUrl: string; captureKind: "selection" | "fullscreen" }) => void) => void;
   onCopiedTextForPlayback: (handler: (text: string) => void) => void;
   onAbortRequested: (handler: () => void) => void;
   onPlaybackHotkey: (handler: (action: "toggle_play_pause" | "next_chunk" | "previous_chunk" | "volume_up" | "volume_down") => void) => void;
@@ -29,6 +36,10 @@ export interface ElectronApi {
   applyCaptureHotkey: (hotkey: string) => Promise<string>;
   cancelCaptureHotkeyEdit: () => Promise<string>;
   getCaptureHotkey: () => Promise<string>;
+  beginFullCaptureHotkeyEdit: () => Promise<string>;
+  applyFullCaptureHotkey: (hotkey: string) => Promise<string>;
+  cancelFullCaptureHotkeyEdit: () => Promise<string>;
+  getFullCaptureHotkey: () => Promise<string>;
   beginCopyHotkeyEdit: () => Promise<string>;
   applyCopyHotkey: (hotkey: string) => Promise<string>;
   cancelCopyHotkeyEdit: () => Promise<string>;
@@ -63,10 +74,10 @@ export interface ElectronApi {
   getReplayCaptureHotkey: () => Promise<string>;
   setCaptureDrawRectangle: (enabled: boolean) => Promise<boolean>;
   getCaptureDrawRectangle: () => Promise<boolean>;
-  launchRecommendedCpuStack: () => Promise<RecommendedCpuStackStatus>;
-  stopRecommendedCpuStack: () => Promise<RecommendedCpuStackStatus>;
+  launchManagedService: (serviceId: ManagedServiceId) => Promise<ManagedServiceStatus>;
+  stopManagedService: (serviceId: ManagedServiceId) => Promise<ManagedServiceStatus>;
   openRuntimeServicesFolder: () => Promise<string>;
-  getRecommendedCpuStackStatus: () => Promise<RecommendedCpuStackStatus>;
+  getManagedServicesStatus: () => Promise<ManagedServicesStatus>;
   recordStartupPhase?: (phase: string, details?: Record<string, unknown>) => void;
   sendLogEntries: (entries: unknown[]) => void;
   getLogLevel: () => Promise<string>;

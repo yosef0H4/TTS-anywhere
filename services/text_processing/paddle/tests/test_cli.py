@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from paddle_text_processing import cli
 
 
@@ -29,7 +31,12 @@ def test_parse_args() -> None:
     assert args.ocr_recognition_model_dir == "models/rec"
 
 
-def test_main_starts_server(monkeypatch) -> None:
+def test_parse_args_rejects_auto_device() -> None:
+    with pytest.raises(SystemExit):
+        cli.parse_args(["serve", "--enable-detect", "--detect-device", "auto"])
+
+
+def test_main_starts_server(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
     original_parse_args = cli.parse_args

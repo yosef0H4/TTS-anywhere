@@ -64,6 +64,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     diagnosticsEnabled: true,
     lastImportAt: "",
     captureHotkey: "ctrl+shift+alt+s",
+    fullCaptureHotkey: "ctrl+shift+alt+a",
     copyPlayHotkey: "ctrl+shift+alt+x",
     abortHotkey: "ctrl+shift+alt+z",
     playPauseHotkey: "ctrl+shift+alt+space",

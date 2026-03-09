@@ -14,11 +14,7 @@ TORCH_CUDA_INDEX_URL = "https://download.pytorch.org/whl/cu128"
 CPU_ONNXRUNTIME_PACKAGE = "onnxruntime>=1.24.2"
 GPU_ONNXRUNTIME_PACKAGE = "onnxruntime-gpu>=1.24.2"
 GPU_TORCH_PACKAGE = "torch>=2.4"
-LOCAL_UV_CACHE_DIR = (
-    Path(tempfile.gettempdir()) / "tts-electron-rapid-uv-cache"
-    if os.name == "nt"
-    else PROJECT_ROOT / ".cache" / "uv"
-)
+LOCAL_UV_CACHE_DIR = Path(tempfile.gettempdir()) / "tts-electron-rapid-uv-cache" if os.name == "nt" else PROJECT_ROOT / ".cache" / "uv"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -27,15 +23,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=8091)
     parser.add_argument("--enable-detect", action="store_true")
     parser.add_argument("--enable-openai-ocr", action="store_true")
-    parser.add_argument("--detect-provider", default="auto", choices=["auto", "cpu", "cuda", "dml"])
-    parser.add_argument("--ocr-provider", default="auto", choices=["auto", "cpu", "cuda", "dml"])
+    parser.add_argument("--detect-provider", default="cpu", choices=["cpu", "cuda", "dml"])
+    parser.add_argument("--ocr-provider", default="cpu", choices=["cpu", "cuda", "dml"])
     return parser.parse_args(argv)
 
 
 def venv_python(env_dir: Path) -> Path:
-    if os.name == "nt":
-        return env_dir / "Scripts" / "python.exe"
-    return env_dir / "bin" / "python"
+    return env_dir / "Scripts" / "python.exe" if os.name == "nt" else env_dir / "bin" / "python"
 
 
 def run(cmd: list[str], *, env: dict[str, str]) -> None:
@@ -98,7 +92,7 @@ def _runtime_matches(env_python_path: Path, package_spec: str) -> bool:
 
 def choose_env(args: argparse.Namespace) -> tuple[Path, bool]:
     requested = {args.detect_provider if args.enable_detect else "cpu", args.ocr_provider if args.enable_openai_ocr else "cpu"}
-    needs_gpu_env = any(provider in {"auto", "cuda"} for provider in requested)
+    needs_gpu_env = any(provider == "cuda" for provider in requested)
     env_name = ".venv-gpu" if needs_gpu_env else ".venv-cpu"
     return PROJECT_ROOT / env_name, needs_gpu_env
 
@@ -120,16 +114,7 @@ def ensure_env(args: argparse.Namespace) -> Path:
         if not _runtime_matches(env_python_path, GPU_TORCH_PACKAGE):
             uninstall_if_present(env_python_path, "torch")
             run(
-                [
-                    "uv",
-                    "pip",
-                    "install",
-                    "--python",
-                    str(env_python_path),
-                    "--index-url",
-                    TORCH_CUDA_INDEX_URL,
-                    GPU_TORCH_PACKAGE,
-                ],
+                ["uv", "pip", "install", "--python", str(env_python_path), "--index-url", TORCH_CUDA_INDEX_URL, GPU_TORCH_PACKAGE],
                 env=env,
             )
     else:
@@ -147,7 +132,6 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit("At least one feature must be enabled: --enable-detect and/or --enable-openai-ocr")
 
     env_python_path = ensure_env(args)
-
     cmd = [
         str(env_python_path),
         "-m",
@@ -167,8 +151,11 @@ def main(argv: list[str] | None = None) -> None:
     if args.enable_openai_ocr:
         cmd.append("--enable-openai-ocr")
 
+    env = os.environ.copy()
+    env.setdefault("UV_CACHE_DIR", str(LOCAL_UV_CACHE_DIR))
+    env.setdefault("UV_LINK_MODE", "copy")
     try:
-        subprocess.run(cmd, cwd=PROJECT_ROOT, check=True)
+        subprocess.run(cmd, cwd=PROJECT_ROOT, check=True, env=env)
     except KeyboardInterrupt:
         return
 

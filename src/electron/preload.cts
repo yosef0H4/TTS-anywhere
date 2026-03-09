@@ -19,9 +19,9 @@ recordStartupPhase("preload.evaluate.end", {
 });
 
 contextBridge.exposeInMainWorld("electronAPI", {
-  onCapturedImage: (handler: (payload: { dataUrl: string; isTap: boolean }) => void) => {
-    ipcRenderer.on("capture-image", (_event, payload: { dataUrl?: string; isTap?: boolean }) => {
-      if (payload?.dataUrl) handler({ dataUrl: payload.dataUrl, isTap: payload.isTap === true });
+  onCapturedImage: (handler: (payload: { dataUrl: string; captureKind: "selection" | "fullscreen" }) => void) => {
+    ipcRenderer.on("capture-image", (_event, payload: { dataUrl?: string; captureKind?: "selection" | "fullscreen" }) => {
+      if (payload?.dataUrl) handler({ dataUrl: payload.dataUrl, captureKind: payload.captureKind === "fullscreen" ? "fullscreen" : "selection" });
     });
   },
   onCopiedTextForPlayback: (handler: (text: string) => void) => {
@@ -61,6 +61,18 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   getCaptureHotkey: () => {
     return ipcRenderer.invoke("capture:get-hotkey") as Promise<string>;
+  },
+  beginFullCaptureHotkeyEdit: () => {
+    return ipcRenderer.invoke("capture-fullscreen:begin-hotkey-edit") as Promise<string>;
+  },
+  applyFullCaptureHotkey: (hotkey: string) => {
+    return ipcRenderer.invoke("capture-fullscreen:apply-hotkey", hotkey) as Promise<string>;
+  },
+  cancelFullCaptureHotkeyEdit: () => {
+    return ipcRenderer.invoke("capture-fullscreen:cancel-hotkey-edit") as Promise<string>;
+  },
+  getFullCaptureHotkey: () => {
+    return ipcRenderer.invoke("capture-fullscreen:get-hotkey") as Promise<string>;
   },
   beginCopyHotkeyEdit: () => {
     return ipcRenderer.invoke("copy:begin-hotkey-edit") as Promise<string>;
@@ -164,17 +176,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getCaptureDrawRectangle: () => {
     return ipcRenderer.invoke("capture:get-draw-rectangle") as Promise<boolean>;
   },
-  launchRecommendedCpuStack: () => {
-    return ipcRenderer.invoke("stack:launch-recommended-cpu");
+  launchManagedService: (serviceId: "rapid" | "edge") => {
+    return ipcRenderer.invoke("stack:launch-service", serviceId);
   },
-  stopRecommendedCpuStack: () => {
-    return ipcRenderer.invoke("stack:stop-recommended-cpu");
+  stopManagedService: (serviceId: "rapid" | "edge") => {
+    return ipcRenderer.invoke("stack:stop-service", serviceId);
   },
   openRuntimeServicesFolder: () => {
     return ipcRenderer.invoke("stack:open-runtime-services") as Promise<string>;
   },
-  getRecommendedCpuStackStatus: () => {
-    return ipcRenderer.invoke("stack:get-recommended-cpu-status");
+  getManagedServicesStatus: () => {
+    return ipcRenderer.invoke("stack:get-services-status");
   },
   recordStartupPhase,
   sendLogEntries: (entries: unknown[]) => {

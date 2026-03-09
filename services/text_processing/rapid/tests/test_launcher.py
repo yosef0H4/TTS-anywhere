@@ -53,7 +53,7 @@ def test_ensure_env_reinstalls_cpu_runtime_when_missing(monkeypatch) -> None:
     assert calls[0] == ["uv", "sync", "--inexact"]
     assert ["uninstall", "onnxruntime-gpu"] in calls
     assert ["uninstall", "torch"] in calls
-    assert ["uv", "pip", "install", "--python", "/tmp/python", launcher.CPU_ONNXRUNTIME_PACKAGE] in calls
+    assert ["uv", "pip", "install", "--python", str(Path("/tmp/python")), launcher.CPU_ONNXRUNTIME_PACKAGE] in calls
 
 
 def test_main_treats_keyboard_interrupt_as_clean_shutdown(monkeypatch) -> None:

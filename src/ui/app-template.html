@@ -95,14 +95,14 @@
             <span class="status-chip" id="detector-status-chip" data-i18n="common.idle">Idle</span>
           </div>
           <div class="setting-group">
-            <label data-i18n="stack.recommendedCpu">Recommended CPU Stack</label>
+            <label data-i18n="stack.rapid">Rapid OCR + Detection</label>
             <div class="stack-controls">
-              <button type="button" id="btn-launch-cpu-stack" class="stack-action-btn stack-action-btn-primary"><i data-lucide="play" class="ui-icon"></i><span data-i18n="stack.launch">Launch</span></button>
-              <button type="button" id="btn-stop-cpu-stack" class="stack-action-btn"><i data-lucide="square" class="ui-icon"></i><span data-i18n="stack.stop">Stop</span></button>
+              <button type="button" id="btn-launch-rapid-service" class="stack-action-btn stack-action-btn-primary"><i data-lucide="play" class="ui-icon"></i><span data-i18n="stack.launch">Launch</span></button>
+              <button type="button" id="btn-stop-rapid-service" class="stack-action-btn"><i data-lucide="square" class="ui-icon"></i><span data-i18n="stack.stop">Stop</span></button>
               <button type="button" id="btn-open-runtime-services" class="stack-action-btn"><i data-lucide="folder-open" class="ui-icon"></i><span data-i18n="stack.openServices">Open Services</span></button>
-              <span class="status-chip" id="cpu-stack-status-chip" data-i18n="common.idle">Idle</span>
+              <span class="status-chip" id="rapid-service-status-chip" data-i18n="common.idle">Idle</span>
             </div>
-            <div class="setting-footnote" id="cpu-stack-footnote" data-i18n="stack.recommendedCpuHint">Launches Rapid CPU for OCR + detection and Edge TTS. The app picks free local ports automatically.</div>
+            <div class="setting-footnote" id="rapid-service-footnote" data-i18n="stack.rapidHint">Launches Rapid CPU for OCR and text detection. The app picks a free local port automatically.</div>
           </div>
         </section>
 
@@ -126,6 +126,15 @@
               <select id="tts-voice"></select>
               <button id="tts-voice-refetch" class="refetch-btn" type="button" data-i18n-title="tts.refetchVoices"><i data-lucide="refresh-cw" class="ui-icon"></i></button>
             </div>
+          </div>
+          <div class="setting-group">
+            <label data-i18n="stack.edge">Edge TTS</label>
+            <div class="stack-controls">
+              <button type="button" id="btn-launch-edge-service" class="stack-action-btn stack-action-btn-primary"><i data-lucide="play" class="ui-icon"></i><span data-i18n="stack.launch">Launch</span></button>
+              <button type="button" id="btn-stop-edge-service" class="stack-action-btn"><i data-lucide="square" class="ui-icon"></i><span data-i18n="stack.stop">Stop</span></button>
+              <span class="status-chip" id="edge-service-status-chip" data-i18n="common.idle">Idle</span>
+            </div>
+            <div class="setting-footnote" id="edge-service-footnote" data-i18n="stack.edgeHint">Launches the recommended Edge TTS adapter. The app picks a free local port automatically.</div>
           </div>
         </section>
 
@@ -191,6 +200,16 @@
             <button type="button" id="btn-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
           </div>
           <div class="setting-footnote" id="hotkey-recording-status"></div>
+          <div class="setting-group">
+            <label data-i18n="system.fullCaptureHotkey">Full Screen Capture Hotkey</label>
+            <input type="text" id="full-capture-hotkey" readonly>
+          </div>
+          <div class="settings-actions-grid">
+            <button type="button" id="btn-full-capture-hotkey-record"><i data-lucide="keyboard" class="ui-icon"></i><span data-i18n="action.record">Record</span></button>
+            <button type="button" id="btn-full-capture-hotkey-apply"><i data-lucide="check" class="ui-icon"></i><span data-i18n="action.apply">Apply</span></button>
+            <button type="button" id="btn-full-capture-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
+          </div>
+          <div class="setting-footnote" id="full-capture-hotkey-recording-status"></div>
           <div class="setting-group">
             <label data-i18n="system.copyPlayHotkey">Copy & Play Hotkey</label>
             <input type="text" id="copy-play-hotkey" readonly>

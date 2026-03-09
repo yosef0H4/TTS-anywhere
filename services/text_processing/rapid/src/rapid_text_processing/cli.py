@@ -16,8 +16,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     serve.add_argument("--port", type=int, default=8091)
     serve.add_argument("--enable-detect", action="store_true", help="Enable RapidOCR detect-only endpoint")
     serve.add_argument("--enable-openai-ocr", action="store_true", help="Enable OpenAI-compatible OCR adapter endpoint")
-    serve.add_argument("--detect-provider", default="auto", choices=["auto", "cpu", "cuda", "dml"], help="Execution provider for detect endpoint")
-    serve.add_argument("--ocr-provider", default="auto", choices=["auto", "cpu", "cuda", "dml"], help="Execution provider for OpenAI OCR endpoint")
+    serve.add_argument("--detect-provider", default="cpu", choices=["cpu", "cuda", "dml"], help="Execution provider for detect endpoint")
+    serve.add_argument("--ocr-provider", default="cpu", choices=["cpu", "cuda", "dml"], help="Execution provider for OpenAI OCR endpoint")
 
     return parser.parse_args(argv)
 

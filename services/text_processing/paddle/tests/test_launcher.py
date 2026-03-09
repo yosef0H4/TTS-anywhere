@@ -44,7 +44,7 @@ def test_ensure_env_skips_reinstall_when_gpu_runtime_matches(monkeypatch: pytest
 
     launcher.ensure_env(args)
 
-    assert calls == [["uv", "sync", "--group", "dev"]]
+    assert calls == [["uv", "sync", "--group", "dev", "--inexact"]]
 
 
 def test_ensure_env_reinstalls_when_cpu_runtime_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -58,7 +58,7 @@ def test_ensure_env_reinstalls_when_cpu_runtime_missing(monkeypatch: pytest.Monk
 
     launcher.ensure_env(args)
 
-    assert calls[0] == ["uv", "sync", "--group", "dev"]
+    assert calls[0] == ["uv", "sync", "--group", "dev", "--inexact"]
     assert ["uninstall", "paddlepaddle"] in calls
     assert ["uninstall", "paddlepaddle-gpu"] in calls
-    assert ["uv", "pip", "install", "--python", "/tmp/python", launcher.CPU_PADDLE_PACKAGE] in calls
+    assert ["uv", "pip", "install", "--python", str(Path("/tmp/python")), launcher.CPU_PADDLE_PACKAGE] in calls

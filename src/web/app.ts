@@ -22,7 +22,7 @@ import {
 } from "../core/playback/chunking";
 import { AppPipeline } from "../core/pipeline/app-pipeline";
 import { LEGACY_SETTINGS_KEYS, SettingsStore, SETTINGS_KEY } from "../core/services/settings-store";
-import type { RecommendedCpuStackStatus } from "../core/services/platform";
+import type { ManagedServiceId, ManagedServiceStatus, ManagedServicesStatus } from "../core/services/platform";
 import { WorkspaceResizer } from "../ui/workspace-resizer";
 import { cleanTextForTts, findChunkIndexByTime } from "../core/utils/chunking";
 import { RequestPreemptor } from "../core/utils/request-preemptor";
@@ -57,6 +57,7 @@ interface PlaybackMetrics {
 
 type ConfigurableHotkeyKey =
   | "capture"
+  | "fullCapture"
   | "copyPlay"
   | "abort"
   | "playPause"
@@ -71,6 +72,7 @@ type PlaybackHotkeyAction = "toggle_play_pause" | "next_chunk" | "previous_chunk
 interface HotkeyBindingConfig {
   systemKey:
     | "captureHotkey"
+    | "fullCaptureHotkey"
     | "copyPlayHotkey"
     | "abortHotkey"
     | "playPauseHotkey"
@@ -91,7 +93,7 @@ interface HotkeyBindingConfig {
 
 type CaptureContext = {
   source: "hotkey" | "clipboard" | "upload" | "paste" | "drop";
-  isTap?: boolean;
+  captureKind?: "selection" | "fullscreen";
 };
 
 const rendererBootAt = performance.now();
@@ -128,6 +130,7 @@ export class WebApp {
   private consoleTransport: ConsoleTransport | null = null;
   private hotkeyRecordingState: Record<ConfigurableHotkeyKey, boolean> = {
     capture: false,
+    fullCapture: false,
     copyPlay: false,
     abort: false,
     playPause: false,
@@ -139,6 +142,7 @@ export class WebApp {
   };
   private pendingHotkeys: Record<ConfigurableHotkeyKey, string | null> = {
     capture: null,
+    fullCapture: null,
     copyPlay: null,
     abort: null,
     playPause: null,
@@ -150,6 +154,7 @@ export class WebApp {
   };
   private hotkeyKeydownHandlers: Record<ConfigurableHotkeyKey, ((event: KeyboardEvent) => void) | null> = {
     capture: null,
+    fullCapture: null,
     copyPlay: null,
     abort: null,
     playPause: null,
@@ -190,7 +195,7 @@ export class WebApp {
     ttsStartsBySessionAndHash: {}
   };
   private detectorHealthy = false;
-  private recommendedCpuStackStatus: RecommendedCpuStackStatus | null = null;
+  private managedServicesStatus: ManagedServicesStatus | null = null;
   private lastRenderedActiveChunkId: string | null = null;
   private alwaysOnTopEnabled = false;
   private currentLanguage(): AppConfig["ui"]["language"] {
@@ -215,6 +220,18 @@ export class WebApp {
           beginEdit: api?.beginCaptureHotkeyEdit,
           apply: api?.applyCaptureHotkey,
           cancelEdit: api?.cancelCaptureHotkeyEdit
+        };
+      case "fullCapture":
+        return {
+          systemKey: "fullCaptureHotkey",
+          inputId: "full-capture-hotkey",
+          statusId: "full-capture-hotkey-recording-status",
+          recordButtonId: "btn-full-capture-hotkey-record",
+          applyButtonId: "btn-full-capture-hotkey-apply",
+          cancelButtonId: "btn-full-capture-hotkey-cancel",
+          beginEdit: api?.beginFullCaptureHotkeyEdit,
+          apply: api?.applyFullCaptureHotkey,
+          cancelEdit: api?.cancelFullCaptureHotkeyEdit
         };
       case "copyPlay":
         return {
@@ -348,7 +365,7 @@ export class WebApp {
     this.renderConfig();
     this.logBootstrapStep("config.rendered");
     void this.checkDetectorHealth(false);
-    void this.refreshRecommendedCpuStackStatus();
+    void this.refreshManagedServicesStatus();
     void this.syncAllElectronHotkeysFromSettings();
     void this.syncElectronCaptureRectangleSetting();
     this.logBootstrapStep("electron.settings.sync.started");
@@ -827,103 +844,159 @@ export class WebApp {
     }
   }
 
-  private renderRecommendedCpuStackStatus(): void {
-    const launchButton = this.must<HTMLButtonElement>("btn-launch-cpu-stack");
-    const stopButton = this.must<HTMLButtonElement>("btn-stop-cpu-stack");
-    const openButton = this.must<HTMLButtonElement>("btn-open-runtime-services");
-    const footnote = this.must<HTMLDivElement>("cpu-stack-footnote");
-    if (!window.electronAPI) {
+  private getManagedServiceLabelKey(serviceId: ManagedServiceId): TranslationKey {
+    return serviceId === "rapid" ? "stack.rapid" : "stack.edge";
+  }
+
+  private renderManagedServiceControl(
+    serviceId: ManagedServiceId,
+    control: {
+      launchButtonId: string;
+      stopButtonId: string;
+      statusChipId: string;
+      footnoteId: string;
+      detailPrefix: "stack.detail.rapid" | "stack.detail.edge";
+      runningLabel: TranslationKey;
+    }
+  ): void {
+    const launchButton = this.must<HTMLButtonElement>(control.launchButtonId);
+    const stopButton = this.must<HTMLButtonElement>(control.stopButtonId);
+    const footnote = this.must<HTMLDivElement>(control.footnoteId);
+
+    if (!window.electronAPI?.getManagedServicesStatus) {
       launchButton.disabled = true;
       stopButton.disabled = true;
-      openButton.disabled = true;
-      this.updateStatusChip("cpu-stack-status-chip", this.t("stack.electronOnly"), "idle");
+      this.updateStatusChip(control.statusChipId, this.t("stack.electronOnly"), "idle");
       footnote.textContent = this.t("stack.electronOnly");
       return;
     }
 
-    const status = this.recommendedCpuStackStatus;
+    const status = this.managedServicesStatus?.[serviceId];
     const state = status?.state ?? "stopped";
     launchButton.disabled = state === "starting" || state === "running";
     stopButton.disabled = state === "stopped" || state === "failed" || state === "starting";
-    openButton.disabled = false;
 
-    if (state === "running" && status?.urls) {
-      this.updateStatusChip("cpu-stack-status-chip", this.t("stack.status.running"), "ok");
-      footnote.textContent = this.t("stack.detail.running", {
-        detectionUrl: status.urls.detectionBaseUrl,
-        ttsUrl: status.urls.ttsBaseUrl
-      });
+    if (state === "running" && status) {
+      this.updateStatusChip(control.statusChipId, this.t("stack.status.running"), "ok");
+      footnote.textContent = serviceId === "rapid"
+        ? this.t(control.runningLabel, { detectionUrl: status.urls?.detectionBaseUrl ?? status.url ?? "", ocrUrl: status.urls?.ocrBaseUrl ?? status.url ?? "" })
+        : this.t("stack.detail.edge.running", { ttsUrl: status.url ?? "" });
       return;
     }
 
     if (state === "starting") {
-      this.updateStatusChip("cpu-stack-status-chip", this.t("stack.status.starting"), "idle");
-      footnote.textContent = this.t("stack.detail.starting");
+      this.updateStatusChip(control.statusChipId, this.t("stack.status.starting"), "idle");
+      footnote.textContent = this.t(`${control.detailPrefix}.starting` as TranslationKey);
       return;
     }
 
     if (state === "failed") {
-      this.updateStatusChip("cpu-stack-status-chip", this.t("stack.status.failed"), "error");
-      footnote.textContent = this.t("stack.detail.failed", { error: status?.error ?? "unknown error" });
+      this.updateStatusChip(control.statusChipId, this.t("stack.status.failed"), "error");
+      footnote.textContent = this.t(`${control.detailPrefix}.failed` as TranslationKey, { error: status?.error ?? "unknown error" });
       return;
     }
 
-    this.updateStatusChip("cpu-stack-status-chip", this.t("stack.status.stopped"), "idle");
-    footnote.textContent = this.t("stack.detail.stopped");
+    this.updateStatusChip(control.statusChipId, this.t("stack.status.stopped"), "idle");
+    footnote.textContent = this.t(`${control.detailPrefix}.stopped` as TranslationKey);
   }
 
-  private async refreshRecommendedCpuStackStatus(): Promise<void> {
-    if (!window.electronAPI?.getRecommendedCpuStackStatus) {
-      this.recommendedCpuStackStatus = null;
-      this.renderRecommendedCpuStackStatus();
+  private renderManagedServicesStatus(): void {
+    this.must<HTMLButtonElement>("btn-open-runtime-services").disabled = !window.electronAPI?.openRuntimeServicesFolder;
+    this.renderManagedServiceControl("rapid", {
+      launchButtonId: "btn-launch-rapid-service",
+      stopButtonId: "btn-stop-rapid-service",
+      statusChipId: "rapid-service-status-chip",
+      footnoteId: "rapid-service-footnote",
+      detailPrefix: "stack.detail.rapid",
+      runningLabel: "stack.detail.rapid.running"
+    });
+    this.renderManagedServiceControl("edge", {
+      launchButtonId: "btn-launch-edge-service",
+      stopButtonId: "btn-stop-edge-service",
+      statusChipId: "edge-service-status-chip",
+      footnoteId: "edge-service-footnote",
+      detailPrefix: "stack.detail.edge",
+      runningLabel: "stack.detail.edge.running"
+    });
+  }
+
+  private async refreshManagedServicesStatus(): Promise<void> {
+    if (!window.electronAPI?.getManagedServicesStatus) {
+      this.managedServicesStatus = null;
+      this.renderManagedServicesStatus();
       return;
     }
-    this.recommendedCpuStackStatus = await window.electronAPI.getRecommendedCpuStackStatus();
-    this.renderRecommendedCpuStackStatus();
+    this.managedServicesStatus = await window.electronAPI.getManagedServicesStatus();
+    this.renderManagedServicesStatus();
   }
 
-  private applyRecommendedCpuStackUrls(status: RecommendedCpuStackStatus): void {
-    if (!status.urls) return;
-    this.config.textProcessing.detectorBaseUrl = status.urls.detectionBaseUrl;
-    this.config.llm.baseUrl = status.urls.ocrBaseUrl;
-    this.config.tts.baseUrl = status.urls.ttsBaseUrl;
+  private applyManagedServiceUrls(serviceId: ManagedServiceId, status: ManagedServiceStatus): void {
+    if (serviceId === "rapid" && status.urls) {
+      this.config.textProcessing.detectorBaseUrl = status.urls.detectionBaseUrl;
+      this.config.llm.baseUrl = status.urls.ocrBaseUrl;
+    }
+    if (serviceId === "edge" && status.url) {
+      this.config.tts.baseUrl = status.url;
+    }
     this.store.save(this.config);
     this.renderConfig();
-    this.renderRecommendedCpuStackStatus();
-    void this.checkDetectorHealth(false);
+    this.renderManagedServicesStatus();
+    if (serviceId === "rapid") {
+      void this.checkDetectorHealth(false);
+    }
   }
 
-  private async launchRecommendedCpuStack(): Promise<void> {
-    if (!window.electronAPI?.launchRecommendedCpuStack) {
+  private async launchManagedService(serviceId: ManagedServiceId): Promise<void> {
+    if (!window.electronAPI?.launchManagedService) {
       this.setStatus(this.t("stack.electronOnly"));
       return;
     }
-    this.recommendedCpuStackStatus = {
-      state: "starting",
-      managed: false,
-      urls: null,
-      error: null
+    const current = this.managedServicesStatus ?? {
+      rapid: { state: "stopped", managed: false, url: null, urls: null, error: null },
+      edge: { state: "stopped", managed: false, url: null, urls: null, error: null }
     };
-    this.renderRecommendedCpuStackStatus();
-    const status = await window.electronAPI.launchRecommendedCpuStack();
-    this.recommendedCpuStackStatus = status;
-    this.renderRecommendedCpuStackStatus();
+    this.managedServicesStatus = {
+      ...current,
+      [serviceId]: {
+        ...current[serviceId],
+        state: "starting",
+        managed: false,
+        error: null
+      }
+    };
+    this.renderManagedServicesStatus();
+    const status = await window.electronAPI.launchManagedService(serviceId);
+    this.managedServicesStatus = {
+      ...(this.managedServicesStatus ?? current),
+      [serviceId]: status
+    };
+    this.renderManagedServicesStatus();
     if (status.state === "running") {
-      this.applyRecommendedCpuStackUrls(status);
-      this.setStatus(this.t("status.cpuStackLaunched"));
+      this.applyManagedServiceUrls(serviceId, status);
+      this.setStatus(this.t("status.serviceLaunched", { service: this.t(this.getManagedServiceLabelKey(serviceId)) }));
       return;
     }
-    this.setStatus(this.t("status.cpuStackLaunchFailed", { error: status.error ?? "unknown error" }));
+    this.setStatus(this.t("status.serviceLaunchFailed", {
+      service: this.t(this.getManagedServiceLabelKey(serviceId)),
+      error: status.error ?? "unknown error"
+    }));
   }
 
-  private async stopRecommendedCpuStack(): Promise<void> {
-    if (!window.electronAPI?.stopRecommendedCpuStack) {
+  private async stopManagedService(serviceId: ManagedServiceId): Promise<void> {
+    if (!window.electronAPI?.stopManagedService) {
       this.setStatus(this.t("stack.electronOnly"));
       return;
     }
-    this.recommendedCpuStackStatus = await window.electronAPI.stopRecommendedCpuStack();
-    this.renderRecommendedCpuStackStatus();
-    this.setStatus(this.t("status.cpuStackStopped"));
+    const status = await window.electronAPI.stopManagedService(serviceId);
+    this.managedServicesStatus = {
+      ...(this.managedServicesStatus ?? {
+        rapid: { state: "stopped", managed: false, url: null, urls: null, error: null },
+        edge: { state: "stopped", managed: false, url: null, urls: null, error: null }
+      }),
+      [serviceId]: status
+    };
+    this.renderManagedServicesStatus();
+    this.setStatus(this.t("status.serviceStopped", { service: this.t(this.getManagedServiceLabelKey(serviceId)) }));
   }
 
   private async openRuntimeServicesFolder(): Promise<void> {
@@ -1216,11 +1289,17 @@ export class WebApp {
     this.must<HTMLButtonElement>("detector-health").addEventListener("click", async () => {
       await this.checkDetectorHealth();
     });
-    this.must<HTMLButtonElement>("btn-launch-cpu-stack").addEventListener("click", () => {
-      void this.launchRecommendedCpuStack();
+    this.must<HTMLButtonElement>("btn-launch-rapid-service").addEventListener("click", () => {
+      void this.launchManagedService("rapid");
     });
-    this.must<HTMLButtonElement>("btn-stop-cpu-stack").addEventListener("click", () => {
-      void this.stopRecommendedCpuStack();
+    this.must<HTMLButtonElement>("btn-stop-rapid-service").addEventListener("click", () => {
+      void this.stopManagedService("rapid");
+    });
+    this.must<HTMLButtonElement>("btn-launch-edge-service").addEventListener("click", () => {
+      void this.launchManagedService("edge");
+    });
+    this.must<HTMLButtonElement>("btn-stop-edge-service").addEventListener("click", () => {
+      void this.stopManagedService("edge");
     });
     this.must<HTMLButtonElement>("btn-open-runtime-services").addEventListener("click", () => {
       void this.openRuntimeServicesFolder();
@@ -1255,6 +1334,15 @@ export class WebApp {
     });
     this.must<HTMLButtonElement>("btn-hotkey-cancel").addEventListener("click", () => {
       void this.cancelHotkeyRecording("capture");
+    });
+    this.must<HTMLButtonElement>("btn-full-capture-hotkey-record").addEventListener("click", () => {
+      void this.beginHotkeyRecording("fullCapture");
+    });
+    this.must<HTMLButtonElement>("btn-full-capture-hotkey-apply").addEventListener("click", () => {
+      void this.applyRecordedHotkey("fullCapture");
+    });
+    this.must<HTMLButtonElement>("btn-full-capture-hotkey-cancel").addEventListener("click", () => {
+      void this.cancelHotkeyRecording("fullCapture");
     });
     this.must<HTMLButtonElement>("btn-copy-hotkey-record").addEventListener("click", () => {
       void this.beginHotkeyRecording("copyPlay");
@@ -1459,7 +1547,7 @@ export class WebApp {
       this.detectorHealthy ? this.describeDetectionMode(this.config.textProcessing.detectionMode) : this.t("statuschip.unreachable"),
       this.detectorHealthy ? "idle" : "error"
     );
-    this.renderRecommendedCpuStackStatus();
+    this.renderManagedServicesStatus();
     this.renderAlwaysOnTopButton();
     this.renderMainPreviewOverlay();
   }
@@ -1559,7 +1647,7 @@ export class WebApp {
     const mode = this.config.textProcessing.detectionMode;
     if (mode === "off") return false;
     if (mode === "all") return true;
-    return captureContext?.source === "hotkey" && captureContext.isTap === true;
+    return captureContext?.source === "hotkey" && captureContext.captureKind === "fullscreen";
   }
 
   private applyDetectorHealthGate(): void {
@@ -1835,10 +1923,10 @@ export class WebApp {
       await this.runPipeline(await this.fileToDataUrl(file), { source: "drop" });
     });
 
-    window.electronAPI?.onCapturedImage(async ({ dataUrl, isTap }) => {
+    window.electronAPI?.onCapturedImage(async ({ dataUrl, captureKind }) => {
       loggers.capture.info("Hotkey capture image received");
       await this.abortVisionWork("new_image");
-      await this.runPipeline(dataUrl, { source: "hotkey", isTap });
+      await this.runPipeline(dataUrl, { source: "hotkey", captureKind });
     });
 
     window.electronAPI?.onCopiedTextForPlayback(async (text: string) => {
@@ -1945,7 +2033,7 @@ export class WebApp {
   }
 
   private getConfigurableHotkeyKeys(): ConfigurableHotkeyKey[] {
-    return ["capture", "copyPlay", "abort", "playPause", "nextChunk", "previousChunk", "volumeUp", "volumeDown", "replayCapture"];
+    return ["capture", "fullCapture", "copyPlay", "abort", "playPause", "nextChunk", "previousChunk", "volumeUp", "volumeDown", "replayCapture"];
   }
 
   private renderHotkeyButtonState(): void {
@@ -2032,6 +2120,7 @@ export class WebApp {
   private getHotkeyLabelKey(key: ConfigurableHotkeyKey): TranslationKey {
     switch (key) {
       case "capture": return "system.captureHotkey";
+      case "fullCapture": return "system.fullCaptureHotkey";
       case "copyPlay": return "system.copyPlayHotkey";
       case "abort": return "system.abortHotkey";
       case "playPause": return "system.playPauseHotkey";

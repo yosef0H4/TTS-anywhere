@@ -74,8 +74,10 @@ Useful launchers:
 
 - `host_both.bat`
 - `host_both_gpu.bat`
-- `host_detect_cpu_ocr_gpu.bat`
-- `host_detect_gpu_ocr_cpu.bat`
+- `host_both_cpu_ocr_gpu.bat`
+- `host_both_gpu_ocr_cpu.bat`
+
+These launchers use `uv` only. Each service pins Python with a local `.python-version`, ensures the selected managed env exists first, and then runs a per-service `launcher.py` inside that env so the launcher can handle sync and runtime package setup without creating a default `.venv`.
 
 Text processing is optional:
 

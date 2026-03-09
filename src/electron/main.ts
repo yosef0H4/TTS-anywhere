@@ -25,21 +25,28 @@ interface BackendLogEntry {
   source: "frontend" | "backend";
 }
 
-interface RecommendedCpuStackUrls {
+interface ManagedRapidServiceUrls {
   detectionBaseUrl: string;
   ocrBaseUrl: string;
-  ttsBaseUrl: string;
 }
 
-interface RecommendedCpuStackStatus {
+type ManagedServiceId = "rapid" | "edge";
+
+interface ManagedServiceStatus {
   state: "stopped" | "starting" | "running" | "failed";
   managed: boolean;
-  urls: RecommendedCpuStackUrls | null;
+  url: string | null;
   error: string | null;
+  urls: ManagedRapidServiceUrls | null;
+}
+
+interface ManagedServicesStatus {
+  rapid: ManagedServiceStatus;
+  edge: ManagedServiceStatus;
 }
 
 interface ManagedStackChild {
-  name: "rapid" | "edge";
+  name: ManagedServiceId;
   child: ChildProcess;
 }
 
@@ -57,6 +64,7 @@ let mainWindow: BrowserWindow | null = null;
 let isPinned = false;
 let currentLogLevel: LogLevel = "info";
 let captureHotkeySession: HotkeySession | null = null;
+let fullCaptureHotkeySession: HotkeySession | null = null;
 let copyHotkeySession: HotkeySession | null = null;
 let abortHotkeySession: HotkeySession | null = null;
 let playbackToggleHotkeySession: HotkeySession | null = null;
@@ -66,6 +74,7 @@ let volumeUpHotkeySession: HotkeySession | null = null;
 let volumeDownHotkeySession: HotkeySession | null = null;
 let replayCaptureHotkeySession: HotkeySession | null = null;
 let activeCaptureHotkey = "ctrl+shift+alt+s";
+let activeFullCaptureHotkey = "ctrl+shift+alt+a";
 let activeCopyHotkey = "ctrl+shift+alt+x";
 let activeAbortHotkey = "ctrl+shift+alt+z";
 let activePlaybackToggleHotkey = "ctrl+shift+alt+space";
@@ -75,6 +84,7 @@ let activeVolumeUpHotkey = "ctrl+shift+alt+up";
 let activeVolumeDownHotkey = "ctrl+shift+alt+down";
 let activeReplayCaptureHotkey = "ctrl+shift+alt+d";
 let captureHotkeyBeforeEdit: string | null = null;
+let fullCaptureHotkeyBeforeEdit: string | null = null;
 let copyHotkeyBeforeEdit: string | null = null;
 let abortHotkeyBeforeEdit: string | null = null;
 let playbackToggleHotkeyBeforeEdit: string | null = null;
@@ -93,17 +103,26 @@ let lastRect: { left: number; top: number; right: number; bottom: number } | nul
 let lastSavedCaptureRect: { left: number; top: number; width: number; height: number } | null = null;
 let frozenCaptureSession: Promise<FrozenCaptureHandle> | null = null;
 let flashOverlayTimer: NodeJS.Timeout | null = null;
-let selectionStartedAt = 0;
 let copyPlayInFlight = false;
 let appCloseInFlight = false;
 let shutdownWatchdog: NodeJS.Timeout | null = null;
-let recommendedCpuStackChildren: ManagedStackChild[] = [];
-let recommendedCpuStackLaunchPromise: Promise<RecommendedCpuStackStatus> | null = null;
-let recommendedCpuStackStatus: RecommendedCpuStackStatus = {
-  state: "stopped",
-  managed: false,
-  urls: null,
-  error: null
+let managedServiceChildren: Partial<Record<ManagedServiceId, ManagedStackChild>> = {};
+let managedServiceLaunchPromises: Partial<Record<ManagedServiceId, Promise<ManagedServiceStatus>>> = {};
+let managedServicesStatus: ManagedServicesStatus = {
+  rapid: {
+    state: "stopped",
+    managed: false,
+    url: null,
+    urls: null,
+    error: null
+  },
+  edge: {
+    state: "stopped",
+    managed: false,
+    url: null,
+    urls: null,
+    error: null
+  }
 };
 const processStartAt = Date.now();
 const startupPhaseBuffer: string[] = [];
@@ -111,9 +130,6 @@ let startupWatchdogDomReady: NodeJS.Timeout | null = null;
 let startupWatchdogRendererMount: NodeJS.Timeout | null = null;
 let startupDomReadySeen = false;
 let startupRendererMountSeen = false;
-
-const CAPTURE_TAP_THRESHOLD_MS = 150;
-const CAPTURE_TAP_MAX_DRIFT_PX = 6;
 
 function processUptimeMs(): number {
   return Date.now() - processStartAt;
@@ -126,6 +142,7 @@ function prefsPath(): string {
 interface NativePrefs {
   alwaysOnTop?: boolean;
   captureHotkey?: string;
+  fullCaptureHotkey?: string;
   copyPlayHotkey?: string;
   captureDrawRectangle?: boolean;
   abortHotkey?: string;
@@ -220,21 +237,30 @@ function runtimeSyncVersionFile(): string {
   return path.join(app.getPath("userData"), "runtime", ".bundled-services-version");
 }
 
-function recommendedCpuStackStatusSnapshot(): RecommendedCpuStackStatus {
+function managedServiceStatusSnapshot(serviceId: ManagedServiceId): ManagedServiceStatus {
+  const status = managedServicesStatus[serviceId];
   return {
-    state: recommendedCpuStackStatus.state,
-    managed: recommendedCpuStackStatus.managed,
-    urls: recommendedCpuStackStatus.urls ? { ...recommendedCpuStackStatus.urls } : null,
-    error: recommendedCpuStackStatus.error
+    ...status,
+    urls: status.urls ? { ...status.urls } : status.urls
   };
 }
 
-function setRecommendedCpuStackStatus(next: Partial<RecommendedCpuStackStatus>): RecommendedCpuStackStatus {
-  recommendedCpuStackStatus = {
-    ...recommendedCpuStackStatus,
-    ...next
+function managedServicesStatusSnapshot(): ManagedServicesStatus {
+  return {
+    rapid: managedServiceStatusSnapshot("rapid"),
+    edge: managedServiceStatusSnapshot("edge")
   };
-  return recommendedCpuStackStatusSnapshot();
+}
+
+function setManagedServiceStatus(serviceId: ManagedServiceId, next: Partial<ManagedServiceStatus>): ManagedServiceStatus {
+  managedServicesStatus = {
+    ...managedServicesStatus,
+    [serviceId]: {
+      ...managedServicesStatus[serviceId],
+      ...next
+    }
+  };
+  return managedServiceStatusSnapshot(serviceId);
 }
 
 function preferredUvCommand(): string {
@@ -347,11 +373,14 @@ function attachManagedChildLogging(name: ManagedStackChild["name"], child: Child
   });
   child.on("exit", (code, signal) => {
     writeBackendLog("info", "stack", `${name}.exit`, { code, signal });
-    recommendedCpuStackChildren = recommendedCpuStackChildren.filter((entry) => entry.child !== child);
-    if (recommendedCpuStackStatus.state === "running" && recommendedCpuStackChildren.length === 0) {
-      setRecommendedCpuStackStatus({
+    if (managedServiceChildren[name]?.child === child) {
+      delete managedServiceChildren[name];
+    }
+    if (managedServicesStatus[name].state === "running") {
+      setManagedServiceStatus(name, {
         state: "stopped",
         managed: false,
+        url: null,
         urls: null,
         error: null
       });
@@ -376,7 +405,7 @@ function spawnManagedChild(
     stdio: ["ignore", "pipe", "pipe"]
   });
   attachManagedChildLogging(name, child);
-  recommendedCpuStackChildren.push({ name, child });
+  managedServiceChildren[name] = { name, child };
   return child;
 }
 
@@ -439,19 +468,6 @@ function terminateChildTree(child: ChildProcess): Promise<void> {
   });
 }
 
-async function stopRecommendedCpuStack(): Promise<RecommendedCpuStackStatus> {
-  recommendedCpuStackLaunchPromise = null;
-  const children = [...recommendedCpuStackChildren].reverse();
-  recommendedCpuStackChildren = [];
-  await Promise.all(children.map(({ child }) => terminateChildTree(child)));
-  return setRecommendedCpuStackStatus({
-    state: "stopped",
-    managed: false,
-    urls: null,
-    error: null
-  });
-}
-
 async function openRuntimeServicesFolder(): Promise<string> {
   const target = app.isPackaged ? syncBundledServicesToRuntime() : servicesBasePath();
   ensureDir(target);
@@ -511,11 +527,18 @@ async function waitForServiceHealth(
   throw new Error(`Service at ${baseUrl} did not become healthy in ${Math.round(timeoutMs / 1000)}s: ${lastError}`);
 }
 
-async function launchRecommendedCpuStackInternal(): Promise<RecommendedCpuStackStatus> {
+function getManagedServicePaths(): {
+  stackRoot: string;
+  uvCacheDir: string;
+  runtimeServicesDir: string;
+  rapidServiceDir: string;
+  edgeServiceDir: string;
+  rapidEnvDir: string;
+  edgeEnvDir: string;
+} {
   if (process.platform !== "win32") {
     throw new Error("Recommended CPU stack launcher is currently Windows-only.");
   }
-
   const stackRoot = recommendedCpuStackRuntimeRoot();
   const uvCacheDir = path.join(stackRoot, "uv-cache");
   const runtimeServicesDir = syncBundledServicesToRuntime();
@@ -530,17 +553,25 @@ async function launchRecommendedCpuStackInternal(): Promise<RecommendedCpuStackS
     throw new Error(`Edge service directory not found: ${edgeServiceDir}`);
   }
   ensureDir(uvCacheDir);
-
-  const rapidPort = await resolveAvailablePort(8091);
-  const edgePort = await resolveAvailablePort(8012);
-  const urls: RecommendedCpuStackUrls = {
-    detectionBaseUrl: `http://127.0.0.1:${rapidPort}`,
-    ocrBaseUrl: `http://127.0.0.1:${rapidPort}`,
-    ttsBaseUrl: `http://127.0.0.1:${edgePort}`
+  return {
+    stackRoot,
+    uvCacheDir,
+    runtimeServicesDir,
+    rapidServiceDir,
+    edgeServiceDir,
+    rapidEnvDir,
+    edgeEnvDir
   };
+}
 
+async function launchRapidServiceInternal(): Promise<ManagedServiceStatus> {
+  const { uvCacheDir, rapidServiceDir, rapidEnvDir } = getManagedServicePaths();
+  const rapidPort = await resolveAvailablePort(8091);
+  const urls: ManagedRapidServiceUrls = {
+    detectionBaseUrl: `http://127.0.0.1:${rapidPort}`,
+    ocrBaseUrl: `http://127.0.0.1:${rapidPort}`
+  };
   const baseEnv = windowsEnv(process.env, { UV_CACHE_DIR: uvCacheDir });
-
   await runManagedCommand(
     "recommendedCpu.rapid.sync",
     preferredUvCommand(),
@@ -579,7 +610,7 @@ async function launchRecommendedCpuStackInternal(): Promise<RecommendedCpuStackS
   );
   writeBackendLog("info", "stack", "recommendedCpu.rapid.started", { pid: rapidChild.pid, port: rapidPort });
   await waitForServiceHealth(
-    urls.detectionBaseUrl,
+    urls.ocrBaseUrl,
     120000,
     (payload) => payload.ok === true
       && typeof payload.features === "object"
@@ -587,7 +618,20 @@ async function launchRecommendedCpuStackInternal(): Promise<RecommendedCpuStackS
       && (payload.features as Record<string, unknown>).detect === true
       && (payload.features as Record<string, unknown>).openai_ocr === true
   );
+  return setManagedServiceStatus("rapid", {
+    state: "running",
+    managed: true,
+    url: urls.ocrBaseUrl,
+    urls,
+    error: null
+  });
+}
 
+async function launchEdgeServiceInternal(): Promise<ManagedServiceStatus> {
+  const { uvCacheDir, edgeServiceDir, edgeEnvDir } = getManagedServicePaths();
+  const edgePort = await resolveAvailablePort(8012);
+  const ttsUrl = `http://127.0.0.1:${edgePort}`;
+  const baseEnv = windowsEnv(process.env, { UV_CACHE_DIR: uvCacheDir });
   await runManagedCommand(
     "recommendedCpu.edge.sync",
     preferredUvCommand(),
@@ -603,48 +647,68 @@ async function launchRecommendedCpuStackInternal(): Promise<RecommendedCpuStackS
     windowsEnv(baseEnv, { UV_PROJECT_ENVIRONMENT: edgeEnvDir })
   );
   writeBackendLog("info", "stack", "recommendedCpu.edge.started", { pid: edgeChild.pid, port: edgePort });
-  await waitForServiceHealth(urls.ttsBaseUrl, 60000, (payload) => payload.ok === true);
-
-  return setRecommendedCpuStackStatus({
+  await waitForServiceHealth(ttsUrl, 60000, (payload) => payload.ok === true);
+  return setManagedServiceStatus("edge", {
     state: "running",
     managed: true,
-    urls,
+    url: ttsUrl,
     error: null
   });
 }
 
-async function launchRecommendedCpuStack(): Promise<RecommendedCpuStackStatus> {
-  if (recommendedCpuStackStatus.state === "running") {
-    return recommendedCpuStackStatusSnapshot();
+async function stopManagedService(serviceId: ManagedServiceId): Promise<ManagedServiceStatus> {
+  delete managedServiceLaunchPromises[serviceId];
+  const child = managedServiceChildren[serviceId]?.child ?? null;
+  if (child) {
+    delete managedServiceChildren[serviceId];
+    await terminateChildTree(child);
   }
-  if (recommendedCpuStackLaunchPromise) {
-    return recommendedCpuStackLaunchPromise;
+  return setManagedServiceStatus(serviceId, {
+    state: "stopped",
+    managed: false,
+    url: null,
+    urls: null,
+    error: null
+  });
+}
+
+async function launchManagedService(serviceId: ManagedServiceId): Promise<ManagedServiceStatus> {
+  const current = managedServicesStatus[serviceId];
+  if (current.state === "running") {
+    return managedServiceStatusSnapshot(serviceId);
+  }
+  if (managedServiceLaunchPromises[serviceId]) {
+    return managedServiceLaunchPromises[serviceId] as Promise<ManagedServiceStatus>;
   }
 
-  setRecommendedCpuStackStatus({
+  setManagedServiceStatus(serviceId, {
     state: "starting",
     managed: false,
+    url: null,
     urls: null,
     error: null
   });
 
-  recommendedCpuStackLaunchPromise = (async () => {
+  managedServiceLaunchPromises[serviceId] = (async () => {
     try {
-      return await launchRecommendedCpuStackInternal();
+      return serviceId === "rapid"
+        ? await launchRapidServiceInternal()
+        : await launchEdgeServiceInternal();
     } catch (error) {
-      await stopRecommendedCpuStack();
-      return setRecommendedCpuStackStatus({
+      await stopManagedService(serviceId);
+      return setManagedServiceStatus(serviceId, {
         state: "failed",
         managed: false,
+        url: null,
         urls: null,
         error: String(error)
       });
     } finally {
-      recommendedCpuStackLaunchPromise = null;
+      delete managedServiceLaunchPromises[serviceId];
     }
   })();
 
-  return recommendedCpuStackLaunchPromise;
+  return managedServiceLaunchPromises[serviceId] as Promise<ManagedServiceStatus>;
 }
 
 function loadPinnedPref(): boolean {
@@ -836,6 +900,8 @@ function disposeNativeResources(): void {
   }
   captureHotkeySession?.stop();
   captureHotkeySession = null;
+  fullCaptureHotkeySession?.stop();
+  fullCaptureHotkeySession = null;
   copyHotkeySession?.stop();
   copyHotkeySession = null;
   abortHotkeySession?.stop();
@@ -1081,12 +1147,6 @@ function sameRect(
   return a.left === b.left && a.top === b.top && a.right === b.right && a.bottom === b.bottom;
 }
 
-function movementDistance(start: { x: number; y: number }, end: { x: number; y: number }): number {
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
-  return Math.hypot(dx, dy);
-}
-
 function beginFrozenCaptureSession(): void {
   if (!selectionStart) return;
   frozenCaptureSession = beginFrozenMonitorCaptureAtPoint(selectionStart.x, selectionStart.y)
@@ -1112,7 +1172,6 @@ function startSelection(point: { x: number; y: number }): void {
   lastCursor = { x: point.x, y: point.y };
   lastRect = null;
   selectionActive = true;
-  selectionStartedAt = Date.now();
   beginFrozenCaptureSession();
   if (drawSelectionRectangle) overlay?.hide();
   diag("capture.start", { x: point.x, y: point.y, hotkey: captureHotkeySession?.getHotkey() });
@@ -1124,14 +1183,12 @@ async function finalizeSelection(point: { x: number; y: number }): Promise<void>
     selectionStart = null;
     lastCursor = null;
     lastRect = null;
-    selectionStartedAt = 0;
     if (drawSelectionRectangle) overlay?.hide();
     return;
   }
 
   lastCursor = { x: point.x, y: point.y };
   const startPoint = { x: selectionStart.x, y: selectionStart.y };
-  const startedAt = selectionStartedAt;
   const rect = buildRect(startPoint, lastCursor);
   const payload = {
     x: rect.left,
@@ -1145,7 +1202,6 @@ async function finalizeSelection(point: { x: number; y: number }): Promise<void>
   selectionStart = null;
   lastCursor = null;
   lastRect = null;
-  selectionStartedAt = 0;
   if (drawSelectionRectangle) overlay?.hide();
 
   let frozen: FrozenCaptureHandle | null = null;
@@ -1153,44 +1209,30 @@ async function finalizeSelection(point: { x: number; y: number }): Promise<void>
     const sessionPromise = frozenCaptureSession ?? beginFrozenMonitorCaptureAtPoint(point.x, point.y);
     frozen = await sessionPromise;
     frozenCaptureSession = null;
-    const elapsedMs = Math.max(0, Date.now() - startedAt);
-    const driftPx = movementDistance(startPoint, point);
-    const isTap = elapsedMs <= CAPTURE_TAP_THRESHOLD_MS && driftPx <= CAPTURE_TAP_MAX_DRIFT_PX;
-
-    let pngBuffer: Buffer;
-    if (isTap) {
-      pngBuffer = await cropFrozenCapture(frozen.id, {
-        x: 0,
-        y: 0,
-        width: frozen.bounds.width,
-        height: frozen.bounds.height
-      });
-    } else {
-      if (payload.width < 1 || payload.height < 1) {
-        throw new Error("Selection rectangle has zero area");
-      }
-      persistLastCaptureRect({
-        left: payload.x,
-        top: payload.y,
-        width: payload.width,
-        height: payload.height
-      });
-      const cropLeft = payload.x - frozen.bounds.left;
-      const cropTop = payload.y - frozen.bounds.top;
-      pngBuffer = await cropFrozenCapture(frozen.id, {
-        x: cropLeft,
-        y: cropTop,
-        width: payload.width,
-        height: payload.height
-      });
+    if (payload.width < 1 || payload.height < 1) {
+      throw new Error("Selection rectangle has zero area");
     }
+    persistLastCaptureRect({
+      left: payload.x,
+      top: payload.y,
+      width: payload.width,
+      height: payload.height
+    });
+    const cropLeft = payload.x - frozen.bounds.left;
+    const cropTop = payload.y - frozen.bounds.top;
+    const pngBuffer = await cropFrozenCapture(frozen.id, {
+      x: cropLeft,
+      y: cropTop,
+      width: payload.width,
+      height: payload.height
+    });
 
     const dataUrl = `data:image/png;base64,${pngBuffer.toString("base64")}`;
-    mainWindow?.webContents.send("capture-image", { dataUrl, isTap });
+    mainWindow?.webContents.send("capture-image", { dataUrl, captureKind: "selection" });
     diag("capture.image.sent", {
-      width: isTap ? frozen.bounds.width : payload.width,
-      height: isTap ? frozen.bounds.height : payload.height,
-      isTap,
+      width: payload.width,
+      height: payload.height,
+      captureKind: "selection",
       frozenAgeMs: Date.now() - frozen.capturedAt
     });
   } catch (error) {
@@ -1236,7 +1278,7 @@ async function replayLastCaptureRect(): Promise<void> {
     });
 
     const dataUrl = `data:image/png;base64,${pngBuffer.toString("base64")}`;
-    mainWindow?.webContents.send("capture-image", { dataUrl, isTap: false });
+    mainWindow?.webContents.send("capture-image", { dataUrl, captureKind: "selection" });
     diag("capture.replay.sent", {
       left: rect.left,
       top: rect.top,
@@ -1249,6 +1291,40 @@ async function replayLastCaptureRect(): Promise<void> {
       error: String(error),
       rect
     });
+  } finally {
+    if (frozen) {
+      try {
+        disposeFrozenCapture(frozen.id);
+      } catch {
+        // best effort
+      }
+    }
+  }
+}
+
+async function captureFullScreenAtPoint(point: { x: number; y: number }): Promise<void> {
+  let frozen: FrozenCaptureHandle | null = null;
+  try {
+    frozen = await beginFrozenMonitorCaptureAtPoint(point.x, point.y);
+    const pngBuffer = await cropFrozenCapture(frozen.id, {
+      x: 0,
+      y: 0,
+      width: frozen.bounds.width,
+      height: frozen.bounds.height
+    });
+
+    const dataUrl = `data:image/png;base64,${pngBuffer.toString("base64")}`;
+    mainWindow?.webContents.send("capture-image", { dataUrl, captureKind: "fullscreen" });
+    diag("capture.fullscreen.sent", {
+      left: frozen.bounds.left,
+      top: frozen.bounds.top,
+      width: frozen.bounds.width,
+      height: frozen.bounds.height,
+      hotkey: fullCaptureHotkeySession?.getHotkey(),
+      frozenAgeMs: Date.now() - frozen.capturedAt
+    });
+  } catch (error) {
+    diag("capture.fullscreen.error", { error: String(error) });
   } finally {
     if (frozen) {
       try {
@@ -1286,7 +1362,7 @@ function normalizeHotkeyLabel(hotkey: string): string {
 function getAllActiveHotkeys(): Array<{ name: string; hotkey: string }> {
   return [
     { name: "capture", hotkey: activeCaptureHotkey },
-    { name: "replay capture", hotkey: activeReplayCaptureHotkey },
+    { name: "full screen capture", hotkey: activeFullCaptureHotkey },
     { name: "copy & play", hotkey: activeCopyHotkey },
     { name: "abort", hotkey: activeAbortHotkey },
     { name: "play/pause", hotkey: activePlaybackToggleHotkey },
@@ -1404,6 +1480,7 @@ app.whenReady().then(() => {
   const nativePrefs = loadNativePrefs();
   isPinned = nativePrefs.alwaysOnTop ?? false;
   activeCaptureHotkey = nativePrefs.captureHotkey ?? activeCaptureHotkey;
+  activeFullCaptureHotkey = nativePrefs.fullCaptureHotkey ?? activeFullCaptureHotkey;
   activeCopyHotkey = nativePrefs.copyPlayHotkey ?? activeCopyHotkey;
   activeAbortHotkey = nativePrefs.abortHotkey ?? activeAbortHotkey;
   activePlaybackToggleHotkey = nativePrefs.playPauseHotkey ?? activePlaybackToggleHotkey;
@@ -1417,6 +1494,7 @@ app.whenReady().then(() => {
   diag("app.native-prefs.loaded", {
     isPinned,
     activeCaptureHotkey,
+    activeFullCaptureHotkey,
     activeCopyHotkey,
     activeAbortHotkey,
     activePlaybackToggleHotkey,
@@ -1446,6 +1524,18 @@ app.whenReady().then(() => {
     }
   });
   diag("app.capture-session.create.end");
+  diag("app.fullscreen-capture-session.create.begin", { hotkey: activeFullCaptureHotkey });
+  fullCaptureHotkeySession = new HotkeySession({
+    initialHotkey: activeFullCaptureHotkey,
+    events: {
+      onHotkeyRegistered: (label) => diag("capture.fullscreen.hotkey.registered", { label }),
+      onHotkeySwitched: (label) => diag("capture.fullscreen.hotkey.switched", { label }),
+      onTriggerUp: (point) => {
+        void captureFullScreenAtPoint(point);
+      }
+    }
+  });
+  diag("app.fullscreen-capture-session.create.end");
   diag("app.copy-session.create.begin", { hotkey: activeCopyHotkey });
   copyHotkeySession = new HotkeySession({
     initialHotkey: activeCopyHotkey,
@@ -1536,6 +1626,9 @@ app.whenReady().then(() => {
   diag("app.capture-session.start.begin");
   captureHotkeySession.start();
   diag("app.capture-session.start.end");
+  diag("app.fullscreen-capture-session.start.begin");
+  fullCaptureHotkeySession.start();
+  diag("app.fullscreen-capture-session.start.end");
   diag("app.copy-session.start.begin");
   copyHotkeySession.start();
   diag("app.copy-session.start.end");
@@ -1614,6 +1707,43 @@ ipcMain.handle("capture:cancel-hotkey-edit", () => {
 
 ipcMain.handle("capture:get-hotkey", () => {
   return getEditableHotkey(captureHotkeySession, activeCaptureHotkey, (value) => { activeCaptureHotkey = value; });
+});
+
+ipcMain.handle("capture-fullscreen:begin-hotkey-edit", () => {
+  return beginEditableHotkey(
+    fullCaptureHotkeySession,
+    activeFullCaptureHotkey,
+    (value) => { fullCaptureHotkeyBeforeEdit = value; },
+    "capture.fullscreen.hotkey.edit.begin"
+  );
+});
+
+ipcMain.handle("capture-fullscreen:apply-hotkey", (_event, hotkey: string) => {
+  return applyEditableHotkey(
+    fullCaptureHotkeySession,
+    hotkey,
+    "full screen capture",
+    (value) => ({ fullCaptureHotkey: value }),
+    (value) => { activeFullCaptureHotkey = value; },
+    (value) => { fullCaptureHotkeyBeforeEdit = value; },
+    "capture.fullscreen.hotkey.edit.applied",
+    activeFullCaptureHotkey
+  );
+});
+
+ipcMain.handle("capture-fullscreen:cancel-hotkey-edit", () => {
+  return cancelEditableHotkey(
+    fullCaptureHotkeySession,
+    fullCaptureHotkeyBeforeEdit,
+    (value) => { activeFullCaptureHotkey = value; },
+    (value) => { fullCaptureHotkeyBeforeEdit = value; },
+    "capture.fullscreen.hotkey.edit.cancelled",
+    activeFullCaptureHotkey
+  );
+});
+
+ipcMain.handle("capture-fullscreen:get-hotkey", () => {
+  return getEditableHotkey(fullCaptureHotkeySession, activeFullCaptureHotkey, (value) => { activeFullCaptureHotkey = value; });
 });
 
 ipcMain.handle("copy:begin-hotkey-edit", () => {
@@ -1925,9 +2055,9 @@ ipcMain.handle("capture:set-draw-rectangle", (_event, enabled: boolean) => {
 ipcMain.handle("capture:get-draw-rectangle", () => drawSelectionRectangle);
 ipcMain.handle("window:get-always-on-top", () => isPinned);
 ipcMain.handle("window:set-always-on-top", (_event, enabled: boolean) => setAlwaysOnTopState(enabled));
-ipcMain.handle("stack:get-recommended-cpu-status", () => recommendedCpuStackStatusSnapshot());
-ipcMain.handle("stack:launch-recommended-cpu", async () => launchRecommendedCpuStack());
-ipcMain.handle("stack:stop-recommended-cpu", async () => stopRecommendedCpuStack());
+ipcMain.handle("stack:get-services-status", () => managedServicesStatusSnapshot());
+ipcMain.handle("stack:launch-service", async (_event, serviceId: ManagedServiceId) => launchManagedService(serviceId));
+ipcMain.handle("stack:stop-service", async (_event, serviceId: ManagedServiceId) => stopManagedService(serviceId));
 ipcMain.handle("stack:open-runtime-services", async () => openRuntimeServicesFolder());
 
 ipcMain.on("startup:phase", (_event, payload: { phase?: string; details?: Record<string, unknown> }) => {
@@ -1979,16 +2109,15 @@ app.on("window-all-closed", () => {
 app.on("will-quit", () => {
   diag("app.will-quit.begin");
   clearShutdownWatchdog();
-  for (const { child } of recommendedCpuStackChildren) {
-    terminateChildTreeSync(child);
+  for (const entry of Object.values(managedServiceChildren)) {
+    if (!entry) continue;
+    terminateChildTreeSync(entry.child);
   }
-  recommendedCpuStackChildren = [];
-  setRecommendedCpuStackStatus({
-    state: "stopped",
-    managed: false,
-    urls: null,
-    error: null
-  });
+  managedServiceChildren = {};
+  managedServicesStatus = {
+    rapid: { state: "stopped", managed: false, url: null, urls: null, error: null },
+    edge: { state: "stopped", managed: false, url: null, urls: null, error: null }
+  };
   disposeNativeResources();
   diag("app.will-quit.end");
 });

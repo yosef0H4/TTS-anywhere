@@ -15,21 +15,12 @@ GPU_ENV_NAME = ".venv-gpu"
 TORCH_CUDA_INDEX_URL = "https://download.pytorch.org/whl/cu129"
 GPU_TORCH_PACKAGE = "torch==2.8.0"
 GPU_TORCHVISION_PACKAGE = "torchvision==0.23.0"
-GPU_RUNTIME_PACKAGES = [
-    "transformers==4.57.3",
-    "accelerate==1.12.0",
-    "timm==1.0.24",
-    "peft==0.18.1",
-]
+GPU_RUNTIME_PACKAGES = ["transformers==4.57.3", "accelerate==1.12.0", "timm==1.0.24", "peft==0.18.1"]
 FLASH_ATTN_WHEEL_URL = (
     "https://huggingface.co/ussoewwin/Flash-Attention-2_for_Windows/resolve/main/"
     "flash_attn-2.8.2+cu129torch2.8.0cxx11abiTRUE-cp311-cp311-win_amd64.whl"
 )
-LOCAL_UV_CACHE_DIR = (
-    Path(tempfile.gettempdir()) / "tts-electron-h2ovl-uv-cache"
-    if os.name == "nt"
-    else PROJECT_ROOT / ".cache" / "uv"
-)
+LOCAL_UV_CACHE_DIR = Path(tempfile.gettempdir()) / "tts-electron-h2ovl-uv-cache" if os.name == "nt" else PROJECT_ROOT / ".cache" / "uv"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -44,9 +35,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def venv_python(env_dir: Path) -> Path:
-    if os.name == "nt":
-        return env_dir / "Scripts" / "python.exe"
-    return env_dir / "bin" / "python"
+    return env_dir / "Scripts" / "python.exe" if os.name == "nt" else env_dir / "bin" / "python"
 
 
 def run(cmd: list[str], *, env: dict[str, str]) -> None:
@@ -75,13 +64,7 @@ def _installed_version(env_python_path: Path, package: str) -> str | None:
         "except m.PackageNotFoundError:\n"
         "    print(json.dumps({'version': None}))\n"
     )
-    result = subprocess.run(
-        [str(env_python_path), "-c", script],
-        cwd=PROJECT_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    result = subprocess.run([str(env_python_path), "-c", script], cwd=PROJECT_ROOT, check=True, capture_output=True, text=True)
     payload = json.loads(result.stdout)
     version = payload.get("version")
     return version if isinstance(version, str) else None
@@ -119,19 +102,9 @@ def _python_version(env_python_path: Path) -> str:
 
 
 def _cuda_available(env_python_path: Path) -> bool:
-    script = (
-        "import json\n"
-        "import torch\n"
-        "print(json.dumps({'cuda': bool(torch.cuda.is_available())}))\n"
-    )
+    script = "import json, torch; print(json.dumps({'cuda': bool(torch.cuda.is_available())}))\n"
     try:
-        result = subprocess.run(
-            [str(env_python_path), "-c", script],
-            cwd=PROJECT_ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        result = subprocess.run([str(env_python_path), "-c", script], cwd=PROJECT_ROOT, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError:
         return False
     payload = json.loads(result.stdout)
@@ -200,17 +173,7 @@ def ensure_env(args: argparse.Namespace) -> Path:
         _ensure_package(env_python_path, env, package_spec)
     if os.name == "nt" and not _flash_attn_installed(env_python_path):
         try:
-            run(
-                [
-                    "uv",
-                    "pip",
-                    "install",
-                    "--python",
-                    str(env_python_path),
-                    args.flash_attn_wheel_url,
-                ],
-                env=env,
-            )
+            run(["uv", "pip", "install", "--python", str(env_python_path), args.flash_attn_wheel_url], env=env)
         except subprocess.CalledProcessError:
             print("[h2ovl] Flash-Attention wheel install failed; falling back to SDPA.")
     return env_python_path
@@ -232,13 +195,7 @@ def ensure_cuda(env_python_path: Path) -> None:
         "  payload['flash_attn'] = False\n"
         "print(json.dumps(payload))\n"
     )
-    result = subprocess.run(
-        [str(env_python_path), "-c", script],
-        cwd=PROJECT_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    result = subprocess.run([str(env_python_path), "-c", script], cwd=PROJECT_ROOT, check=True, capture_output=True, text=True)
     payload = json.loads(result.stdout)
     if not payload.get("cuda"):
         raise SystemExit("H2OVL requires a CUDA GPU and will not start without one.")
@@ -257,16 +214,7 @@ def main(argv: list[str] | None = None) -> None:
     env.setdefault("HF_HOME", str(PROJECT_ROOT / ".hf-cache"))
     env["PYTHONPATH"] = str(PROJECT_ROOT / "src") + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
 
-    cmd = [
-        str(env_python_path),
-        "-m",
-        "h2ovl_text_processing.cli",
-        "serve",
-        "--host",
-        args.host,
-        "--port",
-        str(args.port),
-    ]
+    cmd = [str(env_python_path), "-m", "h2ovl_text_processing.cli", "serve", "--host", args.host, "--port", str(args.port)]
     try:
         subprocess.run(cmd, cwd=PROJECT_ROOT, env=env, check=True)
     except KeyboardInterrupt:

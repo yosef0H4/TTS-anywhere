@@ -61,6 +61,7 @@ describe("settings store", () => {
     expect(store.load().system.abortHotkey).toBe("ctrl+shift+alt+z");
     expect(store.load().system.playPauseHotkey).toBe("ctrl+shift+alt+space");
     expect(store.load().system.replayCaptureHotkey).toBe("ctrl+shift+alt+d");
+    expect(store.load().system.fullCaptureHotkey).toBe(DEFAULT_CONFIG.system.fullCaptureHotkey);
     expect(store.load().textProcessing.detectionMode).toBe("fullscreen_only");
     expect(store.load().textProcessing.detectorBaseUrl).toBe("http://127.0.0.1:8093");
   });
@@ -133,5 +134,21 @@ describe("settings store", () => {
     const restored = new SettingsStore().load();
 
     expect(restored.ui.language).toBe(resolveUiLanguage());
+  });
+
+  it("fills missing full screen capture hotkey from defaults", () => {
+    const legacy = {
+      ...DEFAULT_CONFIG,
+      system: {
+        ...DEFAULT_CONFIG.system
+      }
+    };
+    delete (legacy.system as Partial<typeof legacy.system>).fullCaptureHotkey;
+
+    localStorage.setItem(LEGACY_SETTINGS_KEYS[0], JSON.stringify(legacy));
+    const restored = new SettingsStore().load();
+
+    expect(restored.system.captureHotkey).toBe(DEFAULT_CONFIG.system.captureHotkey);
+    expect(restored.system.fullCaptureHotkey).toBe(DEFAULT_CONFIG.system.fullCaptureHotkey);
   });
 });

@@ -15,11 +15,7 @@ GPU_ENV_NAME = ".venv-gpu"
 CPU_PADDLE_PACKAGE = "paddlepaddle==3.2.0"
 GPU_PADDLE_PACKAGE = "paddlepaddle-gpu==3.3.0"
 DEFAULT_GPU_INDEX_URL = "https://www.paddlepaddle.org.cn/packages/stable/cu129/"
-LOCAL_UV_CACHE_DIR = (
-    Path(tempfile.gettempdir()) / "tts-electron-paddle-uv-cache"
-    if os.name == "nt"
-    else PROJECT_ROOT / ".cache" / "uv"
-)
+LOCAL_UV_CACHE_DIR = Path(tempfile.gettempdir()) / "tts-electron-paddle-uv-cache" if os.name == "nt" else PROJECT_ROOT / ".cache" / "uv"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -28,8 +24,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=8093)
     parser.add_argument("--enable-detect", action="store_true")
     parser.add_argument("--enable-openai-ocr", action="store_true")
-    parser.add_argument("--detect-device", default="auto", choices=["auto", "cpu", "gpu"])
-    parser.add_argument("--ocr-device", default="auto", choices=["auto", "cpu", "gpu"])
+    parser.add_argument("--detect-device", default="cpu", choices=["cpu", "gpu"])
+    parser.add_argument("--ocr-device", default="cpu", choices=["cpu", "gpu"])
     parser.add_argument("--detect-model-name", default="PP-OCRv5_mobile_det")
     parser.add_argument("--ocr-detection-model-name", default="PP-OCRv5_mobile_det")
     parser.add_argument("--ocr-recognition-model-name", default="PP-OCRv5_mobile_rec")
@@ -43,9 +39,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def venv_python(env_dir: Path) -> Path:
-    if os.name == "nt":
-        return env_dir / "Scripts" / "python.exe"
-    return env_dir / "bin" / "python"
+    return env_dir / "Scripts" / "python.exe" if os.name == "nt" else env_dir / "bin" / "python"
 
 
 def run(cmd: list[str], *, env: dict[str, str]) -> None:
@@ -104,11 +98,8 @@ def _runtime_matches(env_python_path: Path, package_spec: str) -> bool:
 
 
 def choose_env(args: argparse.Namespace) -> tuple[Path, bool]:
-    requested = {
-        args.detect_device if args.enable_detect else "cpu",
-        args.ocr_device if args.enable_openai_ocr else "cpu",
-    }
-    needs_gpu_env = any(device in {"auto", "gpu"} for device in requested)
+    requested = {args.detect_device if args.enable_detect else "cpu", args.ocr_device if args.enable_openai_ocr else "cpu"}
+    needs_gpu_env = any(device == "gpu" for device in requested)
     env_name = GPU_ENV_NAME if needs_gpu_env else CPU_ENV_NAME
     return PROJECT_ROOT / env_name, needs_gpu_env
 
@@ -123,22 +114,12 @@ def ensure_env(args: argparse.Namespace) -> Path:
     run(["uv", "sync", "--group", "dev", "--inexact"], env=env)
 
     env_python_path = venv_python(env_dir)
-
     if needs_gpu_env:
         if not _runtime_matches(env_python_path, args.gpu_package):
             uninstall_if_present(env_python_path, "paddlepaddle")
             uninstall_if_present(env_python_path, "paddlepaddle-gpu")
             run(
-                [
-                    "uv",
-                    "pip",
-                    "install",
-                    "--python",
-                    str(env_python_path),
-                    "--index-url",
-                    args.gpu_index_url.strip(),
-                    args.gpu_package,
-                ],
+                ["uv", "pip", "install", "--python", str(env_python_path), "--index-url", args.gpu_index_url.strip(), args.gpu_package],
                 env=env,
             )
     else:
@@ -156,7 +137,6 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit("At least one feature must be enabled: --enable-detect and/or --enable-openai-ocr")
 
     env_python_path = ensure_env(args)
-
     cmd = [
         str(env_python_path),
         "-m",
@@ -203,7 +183,6 @@ def main(argv: list[str] | None = None) -> None:
     try:
         subprocess.run(cmd, cwd=PROJECT_ROOT, env=env, check=True)
     except KeyboardInterrupt:
-        # Treat Ctrl+C from the console as a normal shutdown path.
         return
 
 

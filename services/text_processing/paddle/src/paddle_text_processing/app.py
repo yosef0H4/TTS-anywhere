@@ -53,8 +53,8 @@ class DetectSettings(BaseModel):
 class RuntimeConfig(BaseModel):
     enable_detect: bool = False
     enable_openai_ocr: bool = False
-    detect_device: str = "auto"
-    ocr_device: str = "auto"
+    detect_device: str = "cpu"
+    ocr_device: str = "cpu"
     detect_model_name: str = DEFAULT_DETECT_MODEL_NAME
     ocr_detection_model_name: str = DEFAULT_DETECT_MODEL_NAME
     ocr_recognition_model_name: str = DEFAULT_RECOGNITION_MODEL_NAME
@@ -94,7 +94,7 @@ class DeviceResolution:
 
 def normalize_device(device: str) -> str:
     value = device.strip().lower()
-    if value not in {"auto", "cpu", "gpu"}:
+    if value not in {"cpu", "gpu"}:
         raise ValueError(f"Unsupported device: {device}")
     return value
 
@@ -116,8 +116,6 @@ def resolve_device(device: str) -> DeviceResolution:
     requested = normalize_device(device)
     if requested == "cpu":
         return DeviceResolution(requested="cpu", resolved="cpu")
-    if requested == "auto":
-        return DeviceResolution(requested="auto", resolved="gpu" if _cuda_available() else "cpu")
     if requested == "gpu":
         if not _cuda_available():
             raise RuntimeError("GPU device requested but Paddle CUDA support is not available")
@@ -182,7 +180,7 @@ class PaddleDetectFactory:
     def get_engine(self) -> Any:
         if self._detector is None:
             if paddle is None:
-                raise RuntimeError("Paddle runtime is not installed. Use launcher.py to install the CPU or GPU runtime.")
+                raise RuntimeError("Paddle runtime is not installed. Use the Windows host scripts to install the CPU or GPU runtime.")
             if TextDetection is None:
                 raise RuntimeError("PaddleOCR TextDetection is not installed")
 
@@ -213,7 +211,7 @@ class PaddleOcrFactory:
     def get_engine(self) -> Any:
         if self._ocr is None:
             if paddle is None:
-                raise RuntimeError("Paddle runtime is not installed. Use launcher.py to install the CPU or GPU runtime.")
+                raise RuntimeError("Paddle runtime is not installed. Use the Windows host scripts to install the CPU or GPU runtime.")
             if PaddleOCR is None:
                 raise RuntimeError("PaddleOCR is not installed")
 

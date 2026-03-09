@@ -48,8 +48,8 @@ class DetectSettings(BaseModel):
 class RuntimeConfig(BaseModel):
     enable_detect: bool = False
     enable_openai_ocr: bool = False
-    detect_execution_provider: str = "auto"
-    ocr_execution_provider: str = "auto"
+    detect_execution_provider: str = "cpu"
+    ocr_execution_provider: str = "cpu"
 
 
 class OpenAiImageUrl(BaseModel):
@@ -82,7 +82,7 @@ class ProviderResolution:
 
 def normalize_execution_provider(provider: str) -> str:
     value = provider.strip().lower()
-    if value not in {"auto", "cpu", "cuda", "dml"}:
+    if value not in {"cpu", "cuda", "dml"}:
         raise ValueError(f"Unsupported execution provider: {provider}")
     return value
 
@@ -102,12 +102,6 @@ def resolve_execution_provider(provider: str) -> ProviderResolution:
 
     if requested == "cpu":
         return ProviderResolution(requested="cpu", resolved="cpu")
-    if requested == "auto":
-        if "cudaexecutionprovider" in available:
-            return ProviderResolution(requested="auto", resolved="cuda")
-        if "dmlexecutionprovider" in available:
-            return ProviderResolution(requested="auto", resolved="dml")
-        return ProviderResolution(requested="auto", resolved="cpu")
     if requested == "cuda":
         if "cudaexecutionprovider" not in available:
             raise RuntimeError("CUDA execution provider requested but not available in this environment")
@@ -314,7 +308,7 @@ def create_app(
     detect_engine_factory: RapidEngineFactory | None = None,
     ocr_engine_factory: RapidEngineFactory | None = None,
 ) -> FastAPI:
-    runtime = config or RuntimeConfig(enable_detect=True, enable_openai_ocr=False, detect_execution_provider="auto", ocr_execution_provider="auto")
+    runtime = config or RuntimeConfig(enable_detect=True, enable_openai_ocr=False, detect_execution_provider="cpu", ocr_execution_provider="cpu")
     resolved_detect_provider = resolve_execution_provider(runtime.detect_execution_provider)
     resolved_ocr_provider = resolve_execution_provider(runtime.ocr_execution_provider)
     detect_engines = detect_engine_factory or RapidEngineFactory(resolved_detect_provider)
