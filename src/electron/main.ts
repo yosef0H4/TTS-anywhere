@@ -15,6 +15,12 @@ import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  GeminiSdkLlmService,
+  GeminiSdkTtsService,
+  fetchGeminiModels,
+  fetchGeminiVoices
+} from "./gemini-sdk-service.js";
+import {
   ElectronProviderLlmService,
   ElectronProviderTtsService,
   extractErrorMessage,
@@ -134,6 +140,8 @@ let managedServiceChildren: Partial<Record<ManagedServiceId, ManagedStackChild>>
 let managedServiceLaunchPromises: Partial<Record<ManagedServiceId, Promise<ManagedServiceStatus>>> = {};
 const providerLlmService = new ElectronProviderLlmService();
 const providerTtsService = new ElectronProviderTtsService();
+const geminiSdkLlmService = new GeminiSdkLlmService();
+const geminiSdkTtsService = new GeminiSdkTtsService();
 const providerAbortControllers = new Map<string, AbortController>();
 let managedServicesStatus: ManagedServicesStatus = {
   rapid: {
@@ -2410,9 +2418,11 @@ ipcMain.handle("stack:stop-service", async (_event, serviceId: ManagedServiceId)
 ipcMain.handle("stack:open-runtime-services", async () => openRuntimeServicesFolder());
 ipcMain.handle("provider:extract-text", async (_event, request: ProviderOcrRequest) => {
   const controller = createProviderController(request.requestId);
-  diag("provider.ocr.request.begin", { requestId: request.requestId, model: request.config.model });
+  diag("provider.ocr.request.begin", { requestId: request.requestId, provider: request.provider, model: request.config.model });
   try {
-    const result = await providerLlmService.extractTextFromImage(request.imageDataUrl, request.config, { signal: controller.signal });
+    const result = request.provider === "gemini_sdk"
+      ? await geminiSdkLlmService.extractTextFromImage(request.imageDataUrl, request.config)
+      : await providerLlmService.extractTextFromImage(request.imageDataUrl, request.config, { signal: controller.signal });
     diag("provider.ocr.request.end", { requestId: request.requestId, textLength: result.text.length });
     return result;
   } catch (error) {
@@ -2425,14 +2435,20 @@ ipcMain.handle("provider:extract-text", async (_event, request: ProviderOcrReque
 });
 ipcMain.handle("provider:start-ocr-stream", async (_event, request: ProviderOcrRequest) => {
   const controller = createProviderController(request.requestId);
-  diag("provider.ocr.stream.begin", { requestId: request.requestId, model: request.config.model });
+  diag("provider.ocr.stream.begin", { requestId: request.requestId, provider: request.provider, model: request.config.model });
   try {
-    const result = await providerLlmService.extractTextFromImageStream(request.imageDataUrl, request.config, {
-      signal: controller.signal,
-      onToken: (token) => {
-        sendProviderOcrStreamEvent({ requestId: request.requestId, type: "token", token });
-      }
-    });
+    const result = request.provider === "gemini_sdk"
+      ? await geminiSdkLlmService.extractTextFromImageStream(request.imageDataUrl, request.config, {
+          onToken: (token) => {
+            sendProviderOcrStreamEvent({ requestId: request.requestId, type: "token", token });
+          }
+        })
+      : await providerLlmService.extractTextFromImageStream(request.imageDataUrl, request.config, {
+          signal: controller.signal,
+          onToken: (token) => {
+            sendProviderOcrStreamEvent({ requestId: request.requestId, type: "token", token });
+          }
+        });
     sendProviderOcrStreamEvent({ requestId: request.requestId, type: "done", text: result.text });
     diag("provider.ocr.stream.end", { requestId: request.requestId, textLength: result.text.length });
     return result;
@@ -2447,15 +2463,17 @@ ipcMain.handle("provider:start-ocr-stream", async (_event, request: ProviderOcrR
 });
 ipcMain.handle("provider:synthesize-text", async (_event, request: ProviderTtsRequest) => {
   const controller = createProviderController(request.requestId);
-  diag("provider.tts.request.begin", { requestId: request.requestId, model: request.config.model, voice: request.config.voice });
+  diag("provider.tts.request.begin", { requestId: request.requestId, provider: request.provider, model: request.config.model, voice: request.config.voice });
   try {
-    const result = await providerTtsService.synthesize(
-      request.text,
-      request.config,
-      request.timeoutMs === undefined
-        ? { signal: controller.signal }
-        : { signal: controller.signal, timeoutMs: request.timeoutMs }
-    );
+    const result = request.provider === "gemini_sdk"
+      ? await geminiSdkTtsService.synthesize(request.text, request.config)
+      : await providerTtsService.synthesize(
+          request.text,
+          request.config,
+          request.timeoutMs === undefined
+            ? { signal: controller.signal }
+            : { signal: controller.signal, timeoutMs: request.timeoutMs }
+        );
     diag("provider.tts.request.end", { requestId: request.requestId, bytes: result.audioBytes.byteLength });
     return result;
   } catch (error) {
@@ -2467,10 +2485,14 @@ ipcMain.handle("provider:synthesize-text", async (_event, request: ProviderTtsRe
   }
 });
 ipcMain.handle("provider:fetch-models", async (_event, request: ProviderModelsRequest) => {
-  return fetchProviderModels(request);
+  return request.provider === "gemini_sdk"
+    ? fetchGeminiModels(request.apiKey, request.kind)
+    : fetchProviderModels(request);
 });
 ipcMain.handle("provider:fetch-voices", async (_event, request: ProviderVoicesRequest) => {
-  return fetchProviderVoices(request);
+  return request.provider === "gemini_sdk"
+    ? fetchGeminiVoices()
+    : fetchProviderVoices(request);
 });
 ipcMain.handle("provider:cancel-request", (_event, requestId: string) => {
   providerAbortControllers.get(requestId)?.abort();

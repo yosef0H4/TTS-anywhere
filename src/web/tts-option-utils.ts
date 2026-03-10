@@ -7,8 +7,8 @@ export type VoiceListQuery = Record<string, string | undefined> & {
   model?: string;
 };
 
-export function makeOptionCacheKey(namespace: string, baseUrl: string, apiKey: string, discriminator = ""): string {
-  return `${namespace}|${baseUrl.trim()}|${apiKey.trim()}|${discriminator.trim()}`;
+export function makeOptionCacheKey(namespace: string, baseUrl: string | undefined, apiKey: string, discriminator = ""): string {
+  return `${namespace}|${baseUrl?.trim() ?? ""}|${apiKey.trim()}|${discriminator.trim()}`;
 }
 
 export function joinApiPath(baseUrl: string, path: string, query: Record<string, string | undefined> = {}): string {

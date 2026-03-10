@@ -1,4 +1,8 @@
-export interface LlmConfig {
+export type OcrProvider = "openai_compatible" | "gemini_sdk";
+export type TtsProvider = "openai_compatible" | "gemini_sdk";
+export type ThinkingMode = "provider_default" | "low" | "off";
+
+export interface OpenAiCompatibleLlmSettings {
   baseUrl: string;
   apiKey: string;
   model: string;
@@ -7,15 +11,49 @@ export interface LlmConfig {
   ocrStreamingEnabled: boolean;
   ocrStreamingFallbackToNonStream: boolean;
   maxTokens: number;
+  thinkingMode: ThinkingMode;
 }
 
-export interface TtsConfig {
+export interface GeminiSdkLlmSettings {
+  apiKey: string;
+  model: string;
+  promptTemplate: string;
+  imageDetail: "low" | "high";
+  ocrStreamingEnabled: boolean;
+  ocrStreamingFallbackToNonStream: boolean;
+  maxTokens: number;
+  thinkingMode: ThinkingMode;
+}
+
+export interface LlmConfig extends OpenAiCompatibleLlmSettings {
+  provider: OcrProvider;
+  openaiCompatible: OpenAiCompatibleLlmSettings;
+  geminiSdk: GeminiSdkLlmSettings;
+}
+
+export interface OpenAiCompatibleTtsSettings {
   baseUrl: string;
   apiKey: string;
   model: string;
   voice: string;
   format: "mp3" | "wav" | "opus";
   speed: number;
+  thinkingMode: ThinkingMode;
+}
+
+export interface GeminiSdkTtsSettings {
+  apiKey: string;
+  model: string;
+  voice: string;
+  format: "mp3" | "wav" | "opus";
+  speed: number;
+  thinkingMode: ThinkingMode;
+}
+
+export interface TtsConfig extends OpenAiCompatibleTtsSettings {
+  provider: TtsProvider;
+  openaiCompatible: OpenAiCompatibleTtsSettings;
+  geminiSdk: GeminiSdkTtsSettings;
 }
 
 export interface ReadingConfig {

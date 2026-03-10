@@ -11,7 +11,7 @@ import {
   setLogLevel
 } from "../core/logging";
 import { DEFAULT_CONFIG } from "../core/models/defaults";
-import type { AppConfig, ReadingTimeline } from "../core/models/types";
+import type { AppConfig, OcrProvider, ReadingTimeline, TtsProvider } from "../core/models/types";
 import {
   createChunkRecords,
   getPrefetchTargets,
@@ -238,6 +238,135 @@ export class WebApp {
 
   private t(key: TranslationKey, params?: Record<string, string | number>): string {
     return translate(this.currentLanguage(), key, params);
+  }
+
+  private currentOcrProvider(): OcrProvider {
+    return this.config.llm.provider;
+  }
+
+  private currentTtsProvider(): TtsProvider {
+    return this.config.tts.provider;
+  }
+
+  private saveActiveLlmToSelectedProvider(): void {
+    if (this.currentOcrProvider() === "gemini_sdk") {
+      this.config.llm.geminiSdk = {
+        apiKey: this.config.llm.apiKey,
+        model: this.config.llm.model,
+        promptTemplate: this.config.llm.promptTemplate,
+        imageDetail: this.config.llm.imageDetail,
+        ocrStreamingEnabled: this.config.llm.ocrStreamingEnabled,
+        ocrStreamingFallbackToNonStream: this.config.llm.ocrStreamingFallbackToNonStream,
+        maxTokens: this.config.llm.maxTokens,
+        thinkingMode: this.config.llm.thinkingMode
+      };
+      return;
+    }
+    this.config.llm.openaiCompatible = {
+      baseUrl: this.config.llm.baseUrl,
+      apiKey: this.config.llm.apiKey,
+      model: this.config.llm.model,
+      promptTemplate: this.config.llm.promptTemplate,
+      imageDetail: this.config.llm.imageDetail,
+      ocrStreamingEnabled: this.config.llm.ocrStreamingEnabled,
+      ocrStreamingFallbackToNonStream: this.config.llm.ocrStreamingFallbackToNonStream,
+      maxTokens: this.config.llm.maxTokens,
+      thinkingMode: this.config.llm.thinkingMode
+    };
+  }
+
+  private applySelectedLlmProviderSettings(): void {
+    if (this.currentOcrProvider() === "gemini_sdk") {
+      const settings = this.config.llm.geminiSdk;
+      this.config.llm.baseUrl = "";
+      this.config.llm.apiKey = settings.apiKey;
+      this.config.llm.model = settings.model;
+      this.config.llm.promptTemplate = settings.promptTemplate;
+      this.config.llm.imageDetail = settings.imageDetail;
+      this.config.llm.ocrStreamingEnabled = settings.ocrStreamingEnabled;
+      this.config.llm.ocrStreamingFallbackToNonStream = settings.ocrStreamingFallbackToNonStream;
+      this.config.llm.maxTokens = settings.maxTokens;
+      this.config.llm.thinkingMode = settings.thinkingMode;
+      return;
+    }
+    const settings = this.config.llm.openaiCompatible;
+    this.config.llm.baseUrl = settings.baseUrl;
+    this.config.llm.apiKey = settings.apiKey;
+    this.config.llm.model = settings.model;
+    this.config.llm.promptTemplate = settings.promptTemplate;
+    this.config.llm.imageDetail = settings.imageDetail;
+    this.config.llm.ocrStreamingEnabled = settings.ocrStreamingEnabled;
+    this.config.llm.ocrStreamingFallbackToNonStream = settings.ocrStreamingFallbackToNonStream;
+    this.config.llm.maxTokens = settings.maxTokens;
+    this.config.llm.thinkingMode = settings.thinkingMode;
+  }
+
+  private saveActiveTtsToSelectedProvider(): void {
+    if (this.currentTtsProvider() === "gemini_sdk") {
+      this.config.tts.geminiSdk = {
+        apiKey: this.config.tts.apiKey,
+        model: this.config.tts.model,
+        voice: this.config.tts.voice,
+        format: this.config.tts.format,
+        speed: this.config.tts.speed,
+        thinkingMode: this.config.tts.thinkingMode
+      };
+      return;
+    }
+    this.config.tts.openaiCompatible = {
+      baseUrl: this.config.tts.baseUrl,
+      apiKey: this.config.tts.apiKey,
+      model: this.config.tts.model,
+      voice: this.config.tts.voice,
+      format: this.config.tts.format,
+      speed: this.config.tts.speed,
+      thinkingMode: this.config.tts.thinkingMode
+    };
+  }
+
+  private applySelectedTtsProviderSettings(): void {
+    if (this.currentTtsProvider() === "gemini_sdk") {
+      const settings = this.config.tts.geminiSdk;
+      this.config.tts.baseUrl = "";
+      this.config.tts.apiKey = settings.apiKey;
+      this.config.tts.model = settings.model;
+      this.config.tts.voice = settings.voice;
+      this.config.tts.format = settings.format;
+      this.config.tts.speed = settings.speed;
+      this.config.tts.thinkingMode = settings.thinkingMode;
+      return;
+    }
+    const settings = this.config.tts.openaiCompatible;
+    this.config.tts.baseUrl = settings.baseUrl;
+    this.config.tts.apiKey = settings.apiKey;
+    this.config.tts.model = settings.model;
+    this.config.tts.voice = settings.voice;
+    this.config.tts.format = settings.format;
+    this.config.tts.speed = settings.speed;
+    this.config.tts.thinkingMode = settings.thinkingMode;
+  }
+
+  private renderProviderVisibility(): void {
+    this.must<HTMLElement>("llm-url-group").hidden = this.currentOcrProvider() === "gemini_sdk";
+    this.must<HTMLElement>("tts-url-group").hidden = this.currentTtsProvider() === "gemini_sdk";
+  }
+
+  private switchOcrProvider(provider: OcrProvider): void {
+    this.syncLlmInputsToActiveConfig();
+    this.saveActiveLlmToSelectedProvider();
+    this.config.llm.provider = provider;
+    this.applySelectedLlmProviderSettings();
+    this.renderConfig();
+    this.store.save(this.config);
+  }
+
+  private switchTtsProvider(provider: TtsProvider): void {
+    this.syncTtsInputsToActiveConfig();
+    this.saveActiveTtsToSelectedProvider();
+    this.config.tts.provider = provider;
+    this.applySelectedTtsProviderSettings();
+    this.renderConfig();
+    this.store.save(this.config);
   }
 
   private getHotkeyBindingConfig(key: ConfigurableHotkeyKey): HotkeyBindingConfig {
@@ -811,7 +940,9 @@ export class WebApp {
       void this.fetchLlmModels(true);
     });
     this.must<HTMLButtonElement>("llm-prompt-reset").addEventListener("click", () => {
-      this.must<HTMLInputElement>("llm-prompt").value = DEFAULT_CONFIG.llm.promptTemplate;
+      this.must<HTMLInputElement>("llm-prompt").value = this.currentOcrProvider() === "gemini_sdk"
+        ? DEFAULT_CONFIG.llm.geminiSdk.promptTemplate
+        : DEFAULT_CONFIG.llm.openaiCompatible.promptTemplate;
       this.syncConfigFromInputs();
     });
 
@@ -825,17 +956,20 @@ export class WebApp {
 
     this.llmModelSelect.on("change", (value: string) => {
       this.config.llm.model = value;
+      this.saveActiveLlmToSelectedProvider();
       this.store.save(this.config);
     });
 
     this.ttsModelSelect.on("change", (value: string) => {
       this.config.tts.model = value;
+      this.saveActiveTtsToSelectedProvider();
       this.store.save(this.config);
       void this.handleTtsModelChange(value);
     });
 
     this.ttsVoiceSelect.on("change", (value: string) => {
       this.config.tts.voice = value;
+      this.saveActiveTtsToSelectedProvider();
       this.store.save(this.config);
     });
   }
@@ -850,12 +984,26 @@ export class WebApp {
   }
 
   private async fetchLlmModels(force: boolean): Promise<void> {
-    const options = await this.fetchOptionsFromElectron(this.config.llm.baseUrl, this.config.llm.apiKey, force, "llm-models");
+    const options = await this.fetchOptionsFromElectron(
+      this.currentOcrProvider(),
+      "ocr",
+      this.currentOcrProvider() === "openai_compatible" ? this.config.llm.baseUrl : undefined,
+      this.config.llm.apiKey,
+      force,
+      "llm-models"
+    );
     this.applyOptions(this.llmModelSelect, options, this.config.llm.model);
   }
 
   private async fetchTtsModels(force: boolean): Promise<void> {
-    const options = await this.fetchOptionsFromElectron(this.config.tts.baseUrl, this.config.tts.apiKey, force, "tts-models");
+    const options = await this.fetchOptionsFromElectron(
+      this.currentTtsProvider(),
+      "tts",
+      this.currentTtsProvider() === "openai_compatible" ? this.config.tts.baseUrl : undefined,
+      this.config.tts.apiKey,
+      force,
+      "tts-models"
+    );
     this.applyOptions(this.ttsModelSelect, options, this.config.tts.model);
   }
 
@@ -865,17 +1013,17 @@ export class WebApp {
       this.setStatus(this.t("stack.electronOnly"));
       return;
     }
-    const base = this.config.tts.baseUrl;
+    const base = this.currentTtsProvider() === "openai_compatible" ? this.config.tts.baseUrl : undefined;
     const key = this.config.tts.apiKey;
     const model = this.config.tts.model;
-    const cacheKey = this.makeCacheKey("tts-voices", base, key, model);
+    const cacheKey = this.makeCacheKey(`tts-voices:${this.currentTtsProvider()}`, base, key, model);
 
     if (!force && this.optionCache.has(cacheKey)) {
       this.applyOptions(this.ttsVoiceSelect, this.optionCache.get(cacheKey) ?? [], this.config.tts.voice);
       return;
     }
 
-    const voices = await this.fetchTtsVoicesFromElectron(base, key, model);
+    const voices = await this.fetchTtsVoicesFromElectron(this.currentTtsProvider(), base, key, model);
     this.optionCache.set(cacheKey, voices);
     this.applyOptions(this.ttsVoiceSelect, voices, this.config.tts.voice);
   }
@@ -887,6 +1035,7 @@ export class WebApp {
     const selectedVoice = this.resolveVoiceSelectionForModel(value, currentVoice);
     if (selectedVoice !== this.config.tts.voice) {
       this.config.tts.voice = selectedVoice;
+      this.saveActiveTtsToSelectedProvider();
       this.store.save(this.config);
     }
     this.applyOptions(
@@ -1020,10 +1169,14 @@ export class WebApp {
   private applyManagedServiceUrls(serviceId: ManagedServiceId, status: ManagedServiceStatus): void {
     if (serviceId === "rapid" && status.urls) {
       this.config.textProcessing.detectorBaseUrl = status.urls.detectionBaseUrl;
-      this.config.llm.baseUrl = status.urls.ocrBaseUrl;
+      this.config.llm.openaiCompatible.baseUrl = status.urls.ocrBaseUrl;
+      this.config.llm.provider = "openai_compatible";
+      this.applySelectedLlmProviderSettings();
     }
     if (serviceId === "edge" && status.url) {
-      this.config.tts.baseUrl = status.url;
+      this.config.tts.openaiCompatible.baseUrl = status.url;
+      this.config.tts.provider = "openai_compatible";
+      this.applySelectedTtsProviderSettings();
     }
     this.store.save(this.config);
     this.renderConfig();
@@ -1099,12 +1252,18 @@ export class WebApp {
     this.setStatus(this.t("status.runtimeServicesOpened"));
   }
 
-  private async fetchTtsVoicesFromElectron(baseUrl: string, apiKey: string, model: string): Promise<NamedOption[]> {
+  private async fetchTtsVoicesFromElectron(provider: TtsProvider, baseUrl: string | undefined, apiKey: string, model: string): Promise<NamedOption[]> {
     if (!this.providerCatalog) {
       return this.config.tts.voice ? [{ value: this.config.tts.voice, label: this.config.tts.voice }] : [];
     }
     try {
-      const options = await this.providerCatalog.fetchVoices({ baseUrl, apiKey, model });
+      const options = await this.providerCatalog.fetchVoices({
+        provider,
+        kind: "tts",
+        apiKey,
+        model,
+        ...(baseUrl ? { baseUrl } : {})
+      });
       if (options.length > 0) {
         this.updateStatusChip("tts-status-chip", this.t("statuschip.voicesLoaded"), "ok");
         return options;
@@ -1120,7 +1279,9 @@ export class WebApp {
   }
 
   private async fetchOptionsFromElectron(
-    baseUrl: string,
+    provider: OcrProvider | TtsProvider,
+    kind: "ocr" | "tts",
+    baseUrl: string | undefined,
     apiKey: string,
     force: boolean,
     namespace: string
@@ -1131,13 +1292,18 @@ export class WebApp {
       if (namespace.startsWith("tts")) this.updateStatusChip("tts-status-chip", this.t("stack.electronOnly"), "idle");
       return [];
     }
-    const cacheKey = this.makeCacheKey(namespace, baseUrl, apiKey);
+    const cacheKey = this.makeCacheKey(`${namespace}:${provider}`, baseUrl, apiKey);
     if (!force && this.optionCache.has(cacheKey)) {
       return this.optionCache.get(cacheKey) ?? [];
     }
 
     try {
-      const options = await this.providerCatalog.fetchModels({ baseUrl, apiKey });
+      const options = await this.providerCatalog.fetchModels({
+        provider,
+        kind,
+        apiKey,
+        ...(baseUrl ? { baseUrl } : {})
+      });
       this.optionCache.set(cacheKey, options);
       if (force) {
         this.setStatus(this.t("status.refetched", { namespace }));
@@ -1180,15 +1346,20 @@ export class WebApp {
   }
 
   private currentCachedTtsVoices(model: string = this.config.tts.model): NamedOption[] {
-    return this.optionCache.get(this.makeCacheKey("tts-voices", this.config.tts.baseUrl, this.config.tts.apiKey, model)) ?? [];
+    const baseUrl = this.currentTtsProvider() === "openai_compatible" ? this.config.tts.baseUrl : undefined;
+    return this.optionCache.get(this.makeCacheKey(`tts-voices:${this.currentTtsProvider()}`, baseUrl, this.config.tts.apiKey, model)) ?? [];
   }
 
-  private makeCacheKey(namespace: string, baseUrl: string, apiKey: string, discriminator = ""): string {
+  private makeCacheKey(namespace: string, baseUrl: string | undefined, apiKey: string, discriminator = ""): string {
     return makeOptionCacheKey(namespace, baseUrl, apiKey, discriminator);
   }
 
-  private withApiBaseUrlHint(message: string, kind: "ocr" | "tts", baseUrl: string): string {
-    const normalized = baseUrl.trim().replace(/\/+$/, "");
+  private withApiBaseUrlHint(message: string, kind: "ocr" | "tts", baseUrl: string | undefined): string {
+    const provider = kind === "ocr" ? this.currentOcrProvider() : this.currentTtsProvider();
+    if (provider !== "openai_compatible") {
+      return message;
+    }
+    const normalized = baseUrl?.trim().replace(/\/+$/, "") ?? "";
     if (!normalized || normalized.endsWith("/v1")) {
       return message;
     }
@@ -1289,6 +1460,14 @@ export class WebApp {
       this.renderConfig();
       this.store.save(this.config);
     });
+    this.must<HTMLSelectElement>("llm-provider").addEventListener("change", () => {
+      const value = this.must<HTMLSelectElement>("llm-provider").value;
+      this.switchOcrProvider(value === "gemini_sdk" ? "gemini_sdk" : "openai_compatible");
+    });
+    this.must<HTMLSelectElement>("tts-provider").addEventListener("change", () => {
+      const value = this.must<HTMLSelectElement>("tts-provider").value;
+      this.switchTtsProvider(value === "gemini_sdk" ? "gemini_sdk" : "openai_compatible");
+    });
 
     const basicIds = [
       "llm-url",
@@ -1296,9 +1475,11 @@ export class WebApp {
       "llm-prompt",
       "llm-image-detail",
       "llm-max-tokens",
+      "llm-thinking-mode",
       "detector-url",
       "tts-url",
       "tts-key",
+      "tts-thinking-mode",
       "chunk-min",
       "chunk-max",
       "clean-text-before-tts",
@@ -1360,6 +1541,8 @@ export class WebApp {
     });
     this.must<HTMLButtonElement>("btn-reset-settings").addEventListener("click", () => {
       Object.assign(this.config, JSON.parse(JSON.stringify(DEFAULT_CONFIG)) as AppConfig);
+      this.applySelectedLlmProviderSettings();
+      this.applySelectedTtsProviderSettings();
       this.renderConfig();
       this.store.save(this.config);
       this.updateTimelineFromRawText();
@@ -1533,12 +1716,8 @@ export class WebApp {
   }
 
   private syncConfigFromInputs(): void {
-    this.config.llm.baseUrl = this.must<HTMLInputElement>("llm-url").value;
-    this.config.llm.apiKey = this.must<HTMLInputElement>("llm-key").value;
-    this.config.llm.promptTemplate = this.must<HTMLInputElement>("llm-prompt").value;
-    this.config.llm.imageDetail = this.must<HTMLSelectElement>("llm-image-detail").value as AppConfig["llm"]["imageDetail"];
-    const maxTokens = Number(this.must<HTMLInputElement>("llm-max-tokens").value);
-    this.config.llm.maxTokens = Number.isFinite(maxTokens) && maxTokens > 0 ? Math.floor(maxTokens) : 4096;
+    this.config.llm.provider = this.must<HTMLSelectElement>("llm-provider").value === "gemini_sdk" ? "gemini_sdk" : "openai_compatible";
+    this.syncLlmInputsToActiveConfig();
     const detectionMode = this.must<HTMLSelectElement>("detector-mode").value;
     this.config.textProcessing.detectionMode = detectionMode === "off"
       || detectionMode === "fullscreen_only"
@@ -1547,8 +1726,8 @@ export class WebApp {
       ? detectionMode
       : "off";
     this.config.textProcessing.detectorBaseUrl = this.must<HTMLInputElement>("detector-url").value;
-    this.config.tts.baseUrl = this.must<HTMLInputElement>("tts-url").value;
-    this.config.tts.apiKey = this.must<HTMLInputElement>("tts-key").value;
+    this.config.tts.provider = this.must<HTMLSelectElement>("tts-provider").value === "gemini_sdk" ? "gemini_sdk" : "openai_compatible";
+    this.syncTtsInputsToActiveConfig();
     const minWords = Number(this.must<HTMLInputElement>("chunk-min").value);
     const maxWords = Number(this.must<HTMLInputElement>("chunk-max").value);
     this.config.reading.minWordsPerChunk = Number.isFinite(minWords) ? Math.max(1, Math.floor(minWords)) : 1;
@@ -1585,22 +1764,49 @@ export class WebApp {
     this.config.system.captureDrawRectangle = this.must<HTMLInputElement>("capture-draw-rectangle").checked;
     this.config.ui.showChunkDiagnostics = this.must<HTMLInputElement>("show-chunk-diagnostics").checked;
     this.config.ui.language = this.must<HTMLSelectElement>("ui-language").value === "ar" ? "ar" : "en";
+    this.saveActiveLlmToSelectedProvider();
+    this.saveActiveTtsToSelectedProvider();
     this.applyUiState();
     this.store.save(this.config);
     this.updateTimelineFromRawText();
   }
 
+  private syncLlmInputsToActiveConfig(): void {
+    this.config.llm.baseUrl = this.must<HTMLInputElement>("llm-url").value;
+    this.config.llm.apiKey = this.must<HTMLInputElement>("llm-key").value;
+    this.config.llm.promptTemplate = this.must<HTMLInputElement>("llm-prompt").value;
+    this.config.llm.imageDetail = this.must<HTMLSelectElement>("llm-image-detail").value as AppConfig["llm"]["imageDetail"];
+    const maxTokens = Number(this.must<HTMLInputElement>("llm-max-tokens").value);
+    this.config.llm.maxTokens = Number.isFinite(maxTokens) && maxTokens > 0 ? Math.floor(maxTokens) : 4096;
+    this.config.llm.thinkingMode = this.readThinkingMode("llm-thinking-mode");
+  }
+
+  private syncTtsInputsToActiveConfig(): void {
+    this.config.tts.baseUrl = this.must<HTMLInputElement>("tts-url").value;
+    this.config.tts.apiKey = this.must<HTMLInputElement>("tts-key").value;
+    this.config.tts.thinkingMode = this.readThinkingMode("tts-thinking-mode");
+  }
+
+  private readThinkingMode(id: "llm-thinking-mode" | "tts-thinking-mode"): "provider_default" | "low" | "off" {
+    const value = this.must<HTMLSelectElement>(id).value;
+    return value === "provider_default" || value === "low" ? value : "off";
+  }
+
   private renderConfig(): void {
     this.must<HTMLSelectElement>("ui-language").value = this.config.ui.language;
+    this.must<HTMLSelectElement>("llm-provider").value = this.currentOcrProvider();
     this.must<HTMLInputElement>("llm-url").value = this.config.llm.baseUrl;
     this.must<HTMLInputElement>("llm-key").value = this.config.llm.apiKey;
     this.must<HTMLInputElement>("llm-prompt").value = this.config.llm.promptTemplate;
     this.must<HTMLSelectElement>("llm-image-detail").value = this.config.llm.imageDetail;
     this.must<HTMLInputElement>("llm-max-tokens").value = String(this.config.llm.maxTokens);
+    this.must<HTMLSelectElement>("llm-thinking-mode").value = this.config.llm.thinkingMode;
     this.must<HTMLSelectElement>("detector-mode").value = this.config.textProcessing.detectionMode;
     this.must<HTMLInputElement>("detector-url").value = this.config.textProcessing.detectorBaseUrl;
+    this.must<HTMLSelectElement>("tts-provider").value = this.currentTtsProvider();
     this.must<HTMLInputElement>("tts-url").value = this.config.tts.baseUrl;
     this.must<HTMLInputElement>("tts-key").value = this.config.tts.apiKey;
+    this.must<HTMLSelectElement>("tts-thinking-mode").value = this.config.tts.thinkingMode;
     this.must<HTMLInputElement>("chunk-min").value = String(this.config.reading.minWordsPerChunk);
     this.must<HTMLInputElement>("chunk-max").value = String(this.config.reading.maxWordsPerChunk);
     this.must<HTMLInputElement>("clean-text-before-tts").checked = this.config.reading.cleanTextBeforeTts;
@@ -1643,6 +1849,7 @@ export class WebApp {
 
     this.applyUiState();
     this.applyLanguage();
+    this.renderProviderVisibility();
 
     this.applyOptions(this.llmModelSelect, [{ value: this.config.llm.model, label: this.config.llm.model }], this.config.llm.model);
     this.applyOptions(this.ttsModelSelect, [{ value: this.config.tts.model, label: this.config.tts.model }], this.config.tts.model);

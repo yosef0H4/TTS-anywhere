@@ -39,6 +39,26 @@ function normalizeOpenAiBaseUrl(baseUrl: string): string {
   return trimmed;
 }
 
+function resolveReasoningEffort(model: string, thinkingMode: "provider_default" | "low" | "off" | undefined): "none" | "low" | null {
+  const normalized = model.trim().toLowerCase();
+  if (thinkingMode === "off") {
+    return normalized.includes("gemini-3") ? "low" : "none";
+  }
+  if (thinkingMode === "low") {
+    return "low";
+  }
+  if (thinkingMode === "provider_default") {
+    return null;
+  }
+  if (normalized.includes("gemini-2.5")) {
+    return "none";
+  }
+  if (normalized.includes("gemini-3")) {
+    return "low";
+  }
+  return null;
+}
+
 function extractErrorMessage(error: unknown): string {
   if (typeof error === "object" && error !== null) {
     const record = error as Record<string, unknown>;
@@ -76,10 +96,12 @@ export class OpenAiCompatibleLlmService {
     const done = loggers.api.time("ocr.request");
     try {
       loggers.api.info("OCR request started", { endpoint, model: config.model, imageBytes: dataUrl.length });
+      const reasoningEffort = resolveReasoningEffort(config.model, config.thinkingMode);
       const response = await this.clientFactory(config).chat.completions.create({
         model: config.model,
         messages,
-        max_tokens: config.maxTokens
+        max_tokens: config.maxTokens,
+        ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {})
       }, options?.signal ? { signal: options.signal } : undefined);
 
       const text = (response as { choices?: Array<{ message?: { content?: string | null } }> }).choices?.[0]?.message?.content?.trim() ?? "";
@@ -113,11 +135,13 @@ export class OpenAiCompatibleLlmService {
 
     try {
       loggers.api.info("OCR stream started", { endpoint, model: config.model, imageBytes: dataUrl.length });
+      const reasoningEffort = resolveReasoningEffort(config.model, config.thinkingMode);
       const stream = await this.clientFactory(config).chat.completions.create({
         model: config.model,
         messages,
         stream: true,
-        max_tokens: config.maxTokens
+        max_tokens: config.maxTokens,
+        ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {})
       }, options?.signal ? { signal: options.signal } : undefined);
 
       for await (const chunk of stream as AsyncIterable<{ choices?: Array<{ delta?: { content?: string | null } }> }>) {

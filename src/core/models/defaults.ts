@@ -3,22 +3,64 @@ import { resolveUiLanguage } from "./locale";
 
 export const DEFAULT_CONFIG: AppConfig = {
   llm: {
-    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+    provider: "gemini_sdk",
+    baseUrl: "",
     apiKey: "",
     model: "models/gemini-2.5-flash-lite",
     promptTemplate: "Extract all text from this image. Return only the extracted text, no additional commentary.",
     imageDetail: "low",
     ocrStreamingEnabled: true,
     ocrStreamingFallbackToNonStream: true,
-    maxTokens: 4096
+    maxTokens: 4096,
+    thinkingMode: "off",
+    openaiCompatible: {
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+      apiKey: "",
+      model: "models/gemini-2.5-flash-lite",
+      promptTemplate: "Extract all text from this image. Return only the extracted text, no additional commentary.",
+      imageDetail: "low",
+      ocrStreamingEnabled: true,
+      ocrStreamingFallbackToNonStream: true,
+      maxTokens: 4096,
+      thinkingMode: "off"
+    },
+    geminiSdk: {
+      apiKey: "",
+      model: "models/gemini-2.5-flash-lite",
+      promptTemplate: "Extract all text from this image. Return only the extracted text, no additional commentary.",
+      imageDetail: "low",
+      ocrStreamingEnabled: true,
+      ocrStreamingFallbackToNonStream: true,
+      maxTokens: 4096,
+      thinkingMode: "off"
+    }
   },
   tts: {
-    baseUrl: "https://api.openai.com/v1",
+    provider: "gemini_sdk",
+    baseUrl: "",
     apiKey: "",
-    model: "gpt-4o-mini-tts",
-    voice: "alloy",
-    format: "mp3",
-    speed: 1
+    model: "gemini-2.5-flash-preview-tts",
+    voice: "Kore",
+    format: "wav",
+    speed: 1,
+    thinkingMode: "off",
+    openaiCompatible: {
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "",
+      model: "gpt-4o-mini-tts",
+      voice: "alloy",
+      format: "mp3",
+      speed: 1,
+      thinkingMode: "off"
+    },
+    geminiSdk: {
+      apiKey: "",
+      model: "gemini-2.5-flash-preview-tts",
+      voice: "Kore",
+      format: "wav",
+      speed: 1,
+      thinkingMode: "off"
+    }
   },
   reading: {
     cleanTextBeforeTts: false,

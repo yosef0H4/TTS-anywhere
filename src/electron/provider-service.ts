@@ -14,6 +14,14 @@ function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.trim().replace(/\/+$/, "");
 }
 
+function requireBaseUrl(baseUrl: string | undefined): string {
+  const normalized = baseUrl?.trim() ?? "";
+  if (!normalized) {
+    throw new Error("OpenAI-compatible provider requires a base URL");
+  }
+  return normalized;
+}
+
 function createClient(baseUrl: string, apiKey: string): OpenAI {
   return new OpenAI({
     baseURL: normalizeBaseUrl(baseUrl),
@@ -94,16 +102,42 @@ function parseOptions(payload: unknown): ProviderOption[] {
   return [];
 }
 
+function resolveReasoningEffort(
+  model: string,
+  thinkingMode: "provider_default" | "low" | "off" | undefined
+): "none" | "low" | null {
+  const normalized = model.trim().toLowerCase();
+  if (thinkingMode === "off") {
+    return normalized.includes("gemini-3") ? "low" : "none";
+  }
+  if (thinkingMode === "low") {
+    return "low";
+  }
+  if (thinkingMode === "provider_default") {
+    return null;
+  }
+  if (normalized.includes("gemini-2.5")) {
+    return "none";
+  }
+  if (normalized.includes("gemini-3")) {
+    return "low";
+  }
+  return null;
+}
+
 export class ElectronProviderLlmService {
   async extractTextFromImage(
     dataUrl: string,
     config: ProviderLlmConfig,
     options?: { signal?: AbortSignal }
   ): Promise<ProviderTextResult> {
-    const response = await createClient(config.baseUrl, config.apiKey).chat.completions.create({
+    const baseUrl = requireBaseUrl(config.baseUrl);
+    const reasoningEffort = resolveReasoningEffort(config.model, config.thinkingMode);
+    const response = await createClient(baseUrl, config.apiKey).chat.completions.create({
       model: config.model,
       messages: buildMessages(dataUrl, config),
-      max_tokens: config.maxTokens
+      max_tokens: config.maxTokens,
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {})
     }, options?.signal ? { signal: options.signal } : undefined);
 
     const text = response.choices?.[0]?.message?.content?.trim() ?? "";
@@ -119,11 +153,14 @@ export class ElectronProviderLlmService {
     options?: { signal?: AbortSignal; onToken?: (token: string) => void }
   ): Promise<ProviderTextResult> {
     let fullText = "";
-    const stream = await createClient(config.baseUrl, config.apiKey).chat.completions.create({
+    const baseUrl = requireBaseUrl(config.baseUrl);
+    const reasoningEffort = resolveReasoningEffort(config.model, config.thinkingMode);
+    const stream = await createClient(baseUrl, config.apiKey).chat.completions.create({
       model: config.model,
       messages: buildMessages(dataUrl, config),
       stream: true,
-      max_tokens: config.maxTokens
+      max_tokens: config.maxTokens,
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {})
     }, options?.signal ? { signal: options.signal } : undefined);
 
     for await (const chunk of stream as AsyncIterable<{ choices?: Array<{ delta?: { content?: string | null } }> }>) {
@@ -148,6 +185,7 @@ export class ElectronProviderTtsService {
     config: ProviderTtsConfig,
     options?: { signal?: AbortSignal; timeoutMs?: number }
   ): Promise<ProviderAudioResult> {
+    const baseUrl = requireBaseUrl(config.baseUrl);
     const timeoutMs = Math.max(1000, options?.timeoutMs ?? 30000);
     const timeoutController = new AbortController();
     const mergedController = new AbortController();
@@ -160,7 +198,7 @@ export class ElectronProviderTtsService {
     options?.signal?.addEventListener("abort", onAbort);
 
     try {
-      const response = await createClient(config.baseUrl, config.apiKey).audio.speech.create({
+      const response = await createClient(baseUrl, config.apiKey).audio.speech.create({
         model: config.model,
         input: text,
         voice: config.voice,
@@ -183,7 +221,7 @@ export class ElectronProviderTtsService {
 }
 
 export async function fetchProviderModels(request: ProviderModelsRequest): Promise<ProviderOption[]> {
-  const response = await fetch(joinApiPath(request.baseUrl, "/models"), {
+  const response = await fetch(joinApiPath(requireBaseUrl(request.baseUrl), "/models"), {
     headers: authHeaders(request.apiKey)
   });
   if (!response.ok) {
@@ -194,10 +232,11 @@ export async function fetchProviderModels(request: ProviderModelsRequest): Promi
 }
 
 export async function fetchProviderVoices(request: ProviderVoicesRequest): Promise<ProviderOption[]> {
+  const baseUrl = requireBaseUrl(request.baseUrl);
   const candidates = ["/voices", "/audio/voices", "/models"];
   for (const path of candidates) {
     try {
-      const response = await fetch(joinApiPath(request.baseUrl, path, { model: request.model }), {
+      const response = await fetch(joinApiPath(baseUrl, path, { model: request.model }), {
         headers: authHeaders(request.apiKey)
       });
       if (!response.ok) continue;

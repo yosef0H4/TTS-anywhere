@@ -1,6 +1,6 @@
 import { DEFAULT_CONFIG } from "../models/defaults";
 import { resolveUiLanguage } from "../models/locale";
-import type { AppConfig } from "../models/types";
+import type { AppConfig, GeminiSdkLlmSettings, GeminiSdkTtsSettings, OpenAiCompatibleLlmSettings, OpenAiCompatibleTtsSettings } from "../models/types";
 
 export const SETTINGS_KEY = "tts-anywhere:settings";
 export const LEGACY_SETTINGS_KEYS = ["tts-snipper:settings"] as const;
@@ -16,8 +16,8 @@ export class SettingsStore {
       const migratedPanels = this.mergePanels(parsed.ui?.panels);
       const migratedTextProcessing = this.mergeTextProcessing(parsed.textProcessing);
       return {
-        llm: { ...DEFAULT_CONFIG.llm, ...parsed.llm },
-        tts: { ...DEFAULT_CONFIG.tts, ...parsed.tts },
+        llm: this.mergeLlm(parsed.llm),
+        tts: this.mergeTts(parsed.tts),
         reading: { ...DEFAULT_CONFIG.reading, ...parsed.reading },
         ui: {
           ...DEFAULT_CONFIG.ui,
@@ -104,6 +104,138 @@ export class SettingsStore {
 
   private cloneDefaults(): AppConfig {
     return JSON.parse(JSON.stringify(DEFAULT_CONFIG)) as AppConfig;
+  }
+
+  private mergeLlm(llm: unknown): AppConfig["llm"] {
+    const defaults = DEFAULT_CONFIG.llm;
+    if (!llm || typeof llm !== "object") {
+      return { ...defaults, openaiCompatible: { ...defaults.openaiCompatible }, geminiSdk: { ...defaults.geminiSdk } };
+    }
+
+    const value = llm as Record<string, unknown>;
+    const openaiCompatible: OpenAiCompatibleLlmSettings = {
+      ...defaults.openaiCompatible,
+      ...((value.openaiCompatible as Partial<OpenAiCompatibleLlmSettings> | undefined) ?? {})
+    };
+    const geminiSdk: GeminiSdkLlmSettings = {
+      ...defaults.geminiSdk,
+      ...((value.geminiSdk as Partial<GeminiSdkLlmSettings> | undefined) ?? {})
+    };
+    const legacyFlat = value as Partial<OpenAiCompatibleLlmSettings>;
+    const migratedProvider = value.provider === "gemini_sdk" || value.provider === "openai_compatible"
+      ? value.provider
+      : "openai_compatible";
+
+    if (!value.openaiCompatible) {
+      Object.assign(openaiCompatible, {
+        baseUrl: typeof legacyFlat.baseUrl === "string" ? legacyFlat.baseUrl : openaiCompatible.baseUrl,
+        apiKey: typeof legacyFlat.apiKey === "string" ? legacyFlat.apiKey : openaiCompatible.apiKey,
+        model: typeof legacyFlat.model === "string" ? legacyFlat.model : openaiCompatible.model,
+        promptTemplate: typeof legacyFlat.promptTemplate === "string" ? legacyFlat.promptTemplate : openaiCompatible.promptTemplate,
+        imageDetail: legacyFlat.imageDetail === "high" || legacyFlat.imageDetail === "low" ? legacyFlat.imageDetail : openaiCompatible.imageDetail,
+        ocrStreamingEnabled: typeof legacyFlat.ocrStreamingEnabled === "boolean" ? legacyFlat.ocrStreamingEnabled : openaiCompatible.ocrStreamingEnabled,
+        ocrStreamingFallbackToNonStream: typeof legacyFlat.ocrStreamingFallbackToNonStream === "boolean" ? legacyFlat.ocrStreamingFallbackToNonStream : openaiCompatible.ocrStreamingFallbackToNonStream,
+        maxTokens: typeof legacyFlat.maxTokens === "number" ? legacyFlat.maxTokens : openaiCompatible.maxTokens,
+        thinkingMode: value.thinkingMode === "provider_default" || value.thinkingMode === "low" || value.thinkingMode === "off"
+          ? value.thinkingMode
+          : openaiCompatible.thinkingMode
+      });
+    }
+
+    const active = migratedProvider === "gemini_sdk"
+      ? {
+          baseUrl: defaults.baseUrl,
+          apiKey: geminiSdk.apiKey,
+          model: geminiSdk.model,
+          promptTemplate: geminiSdk.promptTemplate,
+          imageDetail: geminiSdk.imageDetail,
+          ocrStreamingEnabled: geminiSdk.ocrStreamingEnabled,
+          ocrStreamingFallbackToNonStream: geminiSdk.ocrStreamingFallbackToNonStream,
+          maxTokens: geminiSdk.maxTokens,
+          thinkingMode: geminiSdk.thinkingMode
+        }
+      : {
+          baseUrl: openaiCompatible.baseUrl,
+          apiKey: openaiCompatible.apiKey,
+          model: openaiCompatible.model,
+          promptTemplate: openaiCompatible.promptTemplate,
+          imageDetail: openaiCompatible.imageDetail,
+          ocrStreamingEnabled: openaiCompatible.ocrStreamingEnabled,
+          ocrStreamingFallbackToNonStream: openaiCompatible.ocrStreamingFallbackToNonStream,
+          maxTokens: openaiCompatible.maxTokens,
+          thinkingMode: openaiCompatible.thinkingMode
+        };
+
+    return {
+      ...defaults,
+      ...active,
+      provider: migratedProvider,
+      openaiCompatible,
+      geminiSdk
+    };
+  }
+
+  private mergeTts(tts: unknown): AppConfig["tts"] {
+    const defaults = DEFAULT_CONFIG.tts;
+    if (!tts || typeof tts !== "object") {
+      return { ...defaults, openaiCompatible: { ...defaults.openaiCompatible }, geminiSdk: { ...defaults.geminiSdk } };
+    }
+
+    const value = tts as Record<string, unknown>;
+    const openaiCompatible: OpenAiCompatibleTtsSettings = {
+      ...defaults.openaiCompatible,
+      ...((value.openaiCompatible as Partial<OpenAiCompatibleTtsSettings> | undefined) ?? {})
+    };
+    const geminiSdk: GeminiSdkTtsSettings = {
+      ...defaults.geminiSdk,
+      ...((value.geminiSdk as Partial<GeminiSdkTtsSettings> | undefined) ?? {})
+    };
+    const legacyFlat = value as Partial<OpenAiCompatibleTtsSettings>;
+    const migratedProvider = value.provider === "gemini_sdk" || value.provider === "openai_compatible"
+      ? value.provider
+      : "openai_compatible";
+
+    if (!value.openaiCompatible) {
+      Object.assign(openaiCompatible, {
+        baseUrl: typeof legacyFlat.baseUrl === "string" ? legacyFlat.baseUrl : openaiCompatible.baseUrl,
+        apiKey: typeof legacyFlat.apiKey === "string" ? legacyFlat.apiKey : openaiCompatible.apiKey,
+        model: typeof legacyFlat.model === "string" ? legacyFlat.model : openaiCompatible.model,
+        voice: typeof legacyFlat.voice === "string" ? legacyFlat.voice : openaiCompatible.voice,
+        format: legacyFlat.format === "mp3" || legacyFlat.format === "wav" || legacyFlat.format === "opus" ? legacyFlat.format : openaiCompatible.format,
+        speed: typeof legacyFlat.speed === "number" ? legacyFlat.speed : openaiCompatible.speed,
+        thinkingMode: value.thinkingMode === "provider_default" || value.thinkingMode === "low" || value.thinkingMode === "off"
+          ? value.thinkingMode
+          : openaiCompatible.thinkingMode
+      });
+    }
+
+    const active = migratedProvider === "gemini_sdk"
+      ? {
+          baseUrl: defaults.baseUrl,
+          apiKey: geminiSdk.apiKey,
+          model: geminiSdk.model,
+          voice: geminiSdk.voice,
+          format: geminiSdk.format,
+          speed: geminiSdk.speed,
+          thinkingMode: geminiSdk.thinkingMode
+        }
+      : {
+          baseUrl: openaiCompatible.baseUrl,
+          apiKey: openaiCompatible.apiKey,
+          model: openaiCompatible.model,
+          voice: openaiCompatible.voice,
+          format: openaiCompatible.format,
+          speed: openaiCompatible.speed,
+          thinkingMode: openaiCompatible.thinkingMode
+        };
+
+    return {
+      ...defaults,
+      ...active,
+      provider: migratedProvider,
+      openaiCompatible,
+      geminiSdk
+    };
   }
 
   private mergeTextProcessing(textProcessing: unknown): AppConfig["textProcessing"] {

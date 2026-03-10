@@ -1,6 +1,74 @@
 import { describe, expect, it, vi } from "vitest";
 import { OpenAiCompatibleLlmService, OpenAiCompatibleTtsService } from "../core/services/openai-compatible-client";
 
+function makeLlmConfig(overrides: Record<string, unknown> = {}) {
+  return {
+    provider: "openai_compatible" as const,
+    baseUrl: "https://example.com/v1",
+    apiKey: "k",
+    model: "m",
+    promptTemplate: "Extract",
+    imageDetail: "low" as const,
+    ocrStreamingEnabled: true,
+    ocrStreamingFallbackToNonStream: true,
+    maxTokens: 4096,
+    thinkingMode: "off" as const,
+    openaiCompatible: {
+      baseUrl: "https://example.com/v1",
+      apiKey: "k",
+      model: "m",
+      promptTemplate: "Extract",
+      imageDetail: "low" as const,
+      ocrStreamingEnabled: true,
+      ocrStreamingFallbackToNonStream: true,
+      maxTokens: 4096,
+      thinkingMode: "off" as const
+    },
+    geminiSdk: {
+      apiKey: "k",
+      model: "models/gemini-2.5-flash-lite",
+      promptTemplate: "Extract",
+      imageDetail: "low" as const,
+      ocrStreamingEnabled: true,
+      ocrStreamingFallbackToNonStream: true,
+      maxTokens: 4096,
+      thinkingMode: "off" as const
+    },
+    ...overrides
+  };
+}
+
+function makeTtsConfig(overrides: Record<string, unknown> = {}) {
+  return {
+    provider: "openai_compatible" as const,
+    baseUrl: "https://example.com/v1",
+    apiKey: "k",
+    model: "tts-model",
+    voice: "alloy",
+    format: "mp3" as const,
+    speed: 1,
+    thinkingMode: "off" as const,
+    openaiCompatible: {
+      baseUrl: "https://example.com/v1",
+      apiKey: "k",
+      model: "tts-model",
+      voice: "alloy",
+      format: "mp3" as const,
+      speed: 1,
+      thinkingMode: "off" as const
+    },
+    geminiSdk: {
+      apiKey: "k",
+      model: "gemini-2.5-flash-preview-tts",
+      voice: "Kore",
+      format: "wav" as const,
+      speed: 1,
+      thinkingMode: "off" as const
+    },
+    ...overrides
+  };
+}
+
 describe("openai compatible clients", () => {
   it("calls chat/completions for OCR", async () => {
     const create = vi.fn().mockResolvedValue({
@@ -15,16 +83,7 @@ describe("openai compatible clients", () => {
       }
     }));
 
-    const result = await service.extractTextFromImage("data:image/png;base64,abc", {
-      baseUrl: "https://example.com/v1",
-      apiKey: "k",
-      model: "m",
-      promptTemplate: "Extract",
-      imageDetail: "low",
-      ocrStreamingEnabled: true,
-      ocrStreamingFallbackToNonStream: true,
-      maxTokens: 4096
-    });
+    const result = await service.extractTextFromImage("data:image/png;base64,abc", makeLlmConfig());
 
     expect(create).toHaveBeenCalledOnce();
     const [firstCallParams] = create.mock.calls[0] ?? [];
@@ -56,14 +115,7 @@ describe("openai compatible clients", () => {
       }
     }));
 
-    const result = await service.synthesize("text", {
-      baseUrl: "https://example.com/v1",
-      apiKey: "k",
-      model: "tts-model",
-      voice: "alloy",
-      format: "mp3",
-      speed: 1
-    });
+    const result = await service.synthesize("text", makeTtsConfig());
 
     expect(create).toHaveBeenCalledOnce();
     expect(result.audioBlob.size).toBeGreaterThan(0);
@@ -80,16 +132,7 @@ describe("openai compatible clients", () => {
     }));
 
     await expect(
-      service.extractTextFromImageStream("data:image/png;base64,abc", {
-        baseUrl: "https://example.com/v1",
-        apiKey: "k",
-        model: "m",
-        promptTemplate: "Extract",
-        maxTokens: 256,
-        imageDetail: "low",
-        ocrStreamingEnabled: true,
-        ocrStreamingFallbackToNonStream: true
-      })
+      service.extractTextFromImageStream("data:image/png;base64,abc", makeLlmConfig({ maxTokens: 256 }))
     ).rejects.toThrow("Cancelled");
   });
 
@@ -104,16 +147,20 @@ describe("openai compatible clients", () => {
     }));
 
     await expect(
-      service.extractTextFromImage("data:image/png;base64,abc", {
+      service.extractTextFromImage("data:image/png;base64,abc", makeLlmConfig({
         baseUrl: "https://example.com/openai",
-        apiKey: "k",
-        model: "m",
-        promptTemplate: "Extract",
-        imageDetail: "low",
-        ocrStreamingEnabled: true,
-        ocrStreamingFallbackToNonStream: true,
-        maxTokens: 4096
-      })
+        openaiCompatible: {
+          baseUrl: "https://example.com/openai",
+          apiKey: "k",
+          model: "m",
+          promptTemplate: "Extract",
+          imageDetail: "low" as const,
+          ocrStreamingEnabled: true,
+          ocrStreamingFallbackToNonStream: true,
+          maxTokens: 4096,
+          thinkingMode: "off" as const
+        }
+      }))
     ).rejects.toThrow("OCR request failed (https://example.com/openai/chat/completions): Connection error.");
   });
 });

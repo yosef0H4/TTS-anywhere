@@ -1,7 +1,7 @@
 {
   "name": "tts-anywhere",
   "productName": "TTS Anywhere",
-  "version": "0.1.0",
+  "version": "0.0.1-alpha",
   "private": true,
   "description": "Dual-mode Electron/Web screen OCR and TTS app",
   "type": "module",
@@ -51,6 +51,7 @@
     "wait-on": "^9.0.4"
   },
   "dependencies": {
+    "@google/genai": "^1.17.0",
     "ignore": "^7.0.5",
     "lucide": "^0.576.0",
     "nodehotkey": "file:services/nodehotkey",

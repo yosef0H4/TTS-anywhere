@@ -29,8 +29,10 @@ export interface ManagedServicesStatus {
   edge: ManagedServiceStatus;
 }
 
+export type ProviderKind = "openai_compatible" | "gemini_sdk";
+
 export interface ProviderLlmConfig {
-  baseUrl: string;
+  baseUrl?: string;
   apiKey: string;
   model: string;
   promptTemplate: string;
@@ -38,15 +40,17 @@ export interface ProviderLlmConfig {
   ocrStreamingEnabled: boolean;
   ocrStreamingFallbackToNonStream: boolean;
   maxTokens: number;
+  thinkingMode?: "provider_default" | "low" | "off";
 }
 
 export interface ProviderTtsConfig {
-  baseUrl: string;
+  baseUrl?: string;
   apiKey: string;
   model: string;
   voice: string;
   format: "mp3" | "wav" | "opus";
   speed: number;
+  thinkingMode?: "provider_default" | "low" | "off";
 }
 
 export interface ProviderOption {
@@ -56,19 +60,23 @@ export interface ProviderOption {
 
 export interface ProviderOcrRequest {
   requestId: string;
+  provider: ProviderKind;
   imageDataUrl: string;
   config: ProviderLlmConfig;
 }
 
 export interface ProviderTtsRequest {
   requestId: string;
+  provider: ProviderKind;
   text: string;
   config: ProviderTtsConfig;
   timeoutMs?: number;
 }
 
 export interface ProviderModelsRequest {
-  baseUrl: string;
+  provider: ProviderKind;
+  kind: "ocr" | "tts";
+  baseUrl?: string;
   apiKey: string;
 }
 

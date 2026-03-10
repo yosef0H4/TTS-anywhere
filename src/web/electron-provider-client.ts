@@ -1,6 +1,7 @@
 import type { OcrResult, TtsAudioResult } from "../core/models/types";
 import type {
   ElectronApi,
+  ProviderKind,
   ProviderLlmConfig,
   ProviderModelsRequest,
   ProviderOcrRequest,
@@ -42,6 +43,10 @@ function asCancelled(error: unknown): Error {
   return new Error(message);
 }
 
+function readProvider(config: { provider?: ProviderKind }): ProviderKind {
+  return config.provider === "gemini_sdk" ? "gemini_sdk" : "openai_compatible";
+}
+
 export class ElectronBackedLlmService {
   constructor(private readonly api: ElectronApi) {}
 
@@ -52,7 +57,7 @@ export class ElectronBackedLlmService {
   ): Promise<OcrResult> {
     const requestId = createRequestId("ocr");
     const cleanupAbort = bindAbort(this.api, requestId, options?.signal);
-    const request: ProviderOcrRequest = { requestId, imageDataUrl: dataUrl, config };
+    const request: ProviderOcrRequest = { requestId, provider: readProvider(config as { provider?: ProviderKind }), imageDataUrl: dataUrl, config };
     try {
       if (options?.signal?.aborted) {
         throw new Error("Cancelled");
@@ -78,7 +83,7 @@ export class ElectronBackedLlmService {
       }
       options?.onToken?.(event.token);
     });
-    const request: ProviderOcrRequest = { requestId, imageDataUrl: dataUrl, config };
+    const request: ProviderOcrRequest = { requestId, provider: readProvider(config as { provider?: ProviderKind }), imageDataUrl: dataUrl, config };
     try {
       if (options?.signal?.aborted) {
         throw new Error("Cancelled");
@@ -104,8 +109,8 @@ export class ElectronBackedTtsService {
     const requestId = createRequestId("tts");
     const cleanupAbort = bindAbort(this.api, requestId, options?.signal);
     const request: ProviderTtsRequest = options?.timeoutMs === undefined
-      ? { requestId, text, config }
-      : { requestId, text, config, timeoutMs: options.timeoutMs };
+      ? { requestId, provider: readProvider(config as { provider?: ProviderKind }), text, config }
+      : { requestId, provider: readProvider(config as { provider?: ProviderKind }), text, config, timeoutMs: options.timeoutMs };
     try {
       if (options?.signal?.aborted) {
         throw new Error("Cancelled");

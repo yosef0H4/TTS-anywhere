@@ -90,7 +90,8 @@
             <h3 data-i18n="ocr.title">OCR</h3>
             <span class="status-chip" id="llm-status-chip" data-i18n="common.idle">Idle</span>
           </div>
-          <div class="setting-group"><label data-i18n="ocr.baseUrl">OCR Base URL</label><input type="text" id="llm-url"></div>
+          <div class="setting-group"><label data-i18n="ocr.provider">OCR Provider</label><select id="llm-provider"><option value="gemini_sdk" data-i18n="provider.geminiSdk">Gemini SDK</option><option value="openai_compatible" data-i18n="provider.openaiCompatible">OpenAI-Compatible</option></select></div>
+          <div class="setting-group" id="llm-url-group"><label data-i18n="ocr.baseUrl">OCR Base URL</label><input type="text" id="llm-url"></div>
           <div class="setting-group"><label data-i18n="ocr.apiKey">OCR API Key</label><input type="password" id="llm-key"></div>
           <div class="setting-group">
             <label data-i18n="ocr.model">OCR Model</label>
@@ -114,13 +115,12 @@
             </select>
           </div>
           <div class="setting-group"><label data-i18n="ocr.maxTokens">Max Tokens</label><input type="number" id="llm-max-tokens" min="1"></div>
-          <div class="setting-group" data-detector-dependent-main>
-            <label for="detector-mode" data-i18n="detection.scope">Text Processing Scope</label>
-            <select id="detector-mode">
-              <option value="off" data-i18n="detection.scope.off">Off</option>
-              <option value="fullscreen_only" data-i18n="detection.scope.fullscreen_only">Full screen only</option>
-              <option value="fullscreen_and_window" data-i18n="detection.scope.fullscreen_and_window">Full screen + window</option>
-              <option value="all" data-i18n="detection.scope.all">All screenshots</option>
+          <div class="setting-group">
+            <label data-i18n="thinking.behavior">Thinking Behavior</label>
+            <select id="llm-thinking-mode">
+              <option value="off" data-i18n="thinking.off">Off</option>
+              <option value="low" data-i18n="thinking.low">Low</option>
+              <option value="provider_default" data-i18n="thinking.providerDefault">Provider default</option>
             </select>
           </div>
           <div class="setting-group">
@@ -133,6 +133,15 @@
           <div class="setting-group">
             <label data-i18n="detection.health">Detection Health</label>
             <span class="status-chip" id="detector-status-chip" data-i18n="common.idle">Idle</span>
+          </div>
+          <div class="setting-group">
+            <label for="detector-mode" data-i18n="detection.scope">Text Processing Scope</label>
+            <select id="detector-mode">
+              <option value="off" data-i18n="detection.scope.off">Off</option>
+              <option value="fullscreen_only" data-i18n="detection.scope.fullscreen_only">Full screen only</option>
+              <option value="fullscreen_and_window" data-i18n="detection.scope.fullscreen_and_window">Full screen + window</option>
+              <option value="all" data-i18n="detection.scope.all">All screenshots</option>
+            </select>
           </div>
           <div class="setting-group">
             <label data-i18n="stack.rapid">Rapid OCR + Detection</label>
@@ -151,7 +160,8 @@
             <h3 data-i18n="tts.title">TTS</h3>
             <span class="status-chip" id="tts-status-chip" data-i18n="common.idle">Idle</span>
           </div>
-          <div class="setting-group"><label data-i18n="tts.baseUrl">TTS Base URL</label><input type="text" id="tts-url"></div>
+          <div class="setting-group"><label data-i18n="tts.provider">TTS Provider</label><select id="tts-provider"><option value="gemini_sdk" data-i18n="provider.geminiSdk">Gemini SDK</option><option value="openai_compatible" data-i18n="provider.openaiCompatible">OpenAI-Compatible</option></select></div>
+          <div class="setting-group" id="tts-url-group"><label data-i18n="tts.baseUrl">TTS Base URL</label><input type="text" id="tts-url"></div>
           <div class="setting-group"><label data-i18n="tts.apiKey">TTS API Key</label><input type="password" id="tts-key"></div>
           <div class="setting-group">
             <label data-i18n="tts.model">TTS Model</label>
@@ -166,6 +176,14 @@
               <select id="tts-voice"></select>
               <button id="tts-voice-refetch" class="refetch-btn" type="button" data-i18n-title="tts.refetchVoices"><i data-lucide="refresh-cw" class="ui-icon"></i></button>
             </div>
+          </div>
+          <div class="setting-group">
+            <label data-i18n="thinking.behavior">Thinking Behavior</label>
+            <select id="tts-thinking-mode">
+              <option value="off" data-i18n="thinking.off">Off</option>
+              <option value="low" data-i18n="thinking.low">Low</option>
+              <option value="provider_default" data-i18n="thinking.providerDefault">Provider default</option>
+            </select>
           </div>
           <div class="setting-group">
             <label data-i18n="stack.edge">Edge TTS</label>

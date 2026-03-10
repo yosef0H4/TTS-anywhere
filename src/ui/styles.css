@@ -1083,6 +1083,10 @@ body {
     min-width: 0;
 }
 
+.setting-group[hidden] {
+    display: none !important;
+}
+
 .setting-group.section-disabled {
     opacity: 0.5;
 }

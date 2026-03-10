@@ -7,6 +7,11 @@ describe("tts-option-utils", () => {
       .toBe("tts-voices|http://127.0.0.1:8014||KittenML/kitten-tts-mini-0.8");
   });
 
+  it("treats missing base URLs as an empty cache-key segment", () => {
+    expect(makeOptionCacheKey("tts-voices", undefined, "key", "gemini-2.5-flash-preview-tts"))
+      .toBe("tts-voices||key|gemini-2.5-flash-preview-tts");
+  });
+
   it("adds the model query parameter to voice-list requests", () => {
     expect(joinApiPath("http://127.0.0.1:8014", "/voices", { model: "KittenML/kitten-tts-mini-0.8" }))
       .toBe("http://127.0.0.1:8014/voices?model=KittenML%2Fkitten-tts-mini-0.8");
