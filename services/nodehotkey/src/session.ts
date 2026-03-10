@@ -1,138 +1,149 @@
-import { parseHotkeySpec, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN } from "./hotkey-parser.js";
+import fs from "node:fs";
+import path from "node:path";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import { parseHotkeySpec } from "./hotkey-parser.js";
 import type { HotkeySpec, HotkeySessionEvents, HotkeySessionOptions } from "./types.js";
-import {
-  CallNextHookEx,
-  GetModuleHandleW,
-  ensureDpiAwareness,
-  GetAsyncKeyState,
-  GetCursorPos,
-  HC_ACTION,
-  LLKHF_INJECTED,
-  PeekMessageW,
-  PM_REMOVE,
-  RegisterHotKey,
-  registerLowLevelKeyboardProc,
-  RegisteredCallback,
-  SetWindowsHookExW,
-  UnregisterHotKey,
-  unregisterCallback,
-  UnhookWindowsHookEx,
-  WH_KEYBOARD_LL,
-  WM_HOTKEY,
-  WM_KEYDOWN,
-  WM_KEYUP,
-  WM_SYSKEYDOWN,
-  WM_SYSKEYUP,
-  type Point,
-  type KbdLlHookStruct,
-  type WinMsg
-} from "./win32-bindings.js";
 
-const HOTKEY_ID = 1;
 const DEFAULT_HOTKEY = "ctrl+shift+alt+s";
-const VK_SHIFT = 0x10;
-const VK_CONTROL = 0x11;
-const VK_MENU = 0x12;
-const VK_LWIN = 0x5b;
-const VK_RWIN = 0x5c;
 
-function sessionDiag(event: string, data?: Record<string, unknown>): void {
-  try {
-    const context = data ? ` ${JSON.stringify(data)}` : "";
-    console.info(`[nodehotkey] ${event}${context}`);
-  } catch {
-    console.info(`[nodehotkey] ${event}`);
+type NativeHotkeyEvent = {
+  type?: "triggerDown" | "triggerUp";
+  point?: { x?: number; y?: number };
+};
+
+type NativeHotkeyModule = {
+  createHotkeySession(spec: HotkeySpec, callback: (event: NativeHotkeyEvent) => void): number;
+  destroyHotkeySession(id: number): void;
+  startHotkeySession(id: number): void;
+  stopHotkeySession(id: number): void;
+  setHotkeySessionSpec(id: number, spec: HotkeySpec): void;
+  getCursorPosition(): { x?: number; y?: number };
+  isVirtualKeyDown(vk: number): boolean;
+};
+
+let hotkeyModule: NativeHotkeyModule | null | undefined;
+
+function resolveHotkeyAddonPath(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const packageRoot = path.resolve(here, "..");
+  const candidates = [
+    path.join(packageRoot, "build", "Release", "nodehotkey_hotkey.node"),
+    path.join(packageRoot, "build", "Debug", "nodehotkey_hotkey.node")
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
   }
+  throw new Error(
+    `nodehotkey native hotkey addon not found. Expected one of: ${candidates.join(", ")}`
+  );
+}
+
+function loadHotkeyModule(): NativeHotkeyModule {
+  if (hotkeyModule) return hotkeyModule;
+  if (hotkeyModule === null) throw new Error("nodehotkey native hotkey addon is unavailable");
+  if (process.platform !== "win32") {
+    hotkeyModule = null;
+    throw new Error("nodehotkey native hotkey addon is Windows-only");
+  }
+
+  const require = createRequire(import.meta.url);
+  const addonPath = resolveHotkeyAddonPath();
+  const loaded = require(addonPath) as Partial<NativeHotkeyModule>;
+  if (
+    typeof loaded.createHotkeySession !== "function" ||
+    typeof loaded.destroyHotkeySession !== "function" ||
+    typeof loaded.startHotkeySession !== "function" ||
+    typeof loaded.stopHotkeySession !== "function" ||
+    typeof loaded.setHotkeySessionSpec !== "function" ||
+    typeof loaded.getCursorPosition !== "function" ||
+    typeof loaded.isVirtualKeyDown !== "function"
+  ) {
+    hotkeyModule = null;
+    throw new Error(`nodehotkey native hotkey addon at ${addonPath} does not expose the expected API`);
+  }
+
+  hotkeyModule = loaded as NativeHotkeyModule;
+  return hotkeyModule;
+}
+
+function normalizePoint(point: NativeHotkeyEvent["point"]): { x: number; y: number } | null {
+  if (typeof point?.x !== "number" || typeof point?.y !== "number") return null;
+  return { x: point.x, y: point.y };
 }
 
 export class HotkeySession {
   private readonly pollMs: number;
   private readonly events: HotkeySessionEvents | undefined;
+  private readonly native: NativeHotkeyModule;
 
   private running = false;
-  private timer: NodeJS.Timeout | null = null;
   private activeHotkey: HotkeySpec | null;
-  private triggerComboDown = false;
-  private triggerHeld = false;
-  private triggerDownDispatched = false;
-  private keyboardHook: unknown = null;
-  private keyboardHookCallback: RegisteredCallback | null = null;
-  private tickCount = 0;
+  private nativeSessionId: number | null = null;
 
   constructor(options: HotkeySessionOptions = {}) {
     if (process.platform !== "win32") throw new Error("nodehotkey is Windows-only");
     this.pollMs = options.pollMs ?? 16;
     this.events = options.events;
     this.activeHotkey = this.parseOptionalHotkey(options.initialHotkey ?? DEFAULT_HOTKEY);
+    this.native = loadHotkeyModule();
   }
 
   start(): void {
     if (this.running) return;
-    const startedAt = Date.now();
-    sessionDiag("session.start.begin", { hotkey: this.getHotkey(), pollMs: this.pollMs });
-    if (!this.activeHotkey) {
-      this.running = true;
-      this.tickCount = 0;
-      this.timer = setInterval(() => this.tick(), this.pollMs);
-      sessionDiag("session.start.disabled", { elapsedMs: Date.now() - startedAt });
-      return;
-    }
-    ensureDpiAwareness();
-    sessionDiag("session.start.dpi-ready", { hotkey: this.activeHotkey.label, elapsedMs: Date.now() - startedAt });
-    this.tryRegisterHotkey(this.activeHotkey);
-    sessionDiag("session.start.hotkey-registered", { hotkey: this.activeHotkey.label, elapsedMs: Date.now() - startedAt });
-    this.installKeyboardHook();
-    sessionDiag("session.start.hook-installed", { hotkey: this.activeHotkey.label, elapsedMs: Date.now() - startedAt });
-    this.events?.onHotkeyRegistered?.(this.activeHotkey.label);
-
     this.running = true;
-    this.tickCount = 0;
-    this.timer = setInterval(() => this.tick(), this.pollMs);
-    sessionDiag("session.start.timer-created", { hotkey: this.activeHotkey.label, elapsedMs: Date.now() - startedAt });
+    if (!this.activeHotkey) return;
+
+    this.nativeSessionId = this.native.createHotkeySession(this.activeHotkey, (event) => {
+      const point = normalizePoint(event.point);
+      if (event.type === "triggerDown" && point) {
+        this.events?.onTriggerDown?.(point);
+        return;
+      }
+      if (event.type === "triggerUp" && point) {
+        this.events?.onTriggerUp?.(point);
+      }
+    });
+    this.native.startHotkeySession(this.nativeSessionId);
+    this.events?.onHotkeyRegistered?.(this.activeHotkey.label);
   }
 
   stop(): void {
     if (!this.running) return;
-    sessionDiag("session.stop.begin", { hotkey: this.getHotkey() });
     this.running = false;
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
+    if (this.nativeSessionId !== null) {
+      this.native.stopHotkeySession(this.nativeSessionId);
+      this.native.destroyHotkeySession(this.nativeSessionId);
+      this.nativeSessionId = null;
     }
-    UnregisterHotKey(null, HOTKEY_ID);
-    this.uninstallKeyboardHook();
-    this.triggerComboDown = false;
-    this.triggerHeld = false;
-    this.triggerDownDispatched = false;
-    this.tickCount = 0;
-    sessionDiag("session.stop.end", { hotkey: this.getHotkey() });
   }
 
   setHotkey(hotkey: string): void {
     const next = this.parseOptionalHotkey(hotkey);
-    if (!this.running) {
-      this.activeHotkey = next;
-      this.events?.onHotkeySwitched?.(next?.label ?? "");
-      return;
+    this.activeHotkey = next;
+
+    if (this.nativeSessionId !== null) {
+      this.native.stopHotkeySession(this.nativeSessionId);
+      this.native.destroyHotkeySession(this.nativeSessionId);
+      this.nativeSessionId = null;
     }
 
-    const previous = this.activeHotkey;
-    UnregisterHotKey(null, HOTKEY_ID);
-    try {
-      if (next) {
-        this.tryRegisterHotkey(next);
-      }
-      this.activeHotkey = next;
-      this.triggerComboDown = false;
-      this.triggerHeld = false;
-      this.triggerDownDispatched = false;
-      this.events?.onHotkeySwitched?.(next?.label ?? "");
-    } catch (error) {
-      if (previous) {
-        this.tryRegisterHotkey(previous);
-      }
-      throw error;
+    if (this.running && next) {
+      this.nativeSessionId = this.native.createHotkeySession(next, (event) => {
+        const point = normalizePoint(event.point);
+        if (event.type === "triggerDown" && point) {
+          this.events?.onTriggerDown?.(point);
+          return;
+        }
+        if (event.type === "triggerUp" && point) {
+          this.events?.onTriggerUp?.(point);
+        }
+      });
+      this.native.startHotkeySession(this.nativeSessionId);
     }
+
+    this.events?.onHotkeySwitched?.(next?.label ?? "");
   }
 
   getHotkey(): string {
@@ -144,156 +155,18 @@ export class HotkeySession {
     return this.activeHotkey;
   }
 
-  getCursorPos(): Point | null {
-    const point: Point = { x: 0, y: 0 };
-    return GetCursorPos(point) ? point : null;
+  getCursorPos(): { x: number; y: number } | null {
+    const point = this.native.getCursorPosition();
+    return normalizePoint(point);
   }
 
   isKeyDown(vk: number): boolean {
-    return (GetAsyncKeyState(vk) & 0x8000) !== 0;
-  }
-
-  private tryRegisterHotkey(spec: HotkeySpec): void {
-    const ok = RegisterHotKey(null, HOTKEY_ID, spec.modifiers, spec.vk);
-    if (!ok) throw new Error(`RegisterHotKey failed for ${spec.label}`);
+    return this.native.isVirtualKeyDown(vk);
   }
 
   private parseOptionalHotkey(hotkey: string | null | undefined): HotkeySpec | null {
     const normalized = String(hotkey ?? "").trim();
     if (!normalized) return null;
     return parseHotkeySpec(normalized);
-  }
-
-  private installKeyboardHook(): void {
-    if (this.keyboardHook) return;
-    const startedAt = Date.now();
-    if (!this.activeHotkey) return;
-    this.keyboardHookCallback = registerLowLevelKeyboardProc((nCode, wParam, info) => this.handleKeyboardHook(nCode, wParam, info));
-    sessionDiag("session.hook.callback-registered", { hotkey: this.activeHotkey.label, elapsedMs: Date.now() - startedAt });
-    const module = GetModuleHandleW(null);
-    sessionDiag("session.hook.module-resolved", { hotkey: this.activeHotkey.label, hasModule: Boolean(module), elapsedMs: Date.now() - startedAt });
-    this.keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, this.keyboardHookCallback, module, 0);
-    if (!this.keyboardHook) {
-      if (this.keyboardHookCallback) unregisterCallback(this.keyboardHookCallback);
-      this.keyboardHookCallback = null;
-      throw new Error(`SetWindowsHookExW failed for ${this.activeHotkey.label}`);
-    }
-    sessionDiag("session.hook.set", { hotkey: this.activeHotkey.label, elapsedMs: Date.now() - startedAt });
-  }
-
-  private uninstallKeyboardHook(): void {
-    if (this.keyboardHook) {
-      UnhookWindowsHookEx(this.keyboardHook);
-      this.keyboardHook = null;
-    }
-    if (this.keyboardHookCallback) {
-      unregisterCallback(this.keyboardHookCallback);
-      this.keyboardHookCallback = null;
-    }
-  }
-
-  private handleKeyboardHook(nCode: number, wParam: number, info: KbdLlHookStruct): number {
-    if (nCode !== HC_ACTION) return CallNextHookEx(this.keyboardHook, nCode, wParam, info);
-    if ((info.flags & LLKHF_INJECTED) !== 0) return CallNextHookEx(this.keyboardHook, nCode, wParam, info);
-    if (!this.running) return CallNextHookEx(this.keyboardHook, nCode, wParam, info);
-    if (!this.activeHotkey) return CallNextHookEx(this.keyboardHook, nCode, wParam, info);
-
-    const isKeyMessage = wParam === WM_KEYDOWN || wParam === WM_KEYUP || wParam === WM_SYSKEYDOWN || wParam === WM_SYSKEYUP;
-    if (!isKeyMessage) return CallNextHookEx(this.keyboardHook, nCode, wParam, info);
-
-    this.syncTriggerStateFromHook(wParam, info.vkCode);
-
-    if (this.shouldSuppressVk(info.vkCode)) return 1;
-    return CallNextHookEx(this.keyboardHook, nCode, wParam, info);
-  }
-
-  private syncTriggerStateFromHook(wParam: number, vkCode: number): void {
-    if (!this.activeHotkey) return;
-    const isKeyDownMessage = wParam === WM_KEYDOWN || wParam === WM_SYSKEYDOWN;
-    const isKeyUpMessage = wParam === WM_KEYUP || wParam === WM_SYSKEYUP;
-    const isTriggerKey = vkCode === this.activeHotkey.vk;
-
-    if (isKeyDownMessage && isTriggerKey && this.areRequiredModifiersDown()) {
-      this.triggerHeld = true;
-      this.triggerComboDown = true;
-    }
-
-    if (isKeyUpMessage && isTriggerKey) {
-      this.triggerComboDown = false;
-    }
-  }
-
-  private shouldSuppressVk(vkCode: number): boolean {
-    if (!this.activeHotkey) return false;
-    if (vkCode === this.activeHotkey.vk && this.areRequiredModifiersDown()) return true;
-    if (!this.triggerHeld) return false;
-    if (vkCode === this.activeHotkey.releaseVk) return true;
-    if ((this.activeHotkey.modifiers & MOD_CONTROL) !== 0 && vkCode === VK_CONTROL) return true;
-    if ((this.activeHotkey.modifiers & MOD_SHIFT) !== 0 && vkCode === VK_SHIFT) return true;
-    if ((this.activeHotkey.modifiers & MOD_ALT) !== 0 && vkCode === VK_MENU) return true;
-    if ((this.activeHotkey.modifiers & MOD_WIN) !== 0 && (vkCode === VK_LWIN || vkCode === VK_RWIN)) return true;
-    return false;
-  }
-
-  private areRequiredModifiersDown(): boolean {
-    if (!this.activeHotkey) return false;
-    const mods = this.activeHotkey.modifiers;
-    if ((mods & MOD_CONTROL) !== 0 && !this.isKeyDown(VK_CONTROL)) return false;
-    if ((mods & MOD_SHIFT) !== 0 && !this.isKeyDown(VK_SHIFT)) return false;
-    if ((mods & MOD_ALT) !== 0 && !this.isKeyDown(VK_MENU)) return false;
-    if ((mods & MOD_WIN) !== 0) {
-      const lWinDown = this.isKeyDown(VK_LWIN);
-      const rWinDown = this.isKeyDown(VK_RWIN);
-      if (!lWinDown && !rWinDown) return false;
-    }
-    return true;
-  }
-
-  private tick(): void {
-    if (!this.running) return;
-    this.tickCount += 1;
-    if (this.tickCount === 1) {
-      sessionDiag("session.tick.first", { hotkey: this.getHotkey() });
-    }
-    if (!this.activeHotkey) return;
-
-    let startedByMessage = false;
-    const msg: WinMsg = {};
-    // Only consume WM_HOTKEY here. Draining the full queue from Electron's main
-    // thread steals framework messages and can stall window/web startup.
-    while (PeekMessageW(msg, null, WM_HOTKEY, WM_HOTKEY, PM_REMOVE)) {
-      if (msg.message === WM_HOTKEY && Number(msg.wParam) === HOTKEY_ID) {
-        startedByMessage = true;
-        this.triggerHeld = true;
-      }
-    }
-
-    const comboDown = this.isTriggerComboDown();
-    if (!startedByMessage && comboDown && !this.triggerComboDown && !this.triggerHeld) {
-      this.triggerHeld = true;
-    }
-
-    if (this.triggerHeld && !this.triggerDownDispatched) {
-      const point = this.getCursorPos();
-      if (point) {
-        this.triggerDownDispatched = true;
-        this.events?.onTriggerDown?.(point);
-      }
-    }
-
-    if (this.triggerHeld && !this.isKeyDown(this.activeHotkey.releaseVk)) {
-      this.triggerHeld = false;
-      this.triggerDownDispatched = false;
-      const point = this.getCursorPos();
-      if (point) this.events?.onTriggerUp?.(point);
-    }
-
-    this.triggerComboDown = comboDown;
-  }
-
-  private isTriggerComboDown(): boolean {
-    if (!this.activeHotkey) return false;
-    if (!this.areRequiredModifiersDown()) return false;
-    return (GetAsyncKeyState(this.activeHotkey.vk) & 0x8000) !== 0;
   }
 }
