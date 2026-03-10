@@ -334,6 +334,15 @@ function ensureDir(dirPath: string): void {
   fs.mkdirSync(dirPath, { recursive: true });
 }
 
+function readProjectPythonVersion(projectDir: string): string {
+  const pythonVersionPath = path.join(projectDir, ".python-version");
+  const raw = fs.readFileSync(pythonVersionPath, "utf-8").trim();
+  if (!raw) {
+    throw new Error(`Missing Python version in ${pythonVersionPath}`);
+  }
+  return raw;
+}
+
 function syncBundledServicesToRuntime(): string {
   const bundledManifest = readBundledServicesManifest(bundledServicesManifestPath());
   return syncBundledServicesToRuntimeHelper({
@@ -541,7 +550,7 @@ function getManagedServicePaths(): {
   const runtimeServicesDir = syncBundledServicesToRuntime();
   const rapidServiceDir = path.join(runtimeServicesDir, "text_processing", "rapid");
   const edgeServiceDir = path.join(runtimeServicesDir, "tts", "edge");
-  const rapidEnvDir = path.join(rapidServiceDir, ".venv");
+  const rapidEnvDir = path.join(rapidServiceDir, ".venv-cpu");
   const edgeEnvDir = path.join(edgeServiceDir, ".venv");
   if (!fs.existsSync(rapidServiceDir)) {
     throw new Error(`Rapid service directory not found: ${rapidServiceDir}`);
@@ -569,28 +578,23 @@ async function launchRapidServiceInternal(): Promise<ManagedServiceStatus> {
     ocrBaseUrl: `http://127.0.0.1:${rapidPort}/v1`
   };
   const baseEnv = windowsEnv(process.env, { UV_CACHE_DIR: uvCacheDir });
-  await runManagedCommand(
-    "recommendedCpu.rapid.sync",
-    preferredUvCommand(),
-    ["sync", "--inexact"],
-    rapidServiceDir,
-    windowsEnv(baseEnv, { UV_PROJECT_ENVIRONMENT: rapidEnvDir })
-  );
-  await runManagedCommand(
-    "recommendedCpu.rapid.runtime",
-    preferredUvCommand(),
-    ["pip", "install", "--python", envPythonPath(rapidEnvDir), "onnxruntime>=1.24.2"],
-    rapidServiceDir,
-    windowsEnv(baseEnv, { UV_PROJECT_ENVIRONMENT: rapidEnvDir })
-  );
+  const rapidEnv = windowsEnv(baseEnv, { UV_PROJECT_ENVIRONMENT: rapidEnvDir });
+  const rapidPythonPath = envPythonPath(rapidEnvDir);
+  if (!fs.existsSync(rapidPythonPath)) {
+    await runManagedCommand(
+      "recommendedCpu.rapid.venv",
+      preferredUvCommand(),
+      ["venv", rapidEnvDir, "--python", readProjectPythonVersion(rapidServiceDir)],
+      rapidServiceDir,
+      rapidEnv
+    );
+  }
 
   const rapidChild = spawnManagedChild(
     "rapid",
-    envPythonPath(rapidEnvDir),
+    rapidPythonPath,
     [
-      "-m",
-      "rapid_text_processing.cli",
-      "serve",
+      "launcher.py",
       "--host",
       "127.0.0.1",
       "--port",
@@ -603,11 +607,11 @@ async function launchRapidServiceInternal(): Promise<ManagedServiceStatus> {
       "cpu"
     ],
     rapidServiceDir,
-    windowsEnv(baseEnv, { UV_PROJECT_ENVIRONMENT: rapidEnvDir })
+    rapidEnv
   );
   writeBackendLog("info", "stack", "recommendedCpu.rapid.started", { pid: rapidChild.pid, port: rapidPort });
   await waitForServiceHealth(
-    urls.ocrBaseUrl,
+    urls.detectionBaseUrl,
     120000,
     (payload) => payload.ok === true
       && typeof payload.features === "object"
