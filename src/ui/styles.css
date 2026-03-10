@@ -1161,6 +1161,22 @@ body {
     gap: 8px;
 }
 
+.hotkey-sound-grid {
+    margin: 2px 0 10px;
+}
+
+.hotkey-sound-preview-btn {
+    width: auto;
+    min-width: 72px;
+    padding: 0 12px;
+    font-size: 12px;
+}
+
+.hotkey-sound-grid input[type="range"] {
+    width: 100%;
+    margin: 4px 0 0;
+}
+
 .setting-toggle-row {
     display: flex;
     flex-direction: row;

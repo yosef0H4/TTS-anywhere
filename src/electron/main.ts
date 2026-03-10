@@ -28,6 +28,8 @@ import {
   fetchProviderVoices
 } from "./provider-service.js";
 import type {
+  ElectronHotkeyFeedbackPhase,
+  ElectronHotkeyKey,
   ProviderModelsRequest,
   ProviderOcrRequest,
   ProviderOcrStreamEvent,
@@ -1256,7 +1258,12 @@ async function finalizeSelection(point: { x: number; y: number }): Promise<void>
     });
 
     const dataUrl = `data:image/png;base64,${pngBuffer.toString("base64")}`;
-    mainWindow?.webContents.send("capture-image", { dataUrl, captureKind: "selection", resultMode });
+    mainWindow?.webContents.send("capture-image", {
+      dataUrl,
+      captureKind: "selection",
+      resultMode,
+      hotkey: resultMode === "clipboard" ? "ocrClipboard" : "capture"
+    });
     diag("capture.image.sent", {
       width: payload.width,
       height: payload.height,
@@ -1266,6 +1273,7 @@ async function finalizeSelection(point: { x: number; y: number }): Promise<void>
     });
   } catch (error) {
     frozenCaptureSession = null;
+    emitHotkeyFeedback(resultMode === "clipboard" ? "ocrClipboard" : "capture", "error", String(error));
     diag("capture.error", { error: String(error) });
   } finally {
     if (frozen) {
@@ -1281,10 +1289,12 @@ async function finalizeSelection(point: { x: number; y: number }): Promise<void>
 async function replayLastCaptureRect(): Promise<void> {
   const rect = lastSavedCaptureRect;
   if (!rect) {
+    emitHotkeyFeedback("replayCapture", "error", "No previous capture selection available");
     diag("capture.replay.missing-rect");
     return;
   }
   if (rect.width < 1 || rect.height < 1) {
+    emitHotkeyFeedback("replayCapture", "error", "Previous capture selection is invalid");
     diag("capture.replay.invalid-rect", rect);
     return;
   }
@@ -1307,7 +1317,8 @@ async function replayLastCaptureRect(): Promise<void> {
     });
 
     const dataUrl = `data:image/png;base64,${pngBuffer.toString("base64")}`;
-    mainWindow?.webContents.send("capture-image", { dataUrl, captureKind: "selection" });
+    mainWindow?.webContents.send("capture-image", { dataUrl, captureKind: "selection", hotkey: "replayCapture" });
+    emitHotkeyFeedback("replayCapture", "success");
     diag("capture.replay.sent", {
       left: rect.left,
       top: rect.top,
@@ -1316,6 +1327,7 @@ async function replayLastCaptureRect(): Promise<void> {
       frozenAgeMs: Date.now() - frozen.capturedAt
     });
   } catch (error) {
+    emitHotkeyFeedback("replayCapture", "error", String(error));
     diag("capture.replay.error", {
       error: String(error),
       rect
@@ -1343,7 +1355,8 @@ async function captureFullScreenAtPoint(point: { x: number; y: number }): Promis
     });
 
     const dataUrl = `data:image/png;base64,${pngBuffer.toString("base64")}`;
-    mainWindow?.webContents.send("capture-image", { dataUrl, captureKind: "fullscreen" });
+    mainWindow?.webContents.send("capture-image", { dataUrl, captureKind: "fullscreen", hotkey: "fullCapture" });
+    emitHotkeyFeedback("fullCapture", "success");
     diag("capture.fullscreen.sent", {
       left: frozen.bounds.left,
       top: frozen.bounds.top,
@@ -1353,6 +1366,7 @@ async function captureFullScreenAtPoint(point: { x: number; y: number }): Promis
       frozenAgeMs: Date.now() - frozen.capturedAt
     });
   } catch (error) {
+    emitHotkeyFeedback("fullCapture", "error", String(error));
     diag("capture.fullscreen.error", { error: String(error) });
   } finally {
     if (frozen) {
@@ -1394,7 +1408,8 @@ async function captureActiveWindow(): Promise<void> {
     });
 
     const dataUrl = `data:image/png;base64,${pngBuffer.toString("base64")}`;
-    mainWindow?.webContents.send("capture-image", { dataUrl, captureKind: "window" });
+    mainWindow?.webContents.send("capture-image", { dataUrl, captureKind: "window", hotkey: "activeWindowCapture" });
+    emitHotkeyFeedback("activeWindowCapture", "success");
     diag("capture.window.sent", {
       left: bounds.left,
       top: bounds.top,
@@ -1404,6 +1419,7 @@ async function captureActiveWindow(): Promise<void> {
       frozenAgeMs: Date.now() - frozen.capturedAt
     });
   } catch (error) {
+    emitHotkeyFeedback("activeWindowCapture", "error", String(error));
     diag("capture.window.error", { error: String(error) });
   } finally {
     if (frozen) {
@@ -1441,6 +1457,11 @@ function normalizeHotkeyLabel(hotkey: string): string {
 
 function readStoredHotkey(value: string | undefined, fallback: string): string {
   return typeof value === "string" ? value : fallback;
+}
+
+function emitHotkeyFeedback(hotkey: ElectronHotkeyKey, phase: ElectronHotkeyFeedbackPhase, message?: string): void {
+  mainWindow?.webContents.send("hotkey-feedback", { hotkey, phase, message });
+  diag("hotkey.feedback", { hotkey, phase, message });
 }
 
 function getAllActiveHotkeys(): Array<{ name: string; hotkey: string }> {
@@ -1563,12 +1584,15 @@ async function runCopyPlayCapture(): Promise<void> {
     const result = await captureCopyToText({ copyHotkey: "ctrl+c", timeoutMs: 5000, pollMs: 25, restoreClipboard: true });
     const text = result.text.trim();
     if (!result.changed || !text) {
+      emitHotkeyFeedback("copyPlay", "error", "No text copied");
       diag("copy.play.empty", { changed: result.changed });
       return;
     }
     mainWindow?.webContents.send("copy-play-text", { text });
+    emitHotkeyFeedback("copyPlay", "success");
     diag("copy.play.sent", { length: text.length });
   } catch (error) {
+    emitHotkeyFeedback("copyPlay", "error", String(error));
     diag("copy.play.error", { error: String(error) });
   } finally {
     copyPlayInFlight = false;
@@ -1629,7 +1653,7 @@ if (!hasSingleInstanceLock) {
     diag("app.main-window.create.begin");
     mainWindow = createMainWindow();
     diag("app.main-window.create.end", { hasWindow: Boolean(mainWindow) });
-    overlay = new BorderOverlay(3);
+    overlay = new BorderOverlay(2);
     diag("app.overlay.created");
     diag("app.capture-session.create.begin", { hotkey: activeCaptureHotkey });
     captureHotkeySession = new HotkeySession({

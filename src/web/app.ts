@@ -11,7 +11,15 @@ import {
   setLogLevel
 } from "../core/logging";
 import { DEFAULT_CONFIG } from "../core/models/defaults";
-import type { AppConfig, OcrProvider, ReadingTimeline, TtsProvider } from "../core/models/types";
+import type {
+  AppConfig,
+  ConfigurableHotkeyKey,
+  HotkeyFeedbackEvent,
+  HotkeySoundId,
+  OcrProvider,
+  ReadingTimeline,
+  TtsProvider
+} from "../core/models/types";
 import {
   createChunkRecords,
   getPrefetchTargets,
@@ -37,6 +45,7 @@ import type { FilteredBox, MergeGroup, RawBox } from "../features/preprocessing/
 import { APP_ICONS } from "../ui/lucide-icons";
 import { makeOptionCacheKey, resolveVoiceSelection } from "./tts-option-utils";
 import { ElectronBackedLlmService, ElectronBackedProviderCatalog, ElectronBackedTtsService } from "./electron-provider-client";
+import { HOTKEY_SOUND_OPTIONS, HOTKEY_SOUND_URLS } from "./hotkey-sounds";
 import { applyTranslationsToElement, translate, type TranslationKey } from "./i18n";
 import "../ui/styles.css";
 
@@ -52,20 +61,6 @@ interface PlaybackMetrics {
   playChunkRequests: number;
   ttsStartsBySessionAndHash: Record<string, number>;
 }
-
-type ConfigurableHotkeyKey =
-  | "capture"
-  | "ocrClipboard"
-  | "fullCapture"
-  | "activeWindowCapture"
-  | "copyPlay"
-  | "abort"
-  | "playPause"
-  | "nextChunk"
-  | "previousChunk"
-  | "volumeUp"
-  | "volumeDown"
-  | "replayCapture";
 
 type PlaybackHotkeyAction = "toggle_play_pause" | "next_chunk" | "previous_chunk" | "volume_up" | "volume_down";
 
@@ -138,6 +133,8 @@ export class WebApp {
   private readonly providerCatalog = window.electronAPI ? new ElectronBackedProviderCatalog(window.electronAPI) : null;
   private readonly config: AppConfig = this.store.load();
   private readonly audio = new Audio();
+  private readonly activeHotkeyAudios = new Set<HTMLAudioElement>();
+  private readonly lastHotkeyFeedbackAt: Partial<Record<ConfigurableHotkeyKey, number>> = {};
   private lastPlaybackText = "";
   private timeline: ReadingTimeline = { chunks: [], durationMs: 0 };
   private activeChunkId: string | null = null;
@@ -541,6 +538,22 @@ export class WebApp {
           cancelEdit: api?.cancelReplayCaptureHotkeyEdit
         };
     }
+  }
+
+  private getHotkeySoundSelectId(key: ConfigurableHotkeyKey): string {
+    return `${key}-sound-id`;
+  }
+
+  private getHotkeySoundVolumeId(key: ConfigurableHotkeyKey): string {
+    return `${key}-sound-volume`;
+  }
+
+  private getHotkeySoundVolumeValueId(key: ConfigurableHotkeyKey): string {
+    return `${key}-sound-volume-value`;
+  }
+
+  private getHotkeySoundPreviewButtonId(key: ConfigurableHotkeyKey): string {
+    return `btn-${key}-sound-preview`;
   }
 
   mount(root: HTMLElement): void {
@@ -1531,6 +1544,18 @@ export class WebApp {
       this.syncConfigFromInputs();
       void this.syncElectronCaptureRectangleSetting();
     });
+    for (const key of this.getConfigurableHotkeyKeys()) {
+      this.must<HTMLSelectElement>(this.getHotkeySoundSelectId(key)).addEventListener("change", () => this.syncFeedbackSoundsOnly());
+      this.must<HTMLInputElement>(this.getHotkeySoundVolumeId(key)).addEventListener("input", () => this.syncFeedbackSoundsOnly());
+      this.must<HTMLButtonElement>(this.getHotkeySoundPreviewButtonId(key)).addEventListener("click", () => {
+        void this.previewHotkeySound(key);
+      });
+    }
+    this.must<HTMLSelectElement>("global-error-sound-id").addEventListener("change", () => this.syncFeedbackSoundsOnly());
+    this.must<HTMLInputElement>("global-error-sound-volume").addEventListener("input", () => this.syncFeedbackSoundsOnly());
+    this.must<HTMLButtonElement>("btn-global-error-sound-preview").addEventListener("click", () => {
+      void this.playHotkeySound(this.config.system.feedbackSounds.globalError.soundId, this.config.system.feedbackSounds.globalError.volume);
+    });
 
     this.must<HTMLButtonElement>("btn-export-settings").addEventListener("click", () => this.exportSettings());
     this.must<HTMLButtonElement>("btn-import-settings").addEventListener("click", () => {
@@ -1762,6 +1787,7 @@ export class WebApp {
       : "low";
     this.config.system.diagnosticsEnabled = this.must<HTMLInputElement>("diagnostics-enabled").checked;
     this.config.system.captureDrawRectangle = this.must<HTMLInputElement>("capture-draw-rectangle").checked;
+    this.syncFeedbackSoundsFromInputs();
     this.config.ui.showChunkDiagnostics = this.must<HTMLInputElement>("show-chunk-diagnostics").checked;
     this.config.ui.language = this.must<HTMLSelectElement>("ui-language").value === "ar" ? "ar" : "en";
     this.saveActiveLlmToSelectedProvider();
@@ -1769,6 +1795,125 @@ export class WebApp {
     this.applyUiState();
     this.store.save(this.config);
     this.updateTimelineFromRawText();
+  }
+
+  private syncFeedbackSoundsFromInputs(): void {
+    for (const key of this.getConfigurableHotkeyKeys()) {
+      const soundId = this.must<HTMLSelectElement>(this.getHotkeySoundSelectId(key)).value as HotkeySoundId;
+      const volume = Number(this.must<HTMLInputElement>(this.getHotkeySoundVolumeId(key)).value);
+      this.config.system.feedbackSounds.byHotkey[key] = {
+        soundId: HOTKEY_SOUND_OPTIONS.includes(soundId) ? soundId : DEFAULT_CONFIG.system.feedbackSounds.byHotkey[key].soundId,
+        volume: Number.isFinite(volume) ? Math.max(0, Math.min(100, Math.round(volume))) : DEFAULT_CONFIG.system.feedbackSounds.byHotkey[key].volume
+      };
+    }
+    const globalErrorSoundId = this.must<HTMLSelectElement>("global-error-sound-id").value as HotkeySoundId;
+    const globalErrorVolume = Number(this.must<HTMLInputElement>("global-error-sound-volume").value);
+    this.config.system.feedbackSounds.globalError = {
+      soundId: HOTKEY_SOUND_OPTIONS.includes(globalErrorSoundId) ? globalErrorSoundId : DEFAULT_CONFIG.system.feedbackSounds.globalError.soundId,
+      volume: Number.isFinite(globalErrorVolume)
+        ? Math.max(0, Math.min(100, Math.round(globalErrorVolume)))
+        : DEFAULT_CONFIG.system.feedbackSounds.globalError.volume
+    };
+    this.renderHotkeySoundControls();
+  }
+
+  private syncFeedbackSoundsOnly(): void {
+    this.syncFeedbackSoundsFromInputs();
+    this.store.save(this.config);
+  }
+
+  private renderHotkeySoundControls(): void {
+    for (const key of this.getConfigurableHotkeyKeys()) {
+      const current = this.config.system.feedbackSounds.byHotkey[key];
+      this.renderHotkeySoundSelect(this.getHotkeySoundSelectId(key), current.soundId);
+      this.must<HTMLInputElement>(this.getHotkeySoundVolumeId(key)).value = String(current.volume);
+      this.must<HTMLDivElement>(this.getHotkeySoundVolumeValueId(key)).textContent = `${current.volume}%`;
+      this.must<HTMLButtonElement>(this.getHotkeySoundPreviewButtonId(key)).textContent = this.t("action.preview");
+    }
+    this.renderHotkeySoundSelect("global-error-sound-id", this.config.system.feedbackSounds.globalError.soundId);
+    this.must<HTMLInputElement>("global-error-sound-volume").value = String(this.config.system.feedbackSounds.globalError.volume);
+    this.must<HTMLDivElement>("global-error-sound-volume-value").textContent = `${this.config.system.feedbackSounds.globalError.volume}%`;
+    this.must<HTMLButtonElement>("btn-global-error-sound-preview").textContent = this.t("action.preview");
+    for (const label of Array.from(document.querySelectorAll<HTMLLabelElement>("[for$='-sound-id']"))) {
+      const wrapper = label.closest("[data-hotkey-sound-controls]");
+      if (!wrapper) continue;
+      label.textContent = wrapper.getAttribute("data-hotkey-sound-controls") === "globalError"
+        ? this.t("system.errorSound")
+        : this.t("system.soundEffect");
+    }
+    for (const label of Array.from(document.querySelectorAll<HTMLLabelElement>("[for$='-sound-volume'], [for='global-error-sound-volume']"))) {
+      label.textContent = this.t("system.soundVolume");
+    }
+  }
+
+  private renderHotkeySoundSelect(id: string, selected: HotkeySoundId): void {
+    const select = this.must<HTMLSelectElement>(id);
+    const previous = select.value;
+    select.innerHTML = "";
+    for (const soundId of HOTKEY_SOUND_OPTIONS) {
+      const option = document.createElement("option");
+      option.value = soundId;
+      option.textContent = this.t(`sound.${soundId}` as TranslationKey);
+      option.selected = soundId === selected || (!selected && soundId === previous);
+      select.appendChild(option);
+    }
+    select.value = HOTKEY_SOUND_OPTIONS.includes(selected) ? selected : HOTKEY_SOUND_OPTIONS[0]!;
+  }
+
+  private async previewHotkeySound(key: ConfigurableHotkeyKey): Promise<void> {
+    const sound = this.config.system.feedbackSounds.byHotkey[key];
+    await this.playHotkeySound(sound.soundId, sound.volume);
+  }
+
+  private async playHotkeySound(soundId: HotkeySoundId, volume: number): Promise<void> {
+    const audio = new Audio(HOTKEY_SOUND_URLS[soundId]);
+    audio.preload = "auto";
+    audio.volume = Math.max(0, Math.min(1, volume / 100));
+    const release = (): void => {
+      audio.removeEventListener("ended", release);
+      audio.removeEventListener("error", release);
+      this.activeHotkeyAudios.delete(audio);
+    };
+    audio.addEventListener("ended", release, { once: true });
+    audio.addEventListener("error", release, { once: true });
+    this.activeHotkeyAudios.add(audio);
+    try {
+      await audio.play();
+    } catch {
+      release();
+      // Best effort preview/feedback.
+    }
+  }
+
+  private async playConfiguredHotkeyFeedback(key: ConfigurableHotkeyKey): Promise<void> {
+    const sound = this.config.system.feedbackSounds.byHotkey[key];
+    await this.playHotkeySound(sound.soundId, sound.volume);
+  }
+
+  private async playConfiguredErrorFeedback(): Promise<void> {
+    const sound = this.config.system.feedbackSounds.globalError;
+    await this.playHotkeySound(sound.soundId, sound.volume);
+  }
+
+  private markHotkeyFeedback(key: ConfigurableHotkeyKey): void {
+    this.lastHotkeyFeedbackAt[key] = Date.now();
+  }
+
+  private shouldUseHotkeyFeedbackFallback(key: ConfigurableHotkeyKey): boolean {
+    const lastAt = this.lastHotkeyFeedbackAt[key] ?? 0;
+    return Date.now() - lastAt > 750;
+  }
+
+  private handleHotkeyFeedback(event: HotkeyFeedbackEvent): void {
+    this.markHotkeyFeedback(event.hotkey);
+    if (event.phase === "error") {
+      void this.playConfiguredErrorFeedback();
+      if (event.message) {
+        this.setStatus(event.message);
+      }
+      return;
+    }
+    void this.playConfiguredHotkeyFeedback(event.hotkey);
   }
 
   private syncLlmInputsToActiveConfig(): void {
@@ -1823,6 +1968,7 @@ export class WebApp {
     this.must<HTMLInputElement>("diagnostics-enabled").checked = this.config.system.diagnosticsEnabled;
     this.must<HTMLInputElement>("capture-draw-rectangle").checked = this.config.system.captureDrawRectangle;
     this.renderHotkeyInputs();
+    this.renderHotkeySoundControls();
     if (window.electronAPI) {
       for (const key of this.getConfigurableHotkeyKeys()) {
         const binding = this.getHotkeyBindingConfig(key);
@@ -2241,21 +2387,38 @@ export class WebApp {
       await this.runPipeline(await this.fileToDataUrl(file), { source: "drop" });
     });
 
-    window.electronAPI?.onCapturedImage(async ({ dataUrl, captureKind, resultMode }) => {
+    window.electronAPI?.onCapturedImage(async ({ dataUrl, captureKind, resultMode, hotkey }) => {
       loggers.capture.info("Hotkey capture image received");
+      const hotkeyKey: ConfigurableHotkeyKey = hotkey ?? (captureKind === "fullscreen"
+        ? "fullCapture"
+        : captureKind === "window"
+          ? "activeWindowCapture"
+          : resultMode === "clipboard"
+            ? "ocrClipboard"
+            : "capture");
+      if (this.shouldUseHotkeyFeedbackFallback(hotkeyKey)) {
+        void this.playConfiguredHotkeyFeedback(hotkeyKey);
+      }
       await this.abortVisionWork("new_image");
       await this.runPipeline(dataUrl, { source: "hotkey", captureKind, resultMode });
     });
 
     window.electronAPI?.onCopiedTextForPlayback(async (text: string) => {
+      if (this.shouldUseHotkeyFeedbackFallback("copyPlay")) {
+        void this.playConfiguredHotkeyFeedback("copyPlay");
+      }
       if (this.hasActiveWork()) await this.abortAllWork("superseded");
       await this.playCopiedText(text);
     });
     window.electronAPI?.onAbortRequested(() => {
+      void this.playConfiguredHotkeyFeedback("abort");
       void this.abortAllWork("user");
     });
     window.electronAPI?.onPlaybackHotkey((action) => {
       void this.handlePlaybackHotkey(action);
+    });
+    window.electronAPI?.onHotkeyFeedback((event) => {
+      this.handleHotkeyFeedback(event);
     });
     void this.syncAlwaysOnTopButton();
   }
@@ -2332,6 +2495,7 @@ export class WebApp {
     try {
       await this.startOrResumePlayback();
     } catch (error) {
+      await this.playConfiguredErrorFeedback();
       this.setStatus(this.withApiBaseUrlHint(this.t("status.playbackFailed", { error: String(error) }), "tts", this.config.tts.baseUrl));
     }
   }
@@ -2689,27 +2853,49 @@ export class WebApp {
   }
 
   private async handlePlaybackHotkey(action: PlaybackHotkeyAction): Promise<void> {
-    switch (action) {
-      case "toggle_play_pause":
-        if (this.audio.paused) {
-          await this.startOrResumePlayback();
-        } else {
-          this.audio.pause();
-        }
-        this.renderPlayState();
-        break;
-      case "next_chunk":
-        this.seekChunk(this.activeChunkIndex + 1);
-        break;
-      case "previous_chunk":
-        this.seekChunk(this.activeChunkIndex - 1);
-        break;
-      case "volume_up":
-        this.adjustVolumeBy(5);
-        break;
-      case "volume_down":
-        this.adjustVolumeBy(-5);
-        break;
+    try {
+      switch (action) {
+        case "toggle_play_pause":
+          if (this.audio.paused) {
+            await this.startOrResumePlayback();
+            if (this.audio.paused && !this.chunkPlaybackMode && !this.audio.src) {
+              await this.playConfiguredErrorFeedback();
+              return;
+            }
+          } else {
+            this.audio.pause();
+          }
+          this.renderPlayState();
+          await this.playConfiguredHotkeyFeedback("playPause");
+          break;
+        case "next_chunk":
+          if (this.activeChunkIndex + 1 >= this.timeline.chunks.length || !this.isChunkPlayable(this.activeChunkIndex + 1)) {
+            await this.playConfiguredErrorFeedback();
+            return;
+          }
+          this.seekChunk(this.activeChunkIndex + 1);
+          await this.playConfiguredHotkeyFeedback("nextChunk");
+          break;
+        case "previous_chunk":
+          if (this.activeChunkIndex <= 0 || !this.isChunkPlayable(this.activeChunkIndex - 1)) {
+            await this.playConfiguredErrorFeedback();
+            return;
+          }
+          this.seekChunk(this.activeChunkIndex - 1);
+          await this.playConfiguredHotkeyFeedback("previousChunk");
+          break;
+        case "volume_up":
+          this.adjustVolumeBy(5);
+          await this.playConfiguredHotkeyFeedback("volumeUp");
+          break;
+        case "volume_down":
+          this.adjustVolumeBy(-5);
+          await this.playConfiguredHotkeyFeedback("volumeDown");
+          break;
+      }
+    } catch (error) {
+      await this.playConfiguredErrorFeedback();
+      this.setStatus(this.t("status.playbackFailed", { error: String(error) }));
     }
   }
 
@@ -2723,6 +2909,10 @@ export class WebApp {
       return;
     }
     throw new Error("Clipboard write is unavailable");
+  }
+
+  private normalizeTextForClipboard(text: string): string {
+    return this.config.reading.cleanTextBeforeTts ? cleanTextForTts(text) : text;
   }
 
   private async runPipeline(dataUrl: string, captureContext: CaptureContext): Promise<void> {
@@ -2756,10 +2946,13 @@ export class WebApp {
         result = await this.pipeline.run(ocrInput.imageDataUrl, this.config, { regions: ocrInput.regions, signal });
       }
       this.throwIfStale(runId);
+      if (!result.text.trim()) {
+        throw new Error("OCR produced empty text");
+      }
       done();
       loggers.pipeline.info("Pipeline completed", { textLength: result.text.length });
       if (resultMode === "clipboard") {
-        await this.copyTextToClipboard(result.text);
+        await this.copyTextToClipboard(this.normalizeTextForClipboard(result.text));
         this.setStatus(this.t("status.ocrCopiedToClipboard"));
       } else if (!streamingEnabled) {
         this.must<HTMLTextAreaElement>("raw-text").value = result.text;
@@ -2772,6 +2965,9 @@ export class WebApp {
         loggers.pipeline.info("Pipeline cancelled", { runId });
       } else {
         loggers.pipeline.error("Pipeline failed", { error: String(error) });
+        if (captureContext.source === "hotkey") {
+          await this.playConfiguredErrorFeedback();
+        }
         this.setStatus(
           captureContext.resultMode === "clipboard"
             ? this.withApiBaseUrlHint(this.t("status.ocrCopyToClipboardFailed", { error: String(error) }), "ocr", this.config.llm.baseUrl)
@@ -3153,6 +3349,7 @@ export class WebApp {
     } catch (error) {
       if (session !== this.chunkPlaybackSession) return;
       this.failPlaybackAtChunk(chunk.id);
+      await this.playConfiguredErrorFeedback();
       this.setStatus(this.t("status.chunkSynthesisFailed", { current: chunk.index + 1, total: this.timeline.chunks.length, error: String(error) }));
     }
   }

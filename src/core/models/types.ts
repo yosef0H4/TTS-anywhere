@@ -1,6 +1,50 @@
 export type OcrProvider = "openai_compatible" | "gemini_sdk";
 export type TtsProvider = "openai_compatible" | "gemini_sdk";
 export type ThinkingMode = "provider_default" | "low" | "off";
+export type ConfigurableHotkeyKey =
+  | "capture"
+  | "ocrClipboard"
+  | "fullCapture"
+  | "activeWindowCapture"
+  | "copyPlay"
+  | "abort"
+  | "playPause"
+  | "nextChunk"
+  | "previousChunk"
+  | "volumeUp"
+  | "volumeDown"
+  | "replayCapture";
+export type HotkeySoundId =
+  | "capture_start_soft"
+  | "clipboard_capture_soft"
+  | "capture_full_chime"
+  | "capture_window_focus"
+  | "copy_play_confirm"
+  | "abort_soft_thud"
+  | "play_pause_toggle"
+  | "seek_next_tick"
+  | "seek_previous_tick"
+  | "volume_up_rise"
+  | "volume_down_fall"
+  | "replay_capture_echo"
+  | "error_double_buzz";
+export type HotkeyFeedbackPhase = "start" | "success" | "error";
+
+export interface HotkeySoundConfig {
+  soundId: HotkeySoundId;
+  volume: number;
+}
+
+export interface FeedbackSoundsConfig {
+  byHotkey: Record<ConfigurableHotkeyKey, HotkeySoundConfig>;
+  globalError: HotkeySoundConfig;
+}
+
+export interface HotkeyFeedbackEvent {
+  hotkey: ConfigurableHotkeyKey;
+  phase: HotkeyFeedbackPhase;
+  message?: string;
+}
 
 export interface OpenAiCompatibleLlmSettings {
   baseUrl: string;
@@ -126,6 +170,7 @@ export interface SystemConfig {
   volumeDownHotkey: string;
   replayCaptureHotkey: string;
   captureDrawRectangle: boolean;
+  feedbackSounds: FeedbackSoundsConfig;
 }
 
 export interface TextProcessingConfig {

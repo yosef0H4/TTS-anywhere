@@ -1,12 +1,16 @@
+import type { ConfigurableHotkeyKey, HotkeyFeedbackEvent } from "../models/types";
+
 export interface PlatformBridge {
   onCapturedImage(handler: (payload: {
     dataUrl: string;
     captureKind: "selection" | "fullscreen" | "window";
     resultMode: "editor" | "clipboard";
+    hotkey?: ConfigurableHotkeyKey;
   }) => void): void;
   onCopiedTextForPlayback(handler: (text: string) => void): void;
   onAbortRequested(handler: () => void): void;
   onPlaybackHotkey(handler: (action: "toggle_play_pause" | "next_chunk" | "previous_chunk" | "volume_up" | "volume_down") => void): void;
+  onHotkeyFeedback(handler: (event: HotkeyFeedbackEvent) => void): void;
 }
 
 export interface ManagedRapidServiceUrls {
@@ -106,10 +110,12 @@ export interface ElectronApi {
     dataUrl: string;
     captureKind: "selection" | "fullscreen" | "window";
     resultMode: "editor" | "clipboard";
+    hotkey?: ConfigurableHotkeyKey;
   }) => void) => void;
   onCopiedTextForPlayback: (handler: (text: string) => void) => void;
   onAbortRequested: (handler: () => void) => void;
   onPlaybackHotkey: (handler: (action: "toggle_play_pause" | "next_chunk" | "previous_chunk" | "volume_up" | "volume_down") => void) => void;
+  onHotkeyFeedback: (handler: (event: HotkeyFeedbackEvent) => void) => void;
   getAlwaysOnTop: () => Promise<boolean>;
   setAlwaysOnTop: (enabled: boolean) => Promise<boolean>;
   beginCaptureHotkeyEdit: () => Promise<string>;

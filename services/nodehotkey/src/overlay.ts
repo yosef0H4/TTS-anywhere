@@ -1,10 +1,14 @@
 import {
+  CreateSolidBrush,
   CreateWindowExW,
+  CS_HREDRAW,
+  CS_VREDRAW,
+  DefWindowProcW,
+  DeleteObject,
   DestroyWindow,
   HWND_TOPMOST,
   InvalidateRect,
-  SS_BLACKRECT,
-  SS_WHITERECT,
+  RegisterClassExW,
   SetWindowPos,
   ShowWindow,
   SW_HIDE,
@@ -16,12 +20,54 @@ import {
   WS_EX_TOOLWINDOW,
   WS_EX_TOPMOST,
   WS_EX_TRANSPARENT,
-  WS_POPUP
+  WS_POPUP,
+  GetModuleHandleW,
+  registerWindowProc,
+  rgb
 } from "./win32-bindings.js";
 
 export type RawRect = { left: number; top: number; right: number; bottom: number };
 
 type BorderWindows = { top: unknown; right: unknown; bottom: unknown; left: unknown };
+type OverlayClassRegistration = { className: string; brush: unknown };
+
+const overlayClassRegistry = new Map<string, OverlayClassRegistration>();
+const defaultWindowProc = registerWindowProc((hWnd, msg, wParam, lParam) => DefWindowProcW(hWnd, msg, wParam, lParam));
+
+function registerOverlayClass(className: string, color: number): OverlayClassRegistration {
+  const existing = overlayClassRegistry.get(className);
+  if (existing) {
+    return existing;
+  }
+
+  const brush = CreateSolidBrush(color);
+  if (!brush) {
+    throw new Error(`CreateSolidBrush failed for ${className}`);
+  }
+
+  const atom = RegisterClassExW({
+    cbSize: 80,
+    style: CS_HREDRAW | CS_VREDRAW,
+    lpfnWndProc: defaultWindowProc,
+    cbClsExtra: 0,
+    cbWndExtra: 0,
+    hInstance: GetModuleHandleW(null),
+    hIcon: null,
+    hCursor: null,
+    hbrBackground: brush,
+    lpszMenuName: null,
+    lpszClassName: className,
+    hIconSm: null
+  });
+  if (atom === 0) {
+    DeleteObject(brush);
+    throw new Error(`RegisterClassExW failed for ${className}`);
+  }
+
+  const registration = { className, brush };
+  overlayClassRegistry.set(className, registration);
+  return registration;
+}
 
 export class BorderOverlay {
   private readonly outerWindows: BorderWindows;
@@ -30,24 +76,26 @@ export class BorderOverlay {
 
   constructor(thickness: number) {
     this.thickness = Math.max(1, thickness);
+    const outerClass = registerOverlayClass("TTSAnywhereOverlayOuter", rgb(57, 255, 20));
+    const innerClass = registerOverlayClass("TTSAnywhereOverlayInner", rgb(0, 0, 0));
     this.outerWindows = {
-      top: this.createBorderWindow(SS_BLACKRECT),
-      right: this.createBorderWindow(SS_BLACKRECT),
-      bottom: this.createBorderWindow(SS_BLACKRECT),
-      left: this.createBorderWindow(SS_BLACKRECT)
+      top: this.createBorderWindow(outerClass.className),
+      right: this.createBorderWindow(outerClass.className),
+      bottom: this.createBorderWindow(outerClass.className),
+      left: this.createBorderWindow(outerClass.className)
     };
     this.innerWindows = {
-      top: this.createBorderWindow(SS_WHITERECT),
-      right: this.createBorderWindow(SS_WHITERECT),
-      bottom: this.createBorderWindow(SS_WHITERECT),
-      left: this.createBorderWindow(SS_WHITERECT)
+      top: this.createBorderWindow(innerClass.className),
+      right: this.createBorderWindow(innerClass.className),
+      bottom: this.createBorderWindow(innerClass.className),
+      left: this.createBorderWindow(innerClass.className)
     };
   }
 
-  private createBorderWindow(rectStyle: number): unknown {
+  private createBorderWindow(className: string): unknown {
     const exStyle = WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE;
-    const hwnd = CreateWindowExW(exStyle, "STATIC", "", WS_POPUP | rectStyle, 0, 0, 1, 1, null, null, null, null);
-    if (!hwnd) throw new Error("CreateWindowExW(STATIC) failed");
+    const hwnd = CreateWindowExW(exStyle, className, "", WS_POPUP, 0, 0, 1, 1, null, null, null, null);
+    if (!hwnd) throw new Error(`CreateWindowExW(${className}) failed`);
     return hwnd;
   }
 

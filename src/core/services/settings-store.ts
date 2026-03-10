@@ -25,7 +25,11 @@ export class SettingsStore {
           language: parsed.ui?.language === "ar" || parsed.ui?.language === "en" ? parsed.ui.language : resolveUiLanguage(),
           panels: migratedPanels
         },
-        system: { ...DEFAULT_CONFIG.system, ...parsed.system },
+        system: {
+          ...DEFAULT_CONFIG.system,
+          ...parsed.system,
+          feedbackSounds: this.mergeFeedbackSounds(parsed.system?.feedbackSounds)
+        },
         logging: { ...DEFAULT_CONFIG.logging, ...parsed.logging },
         textProcessing: migratedTextProcessing,
         preprocessing: {
@@ -104,6 +108,34 @@ export class SettingsStore {
 
   private cloneDefaults(): AppConfig {
     return JSON.parse(JSON.stringify(DEFAULT_CONFIG)) as AppConfig;
+  }
+
+  private mergeFeedbackSounds(feedbackSounds: unknown): AppConfig["system"]["feedbackSounds"] {
+    const defaults = DEFAULT_CONFIG.system.feedbackSounds;
+    if (!feedbackSounds || typeof feedbackSounds !== "object") {
+      return JSON.parse(JSON.stringify(defaults)) as AppConfig["system"]["feedbackSounds"];
+    }
+    const value = feedbackSounds as {
+      byHotkey?: Partial<Record<keyof typeof defaults.byHotkey, Partial<typeof defaults.byHotkey.capture>>>;
+      globalError?: Partial<typeof defaults.globalError>;
+    };
+    return {
+      byHotkey: {
+        capture: { ...defaults.byHotkey.capture, ...value.byHotkey?.capture },
+        ocrClipboard: { ...defaults.byHotkey.ocrClipboard, ...value.byHotkey?.ocrClipboard },
+        fullCapture: { ...defaults.byHotkey.fullCapture, ...value.byHotkey?.fullCapture },
+        activeWindowCapture: { ...defaults.byHotkey.activeWindowCapture, ...value.byHotkey?.activeWindowCapture },
+        copyPlay: { ...defaults.byHotkey.copyPlay, ...value.byHotkey?.copyPlay },
+        abort: { ...defaults.byHotkey.abort, ...value.byHotkey?.abort },
+        playPause: { ...defaults.byHotkey.playPause, ...value.byHotkey?.playPause },
+        nextChunk: { ...defaults.byHotkey.nextChunk, ...value.byHotkey?.nextChunk },
+        previousChunk: { ...defaults.byHotkey.previousChunk, ...value.byHotkey?.previousChunk },
+        volumeUp: { ...defaults.byHotkey.volumeUp, ...value.byHotkey?.volumeUp },
+        volumeDown: { ...defaults.byHotkey.volumeDown, ...value.byHotkey?.volumeDown },
+        replayCapture: { ...defaults.byHotkey.replayCapture, ...value.byHotkey?.replayCapture }
+      },
+      globalError: { ...defaults.globalError, ...value.globalError }
+    };
   }
 
   private mergeLlm(llm: unknown): AppConfig["llm"] {

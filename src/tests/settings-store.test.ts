@@ -53,6 +53,10 @@ describe("settings store", () => {
     cfg.system.replayCaptureHotkey = "ctrl+shift+alt+d";
     cfg.system.activeWindowCaptureHotkey = "ctrl+shift+alt+w";
     cfg.system.ocrClipboardHotkey = "ctrl+shift+alt+c";
+    cfg.system.feedbackSounds.byHotkey.capture.soundId = "capture_full_chime";
+    cfg.system.feedbackSounds.byHotkey.capture.volume = 64;
+    cfg.system.feedbackSounds.globalError.soundId = "error_double_buzz";
+    cfg.system.feedbackSounds.globalError.volume = 71;
     cfg.textProcessing.detectionMode = "fullscreen_and_window";
     cfg.textProcessing.detectorBaseUrl = "http://127.0.0.1:8093";
     store.save(cfg);
@@ -67,6 +71,10 @@ describe("settings store", () => {
     expect(store.load().system.replayCaptureHotkey).toBe("ctrl+shift+alt+d");
     expect(store.load().system.activeWindowCaptureHotkey).toBe("ctrl+shift+alt+w");
     expect(store.load().system.ocrClipboardHotkey).toBe("ctrl+shift+alt+c");
+    expect(store.load().system.feedbackSounds.byHotkey.capture.soundId).toBe("capture_full_chime");
+    expect(store.load().system.feedbackSounds.byHotkey.capture.volume).toBe(64);
+    expect(store.load().system.feedbackSounds.globalError.soundId).toBe("error_double_buzz");
+    expect(store.load().system.feedbackSounds.globalError.volume).toBe(71);
     expect(store.load().system.fullCaptureHotkey).toBe(DEFAULT_CONFIG.system.fullCaptureHotkey);
     expect(store.load().textProcessing.detectionMode).toBe("fullscreen_and_window");
     expect(store.load().textProcessing.detectorBaseUrl).toBe("http://127.0.0.1:8093");
@@ -203,5 +211,20 @@ describe("settings store", () => {
 
     expect(restored.system.captureHotkey).toBe("");
     expect(restored.system.playPauseHotkey).toBe("");
+  });
+
+  it("fills missing feedback sound settings from defaults", () => {
+    const legacy = {
+      ...DEFAULT_CONFIG,
+      system: {
+        ...DEFAULT_CONFIG.system
+      }
+    };
+    delete (legacy.system as Partial<typeof legacy.system>).feedbackSounds;
+
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(legacy));
+    const restored = new SettingsStore().load();
+
+    expect(restored.system.feedbackSounds).toEqual(DEFAULT_CONFIG.system.feedbackSounds);
   });
 });

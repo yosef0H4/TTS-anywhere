@@ -12,6 +12,8 @@ export const WS_EX_TRANSPARENT = 0x00000020;
 export const WS_EX_NOACTIVATE = 0x08000000;
 export const SS_BLACKRECT = 0x0004;
 export const SS_WHITERECT = 0x0006;
+export const CS_HREDRAW = 0x0002;
+export const CS_VREDRAW = 0x0001;
 export const WM_HOTKEY = 0x0312;
 export const WM_KEYDOWN = 0x0100;
 export const WM_KEYUP = 0x0101;
@@ -42,6 +44,20 @@ export type KbdLlHookStruct = { vkCode: number; scanCode: number; flags: number;
 export type RegisteredCallback = ReturnType<typeof koffi.register>;
 
 const POINT = koffi.struct("POINT", { x: "long", y: "long" });
+const WNDCLASSEXW = koffi.struct("WNDCLASSEXW", {
+  cbSize: "uint32",
+  style: "uint32",
+  lpfnWndProc: "void *",
+  cbClsExtra: "int32",
+  cbWndExtra: "int32",
+  hInstance: "void *",
+  hIcon: "void *",
+  hCursor: "void *",
+  hbrBackground: "void *",
+  lpszMenuName: "void *",
+  lpszClassName: "const char16_t *",
+  hIconSm: "void *"
+});
 const MSG = koffi.struct("MSG", {
   hwnd: "void *",
   message: "uint32",
@@ -74,7 +90,9 @@ const INPUT = koffi.struct("INPUT", {
 
 const user32 = koffi.load("user32.dll");
 const kernel32 = koffi.load("kernel32.dll");
+const gdi32 = koffi.load("gdi32.dll");
 const LowLevelKeyboardProc = koffi.proto("intptr __stdcall LowLevelKeyboardProc(int nCode, uintptr wParam, KBDLLHOOKSTRUCT *lParam)");
+const WindowProc = koffi.proto("intptr __stdcall WindowProc(void *hWnd, uint32 Msg, uintptr wParam, intptr lParam)");
 
 const SetProcessDpiAwarenessContext = user32.func("bool __stdcall SetProcessDpiAwarenessContext(intptr value)") as (
   value: number
@@ -107,6 +125,25 @@ export const GetCursorPos = user32.func("bool __stdcall GetCursorPos(_Out_ POINT
 export const GetModuleHandleW = kernel32.func("void * __stdcall GetModuleHandleW(const char16_t *lpModuleName)") as (
   moduleName: string | null
 ) => unknown;
+export const DefWindowProcW = user32.func(
+  "intptr __stdcall DefWindowProcW(void *hWnd, uint32 Msg, uintptr wParam, intptr lParam)"
+) as (hWnd: unknown, msg: number, wParam: number | bigint, lParam: number | bigint) => number;
+export const RegisterClassExW = user32.func("uint16 __stdcall RegisterClassExW(const WNDCLASSEXW *lpwcx)") as (
+  wndClass: {
+    cbSize: number;
+    style: number;
+    lpfnWndProc: unknown;
+    cbClsExtra: number;
+    cbWndExtra: number;
+    hInstance: unknown;
+    hIcon: null;
+    hCursor: null;
+    hbrBackground: unknown;
+    lpszMenuName: null;
+    lpszClassName: string;
+    hIconSm: null;
+  }
+) => number;
 
 export const CreateWindowExW = user32.func(
   "void * __stdcall CreateWindowExW(uint32 exStyle, const char16_t *className, const char16_t *windowName, uint32 style, int x, int y, int w, int h, void *parent, void *menu, void *instance, void *param)"
@@ -142,6 +179,8 @@ export const InvalidateRect = user32.func("bool __stdcall InvalidateRect(void *h
   erase: boolean
 ) => boolean;
 export const UpdateWindow = user32.func("bool __stdcall UpdateWindow(void *hWnd)") as (hWnd: unknown) => boolean;
+export const CreateSolidBrush = gdi32.func("void * __stdcall CreateSolidBrush(uint32 color)") as (color: number) => unknown;
+export const DeleteObject = gdi32.func("bool __stdcall DeleteObject(void *ho)") as (handle: unknown) => boolean;
 export const SendInput = user32.func(
   "uint32 __stdcall SendInput(uint32 cInputs, const INPUT *pInputs, int cbSize)"
 ) as (count: number, inputs: Array<{ type: number; _pad: number; ki: { wVk: number; wScan: number; dwFlags: number; time: number; dwExtraInfo: number } }>, cbSize: number) => number;
@@ -176,6 +215,13 @@ export const registerLowLevelKeyboardProc = (cb: (nCode: number, wParam: number,
 export const unregisterCallback = (cb: RegisteredCallback): void => {
   koffi.unregister(cb);
 };
+
+export const registerWindowProc = (cb: (hWnd: unknown, msg: number, wParam: number | bigint, lParam: number | bigint) => number): RegisteredCallback =>
+  koffi.register(cb, koffi.pointer(WindowProc));
+
+export function rgb(red: number, green: number, blue: number): number {
+  return (red & 0xff) | ((green & 0xff) << 8) | ((blue & 0xff) << 16);
+}
 
 let dpiInitialized = false;
 

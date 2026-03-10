@@ -1,5 +1,8 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
+  ElectronHotkeyFeedbackEvent,
+  ElectronHotkeyFeedbackPhase,
+  ElectronHotkeyKey,
   ProviderModelsRequest,
   ProviderOcrRequest,
   ProviderOcrStreamEvent,
@@ -30,18 +33,22 @@ contextBridge.exposeInMainWorld("electronAPI", {
     dataUrl: string;
     captureKind: "selection" | "fullscreen" | "window";
     resultMode: "editor" | "clipboard";
+    hotkey?: ElectronHotkeyKey;
   }) => void) => {
     ipcRenderer.on("capture-image", (_event, payload: {
       dataUrl?: string;
       captureKind?: "selection" | "fullscreen" | "window";
       resultMode?: "editor" | "clipboard";
+      hotkey?: ElectronHotkeyKey;
     }) => {
       if (!payload?.dataUrl) return;
       const captureKind = payload.captureKind === "fullscreen" || payload.captureKind === "window"
         ? payload.captureKind
         : "selection";
       const resultMode = payload.resultMode === "clipboard" ? "clipboard" : "editor";
-      handler({ dataUrl: payload.dataUrl, captureKind, resultMode });
+      handler(payload.hotkey
+        ? { dataUrl: payload.dataUrl, captureKind, resultMode, hotkey: payload.hotkey }
+        : { dataUrl: payload.dataUrl, captureKind, resultMode });
     });
   },
   onCopiedTextForPlayback: (handler: (text: string) => void) => {
@@ -62,6 +69,18 @@ contextBridge.exposeInMainWorld("electronAPI", {
       payload: { action?: "toggle_play_pause" | "next_chunk" | "previous_chunk" | "volume_up" | "volume_down" }
     ) => {
       if (payload?.action) handler(payload.action);
+    });
+  },
+  onHotkeyFeedback: (handler: (payload: ElectronHotkeyFeedbackEvent) => void) => {
+    ipcRenderer.on("hotkey-feedback", (_event, payload: {
+      hotkey?: ElectronHotkeyKey;
+      phase?: ElectronHotkeyFeedbackPhase;
+      message?: string;
+    }) => {
+      if (!payload?.hotkey || !payload?.phase) return;
+      handler(payload.message
+        ? { hotkey: payload.hotkey, phase: payload.phase, message: payload.message }
+        : { hotkey: payload.hotkey, phase: payload.phase });
     });
   },
   getAlwaysOnTop: () => {

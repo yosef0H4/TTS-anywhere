@@ -269,6 +269,20 @@
             <button type="button" id="btn-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
           </div>
           <div class="setting-footnote" id="hotkey-recording-status"></div>
+          <div class="setting-grid hotkey-sound-grid" data-hotkey-sound-controls="capture">
+            <div class="setting-group">
+              <label for="capture-sound-id" data-i18n="system.soundEffect">Sound Effect</label>
+              <div class="setting-inline">
+                <select id="capture-sound-id"></select>
+                <button type="button" class="refetch-btn hotkey-sound-preview-btn" id="btn-capture-sound-preview" data-i18n="action.preview">Preview</button>
+              </div>
+            </div>
+            <div class="setting-group">
+              <label for="capture-sound-volume" data-i18n="system.soundVolume">Sound Volume</label>
+              <input id="capture-sound-volume" type="range" min="0" max="100" step="1">
+              <div class="setting-footnote" id="capture-sound-volume-value">0%</div>
+            </div>
+          </div>
           <div class="setting-group">
             <label data-i18n="system.ocrClipboardHotkey">OCR to Clipboard Hotkey</label>
             <input type="text" id="ocr-clipboard-hotkey" readonly>
@@ -280,6 +294,20 @@
             <button type="button" id="btn-ocr-clipboard-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
           </div>
           <div class="setting-footnote" id="ocr-clipboard-hotkey-recording-status"></div>
+          <div class="setting-grid hotkey-sound-grid" data-hotkey-sound-controls="ocrClipboard">
+            <div class="setting-group">
+              <label for="ocrClipboard-sound-id" data-i18n="system.soundEffect">Sound Effect</label>
+              <div class="setting-inline">
+                <select id="ocrClipboard-sound-id"></select>
+                <button type="button" class="refetch-btn hotkey-sound-preview-btn" id="btn-ocrClipboard-sound-preview" data-i18n="action.preview">Preview</button>
+              </div>
+            </div>
+            <div class="setting-group">
+              <label for="ocrClipboard-sound-volume" data-i18n="system.soundVolume">Sound Volume</label>
+              <input id="ocrClipboard-sound-volume" type="range" min="0" max="100" step="1">
+              <div class="setting-footnote" id="ocrClipboard-sound-volume-value">0%</div>
+            </div>
+          </div>
           <div class="setting-group">
             <label data-i18n="system.fullCaptureHotkey">Full Screen Capture Hotkey</label>
             <input type="text" id="full-capture-hotkey" readonly>
@@ -291,6 +319,20 @@
             <button type="button" id="btn-full-capture-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
           </div>
           <div class="setting-footnote" id="full-capture-hotkey-recording-status"></div>
+          <div class="setting-grid hotkey-sound-grid" data-hotkey-sound-controls="fullCapture">
+            <div class="setting-group">
+              <label for="fullCapture-sound-id" data-i18n="system.soundEffect">Sound Effect</label>
+              <div class="setting-inline">
+                <select id="fullCapture-sound-id"></select>
+                <button type="button" class="refetch-btn hotkey-sound-preview-btn" id="btn-fullCapture-sound-preview" data-i18n="action.preview">Preview</button>
+              </div>
+            </div>
+            <div class="setting-group">
+              <label for="fullCapture-sound-volume" data-i18n="system.soundVolume">Sound Volume</label>
+              <input id="fullCapture-sound-volume" type="range" min="0" max="100" step="1">
+              <div class="setting-footnote" id="fullCapture-sound-volume-value">0%</div>
+            </div>
+          </div>
           <div class="setting-group">
             <label data-i18n="system.activeWindowCaptureHotkey">Active Window Capture Hotkey</label>
             <input type="text" id="active-window-capture-hotkey" readonly>
@@ -302,6 +344,20 @@
             <button type="button" id="btn-active-window-capture-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
           </div>
           <div class="setting-footnote" id="active-window-capture-hotkey-recording-status"></div>
+          <div class="setting-grid hotkey-sound-grid" data-hotkey-sound-controls="activeWindowCapture">
+            <div class="setting-group">
+              <label for="activeWindowCapture-sound-id" data-i18n="system.soundEffect">Sound Effect</label>
+              <div class="setting-inline">
+                <select id="activeWindowCapture-sound-id"></select>
+                <button type="button" class="refetch-btn hotkey-sound-preview-btn" id="btn-activeWindowCapture-sound-preview" data-i18n="action.preview">Preview</button>
+              </div>
+            </div>
+            <div class="setting-group">
+              <label for="activeWindowCapture-sound-volume" data-i18n="system.soundVolume">Sound Volume</label>
+              <input id="activeWindowCapture-sound-volume" type="range" min="0" max="100" step="1">
+              <div class="setting-footnote" id="activeWindowCapture-sound-volume-value">0%</div>
+            </div>
+          </div>
           <div class="setting-group">
             <label data-i18n="system.copyPlayHotkey">Copy & Play Hotkey</label>
             <input type="text" id="copy-play-hotkey" readonly>
@@ -313,6 +369,20 @@
             <button type="button" id="btn-copy-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
           </div>
           <div class="setting-footnote" id="copy-hotkey-recording-status"></div>
+          <div class="setting-grid hotkey-sound-grid" data-hotkey-sound-controls="copyPlay">
+            <div class="setting-group">
+              <label for="copyPlay-sound-id" data-i18n="system.soundEffect">Sound Effect</label>
+              <div class="setting-inline">
+                <select id="copyPlay-sound-id"></select>
+                <button type="button" class="refetch-btn hotkey-sound-preview-btn" id="btn-copyPlay-sound-preview" data-i18n="action.preview">Preview</button>
+              </div>
+            </div>
+            <div class="setting-group">
+              <label for="copyPlay-sound-volume" data-i18n="system.soundVolume">Sound Volume</label>
+              <input id="copyPlay-sound-volume" type="range" min="0" max="100" step="1">
+              <div class="setting-footnote" id="copyPlay-sound-volume-value">0%</div>
+            </div>
+          </div>
           <div class="setting-group">
             <label data-i18n="system.abortHotkey">Abort Hotkey</label>
             <input type="text" id="abort-hotkey" readonly>
@@ -324,6 +394,20 @@
             <button type="button" id="btn-abort-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
           </div>
           <div class="setting-footnote" id="abort-hotkey-recording-status"></div>
+          <div class="setting-grid hotkey-sound-grid" data-hotkey-sound-controls="abort">
+            <div class="setting-group">
+              <label for="abort-sound-id" data-i18n="system.soundEffect">Sound Effect</label>
+              <div class="setting-inline">
+                <select id="abort-sound-id"></select>
+                <button type="button" class="refetch-btn hotkey-sound-preview-btn" id="btn-abort-sound-preview" data-i18n="action.preview">Preview</button>
+              </div>
+            </div>
+            <div class="setting-group">
+              <label for="abort-sound-volume" data-i18n="system.soundVolume">Sound Volume</label>
+              <input id="abort-sound-volume" type="range" min="0" max="100" step="1">
+              <div class="setting-footnote" id="abort-sound-volume-value">0%</div>
+            </div>
+          </div>
           <div class="setting-group">
             <label data-i18n="system.playPauseHotkey">Play / Pause Hotkey</label>
             <input type="text" id="play-pause-hotkey" readonly>
@@ -335,6 +419,20 @@
             <button type="button" id="btn-play-pause-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
           </div>
           <div class="setting-footnote" id="play-pause-hotkey-recording-status"></div>
+          <div class="setting-grid hotkey-sound-grid" data-hotkey-sound-controls="playPause">
+            <div class="setting-group">
+              <label for="playPause-sound-id" data-i18n="system.soundEffect">Sound Effect</label>
+              <div class="setting-inline">
+                <select id="playPause-sound-id"></select>
+                <button type="button" class="refetch-btn hotkey-sound-preview-btn" id="btn-playPause-sound-preview" data-i18n="action.preview">Preview</button>
+              </div>
+            </div>
+            <div class="setting-group">
+              <label for="playPause-sound-volume" data-i18n="system.soundVolume">Sound Volume</label>
+              <input id="playPause-sound-volume" type="range" min="0" max="100" step="1">
+              <div class="setting-footnote" id="playPause-sound-volume-value">0%</div>
+            </div>
+          </div>
           <div class="setting-group">
             <label data-i18n="system.nextChunkHotkey">Next Chunk Hotkey</label>
             <input type="text" id="next-chunk-hotkey" readonly>
@@ -346,6 +444,20 @@
             <button type="button" id="btn-next-chunk-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
           </div>
           <div class="setting-footnote" id="next-chunk-hotkey-recording-status"></div>
+          <div class="setting-grid hotkey-sound-grid" data-hotkey-sound-controls="nextChunk">
+            <div class="setting-group">
+              <label for="nextChunk-sound-id" data-i18n="system.soundEffect">Sound Effect</label>
+              <div class="setting-inline">
+                <select id="nextChunk-sound-id"></select>
+                <button type="button" class="refetch-btn hotkey-sound-preview-btn" id="btn-nextChunk-sound-preview" data-i18n="action.preview">Preview</button>
+              </div>
+            </div>
+            <div class="setting-group">
+              <label for="nextChunk-sound-volume" data-i18n="system.soundVolume">Sound Volume</label>
+              <input id="nextChunk-sound-volume" type="range" min="0" max="100" step="1">
+              <div class="setting-footnote" id="nextChunk-sound-volume-value">0%</div>
+            </div>
+          </div>
           <div class="setting-group">
             <label data-i18n="system.previousChunkHotkey">Previous Chunk Hotkey</label>
             <input type="text" id="previous-chunk-hotkey" readonly>
@@ -357,6 +469,20 @@
             <button type="button" id="btn-previous-chunk-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
           </div>
           <div class="setting-footnote" id="previous-chunk-hotkey-recording-status"></div>
+          <div class="setting-grid hotkey-sound-grid" data-hotkey-sound-controls="previousChunk">
+            <div class="setting-group">
+              <label for="previousChunk-sound-id" data-i18n="system.soundEffect">Sound Effect</label>
+              <div class="setting-inline">
+                <select id="previousChunk-sound-id"></select>
+                <button type="button" class="refetch-btn hotkey-sound-preview-btn" id="btn-previousChunk-sound-preview" data-i18n="action.preview">Preview</button>
+              </div>
+            </div>
+            <div class="setting-group">
+              <label for="previousChunk-sound-volume" data-i18n="system.soundVolume">Sound Volume</label>
+              <input id="previousChunk-sound-volume" type="range" min="0" max="100" step="1">
+              <div class="setting-footnote" id="previousChunk-sound-volume-value">0%</div>
+            </div>
+          </div>
           <div class="setting-group">
             <label data-i18n="system.volumeUpHotkey">Volume Up Hotkey</label>
             <input type="text" id="volume-up-hotkey" readonly>
@@ -368,6 +494,20 @@
             <button type="button" id="btn-volume-up-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
           </div>
           <div class="setting-footnote" id="volume-up-hotkey-recording-status"></div>
+          <div class="setting-grid hotkey-sound-grid" data-hotkey-sound-controls="volumeUp">
+            <div class="setting-group">
+              <label for="volumeUp-sound-id" data-i18n="system.soundEffect">Sound Effect</label>
+              <div class="setting-inline">
+                <select id="volumeUp-sound-id"></select>
+                <button type="button" class="refetch-btn hotkey-sound-preview-btn" id="btn-volumeUp-sound-preview" data-i18n="action.preview">Preview</button>
+              </div>
+            </div>
+            <div class="setting-group">
+              <label for="volumeUp-sound-volume" data-i18n="system.soundVolume">Sound Volume</label>
+              <input id="volumeUp-sound-volume" type="range" min="0" max="100" step="1">
+              <div class="setting-footnote" id="volumeUp-sound-volume-value">0%</div>
+            </div>
+          </div>
           <div class="setting-group">
             <label data-i18n="system.volumeDownHotkey">Volume Down Hotkey</label>
             <input type="text" id="volume-down-hotkey" readonly>
@@ -379,6 +519,20 @@
             <button type="button" id="btn-volume-down-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
           </div>
           <div class="setting-footnote" id="volume-down-hotkey-recording-status"></div>
+          <div class="setting-grid hotkey-sound-grid" data-hotkey-sound-controls="volumeDown">
+            <div class="setting-group">
+              <label for="volumeDown-sound-id" data-i18n="system.soundEffect">Sound Effect</label>
+              <div class="setting-inline">
+                <select id="volumeDown-sound-id"></select>
+                <button type="button" class="refetch-btn hotkey-sound-preview-btn" id="btn-volumeDown-sound-preview" data-i18n="action.preview">Preview</button>
+              </div>
+            </div>
+            <div class="setting-group">
+              <label for="volumeDown-sound-volume" data-i18n="system.soundVolume">Sound Volume</label>
+              <input id="volumeDown-sound-volume" type="range" min="0" max="100" step="1">
+              <div class="setting-footnote" id="volumeDown-sound-volume-value">0%</div>
+            </div>
+          </div>
           <div class="setting-group">
             <label data-i18n="system.replayCaptureHotkey">Replay Capture Hotkey</label>
             <input type="text" id="replay-capture-hotkey" readonly>
@@ -390,6 +544,34 @@
             <button type="button" id="btn-replay-capture-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
           </div>
           <div class="setting-footnote" id="replay-capture-hotkey-recording-status"></div>
+          <div class="setting-grid hotkey-sound-grid" data-hotkey-sound-controls="replayCapture">
+            <div class="setting-group">
+              <label for="replayCapture-sound-id" data-i18n="system.soundEffect">Sound Effect</label>
+              <div class="setting-inline">
+                <select id="replayCapture-sound-id"></select>
+                <button type="button" class="refetch-btn hotkey-sound-preview-btn" id="btn-replayCapture-sound-preview" data-i18n="action.preview">Preview</button>
+              </div>
+            </div>
+            <div class="setting-group">
+              <label for="replayCapture-sound-volume" data-i18n="system.soundVolume">Sound Volume</label>
+              <input id="replayCapture-sound-volume" type="range" min="0" max="100" step="1">
+              <div class="setting-footnote" id="replayCapture-sound-volume-value">0%</div>
+            </div>
+          </div>
+          <div class="setting-grid hotkey-sound-grid hotkey-sound-grid--global-error" data-hotkey-sound-controls="globalError">
+            <div class="setting-group">
+              <label for="global-error-sound-id" data-i18n="system.errorSound">Error Sound</label>
+              <div class="setting-inline">
+                <select id="global-error-sound-id"></select>
+                <button type="button" class="refetch-btn hotkey-sound-preview-btn" id="btn-global-error-sound-preview" data-i18n="action.preview">Preview</button>
+              </div>
+            </div>
+            <div class="setting-group">
+              <label for="global-error-sound-volume" data-i18n="system.soundVolume">Sound Volume</label>
+              <input id="global-error-sound-volume" type="range" min="0" max="100" step="1">
+              <div class="setting-footnote" id="global-error-sound-volume-value">0%</div>
+            </div>
+          </div>
           <div class="setting-group setting-toggle-row">
             <label for="capture-draw-rectangle" data-i18n="system.drawSelectionRectangle">Draw Selection Rectangle</label>
             <label class="setting-switch" for="capture-draw-rectangle">

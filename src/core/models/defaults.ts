@@ -117,7 +117,27 @@ export const DEFAULT_CONFIG: AppConfig = {
     volumeUpHotkey: "ctrl+shift+alt+up",
     volumeDownHotkey: "ctrl+shift+alt+down",
     replayCaptureHotkey: "ctrl+shift+alt+d",
-    captureDrawRectangle: true
+    captureDrawRectangle: true,
+    feedbackSounds: {
+      byHotkey: {
+        capture: { soundId: "capture_start_soft", volume: 10 },
+        ocrClipboard: { soundId: "clipboard_capture_soft", volume: 10 },
+        fullCapture: { soundId: "capture_full_chime", volume: 10 },
+        activeWindowCapture: { soundId: "capture_window_focus", volume: 10 },
+        copyPlay: { soundId: "copy_play_confirm", volume: 10 },
+        abort: { soundId: "abort_soft_thud", volume: 10 },
+        playPause: { soundId: "play_pause_toggle", volume: 10 },
+        nextChunk: { soundId: "seek_next_tick", volume: 10 },
+        previousChunk: { soundId: "seek_previous_tick", volume: 10 },
+        volumeUp: { soundId: "volume_up_rise", volume: 10 },
+        volumeDown: { soundId: "volume_down_fall", volume: 10 },
+        replayCapture: { soundId: "replay_capture_echo", volume: 10 }
+      },
+      globalError: {
+        soundId: "error_double_buzz",
+        volume: 10
+      }
+    }
   },
   logging: {
     level: "info",

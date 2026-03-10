@@ -8,6 +8,7 @@ function createApi(overrides: Partial<ElectronApi> = {}): ElectronApi {
     onCopiedTextForPlayback: () => undefined,
     onAbortRequested: () => undefined,
     onPlaybackHotkey: () => undefined,
+    onHotkeyFeedback: () => undefined,
     getAlwaysOnTop: async () => false,
     setAlwaysOnTop: async () => false,
     beginCaptureHotkeyEdit: async () => "",

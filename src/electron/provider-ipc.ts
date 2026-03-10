@@ -1,4 +1,24 @@
 export type ProviderKind = "openai_compatible" | "gemini_sdk";
+export type ElectronHotkeyKey =
+  | "capture"
+  | "ocrClipboard"
+  | "fullCapture"
+  | "activeWindowCapture"
+  | "copyPlay"
+  | "abort"
+  | "playPause"
+  | "nextChunk"
+  | "previousChunk"
+  | "volumeUp"
+  | "volumeDown"
+  | "replayCapture";
+export type ElectronHotkeyFeedbackPhase = "start" | "success" | "error";
+
+export interface ElectronHotkeyFeedbackEvent {
+  hotkey: ElectronHotkeyKey;
+  phase: ElectronHotkeyFeedbackPhase;
+  message?: string;
+}
 
 export interface ProviderLlmConfig {
   baseUrl?: string;
