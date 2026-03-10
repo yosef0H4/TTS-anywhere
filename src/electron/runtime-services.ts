@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 
 import type { BundledServicesManifest } from "./service-bundle-manifest.js";
 
@@ -91,6 +92,30 @@ function writeRuntimeServicesManifest(manifestFile: string, manifest: BundledSer
   fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`, "utf-8");
 }
 
+function sha256File(filePath: string): string {
+  const hash = crypto.createHash("sha256");
+  hash.update(fs.readFileSync(filePath));
+  return hash.digest("hex");
+}
+
+function runtimeTreeMatchesManifest(targetRoot: string, manifest: BundledServicesManifest | null): boolean {
+  if (manifest === null) return false;
+  for (const entry of manifest.services) {
+    const targetPath = path.join(targetRoot, ...entry.path.split("/"));
+    if (!fs.existsSync(targetPath)) {
+      return false;
+    }
+    const stat = fs.statSync(targetPath);
+    if (!stat.isFile()) {
+      return false;
+    }
+    if (sha256File(targetPath) !== entry.sha256) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function resetRuntimeServicesRoot(targetRoot: string): void {
   fs.rmSync(targetRoot, { recursive: true, force: true });
   ensureDir(targetRoot);
@@ -106,7 +131,9 @@ export function syncBundledServicesToRuntime(options: RuntimeServicesSyncOptions
   const runtimeHash = runtimeManifest?.hash ?? null;
   const hasTargetRoot = fs.existsSync(options.targetRoot);
 
-  if (bundledHash !== null && runtimeHash === bundledHash && hasTargetRoot) {
+  const runtimeMatchesBundle = hasTargetRoot && runtimeTreeMatchesManifest(options.targetRoot, options.bundledManifest);
+
+  if (bundledHash !== null && runtimeHash === bundledHash && runtimeMatchesBundle) {
     options.logSync?.({
       action: "skipped",
       reason: "bundle hash matched existing runtime services",
@@ -140,6 +167,8 @@ export function syncBundledServicesToRuntime(options: RuntimeServicesSyncOptions
           ? hasTargetRoot
             ? "runtime services manifest missing or invalid"
             : "runtime services directory missing"
+          : !runtimeMatchesBundle
+            ? "runtime services content drifted from bundle manifest"
           : !hasTargetRoot
             ? "runtime services directory missing"
             : "bundle hash changed",

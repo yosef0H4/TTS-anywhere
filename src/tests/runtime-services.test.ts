@@ -1,5 +1,6 @@
 // @vitest-environment node
 
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -20,6 +21,10 @@ function makeTempDir(): string {
 function writeFile(filePath: string, contents: string): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, contents, "utf-8");
+}
+
+function sha256(contents: string): string {
+  return crypto.createHash("sha256").update(contents).digest("hex");
 }
 
 function makeManifest(hash: string, services: BundledServicesManifest["services"] = []): BundledServicesManifest {
@@ -58,26 +63,82 @@ describe("syncBundledServicesToRuntime", () => {
     expect(fs.existsSync(targetRoot)).toBe(false);
   });
 
-  it("keeps the existing runtime tree when the bundle hash matches", () => {
+  it("keeps the existing runtime tree when the bundle hash and files match", () => {
     const root = makeTempDir();
     const sourceRoot = path.join(root, "services");
     const targetRoot = path.join(root, "runtime", "services");
     const manifestFile = path.join(root, "runtime", ".bundled-services-manifest.json");
+    const freshContents = "fresh";
+    const manifest = makeManifest("hash-a", [
+      { path: "tts/edge/fresh.txt", sha256: sha256(freshContents) }
+    ]);
 
-    writeFile(path.join(sourceRoot, "tts", "edge", "fresh.txt"), "fresh");
+    writeFile(path.join(sourceRoot, "tts", "edge", "fresh.txt"), freshContents);
+    writeFile(path.join(targetRoot, "tts", "edge", "fresh.txt"), freshContents);
     writeFile(path.join(targetRoot, "tts", "edge", "stale.txt"), "keep");
-    writeFile(manifestFile, `${JSON.stringify(makeManifest("hash-a"))}\n`);
+    writeFile(manifestFile, `${JSON.stringify(manifest)}\n`);
 
     syncBundledServicesToRuntime({
       isPackaged: true,
       sourceRoot,
       targetRoot,
-      bundledManifest: makeManifest("hash-a"),
+      bundledManifest: manifest,
       manifestFile
     });
 
     expect(fs.existsSync(path.join(targetRoot, "tts", "edge", "stale.txt"))).toBe(true);
-    expect(fs.existsSync(path.join(targetRoot, "tts", "edge", "fresh.txt"))).toBe(false);
+    expect(fs.existsSync(path.join(targetRoot, "tts", "edge", "fresh.txt"))).toBe(true);
+  });
+
+  it("rebuilds when the hash matches but the runtime tree is missing bundled files", () => {
+    const root = makeTempDir();
+    const sourceRoot = path.join(root, "services");
+    const targetRoot = path.join(root, "runtime", "services");
+    const manifestFile = path.join(root, "runtime", ".bundled-services-manifest.json");
+    const launcherContents = "print('ok')";
+    const manifest = makeManifest("hash-a", [
+      { path: "text_processing/rapid/launcher.py", sha256: sha256(launcherContents) }
+    ]);
+
+    writeFile(path.join(sourceRoot, "text_processing", "rapid", "launcher.py"), launcherContents);
+    writeFile(path.join(targetRoot, "text_processing", "rapid", ".venv", "old.txt"), "old");
+    writeFile(manifestFile, `${JSON.stringify(manifest)}\n`);
+
+    syncBundledServicesToRuntime({
+      isPackaged: true,
+      sourceRoot,
+      targetRoot,
+      bundledManifest: manifest,
+      manifestFile
+    });
+
+    expect(fs.existsSync(path.join(targetRoot, "text_processing", "rapid", "launcher.py"))).toBe(true);
+    expect(fs.existsSync(path.join(targetRoot, "text_processing", "rapid", ".venv"))).toBe(false);
+  });
+
+  it("rebuilds when the hash matches but a bundled file has drifted", () => {
+    const root = makeTempDir();
+    const sourceRoot = path.join(root, "services");
+    const targetRoot = path.join(root, "runtime", "services");
+    const manifestFile = path.join(root, "runtime", ".bundled-services-manifest.json");
+    const launcherContents = "print('one')";
+    const manifest = makeManifest("hash-a", [
+      { path: "tts/edge/launcher.py", sha256: sha256(launcherContents) }
+    ]);
+
+    writeFile(path.join(sourceRoot, "tts", "edge", "launcher.py"), launcherContents);
+    writeFile(path.join(targetRoot, "tts", "edge", "launcher.py"), "print('old')");
+    writeFile(manifestFile, `${JSON.stringify(manifest)}\n`);
+
+    syncBundledServicesToRuntime({
+      isPackaged: true,
+      sourceRoot,
+      targetRoot,
+      bundledManifest: manifest,
+      manifestFile
+    });
+
+    expect(fs.readFileSync(path.join(targetRoot, "tts", "edge", "launcher.py"), "utf-8")).toBe(launcherContents);
   });
 
   it("recreates the runtime tree when the bundle hash changes", () => {

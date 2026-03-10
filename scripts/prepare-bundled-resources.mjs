@@ -5,7 +5,9 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import ignore from "ignore";
 
-const projectRoot = process.cwd();
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(scriptDir, "..");
+process.chdir(projectRoot);
 const outputRoot = path.join(projectRoot, ".bundle-resources");
 const servicesOutputRoot = path.join(outputRoot, "services");
 const binOutputRoot = path.join(outputRoot, "bin");

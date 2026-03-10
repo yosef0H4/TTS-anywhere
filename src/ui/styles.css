@@ -78,6 +78,11 @@ body {
     --accent: #ef6b57;
     --accent-strong: #2f2f32;
     --dot: #cfc8b5;
+    --dot-opacity: 0.34;
+    --dot-blur: 0.45px;
+    --bg-glow:
+        radial-gradient(circle at 18% 14%, color-mix(in srgb, #fff 62%, transparent), transparent 30%),
+        radial-gradient(circle at 82% 12%, color-mix(in srgb, var(--accent) 4%, transparent), transparent 24%);
     --workspace-left: 38%;
     --workspace-right-top: 55%;
     --mobile-image-height: 34%;
@@ -103,7 +108,13 @@ body {
     --line-soft: #fbcfe8;
     --accent: #db2777;
     --accent-strong: #be185d;
-    --dot: #db2777;
+    --dot: color-mix(in srgb, #db2777 42%, #ffffff 58%);
+    --dot-opacity: 0.24;
+    --dot-blur: 1.2px;
+    --bg-glow:
+        radial-gradient(circle at 16% 12%, rgba(255, 255, 255, 0.95), transparent 28%),
+        radial-gradient(circle at 78% 10%, rgba(244, 114, 182, 0.18), transparent 24%),
+        radial-gradient(circle at 50% 100%, rgba(251, 207, 232, 0.4), transparent 38%);
 }
 
 #app-shell[data-density="compact"] .setting-group input,
@@ -159,10 +170,12 @@ body {
     inset: 0;
     z-index: 0;
     pointer-events: none;
-    background-image: radial-gradient(var(--dot) 1.7px, transparent 1.7px);
+    background-image:
+        var(--bg-glow),
+        radial-gradient(var(--dot) 1.7px, transparent 1.7px);
     background-size: 24px 24px;
-    opacity: 0.34;
-    filter: blur(0.45px);
+    opacity: var(--dot-opacity);
+    filter: blur(var(--dot-blur));
 }
 
 .sidebar {
