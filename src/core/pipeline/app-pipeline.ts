@@ -15,10 +15,31 @@ export interface OcrRegion {
   nh: number;
 }
 
+interface LlmServiceLike {
+  extractTextFromImage: (
+    dataUrl: string,
+    config: AppConfig["llm"],
+    options?: { signal?: AbortSignal }
+  ) => Promise<{ text: string }>;
+  extractTextFromImageStream: (
+    dataUrl: string,
+    config: AppConfig["llm"],
+    options?: { signal?: AbortSignal; onToken?: (token: string) => void }
+  ) => Promise<{ text: string }>;
+}
+
+interface TtsServiceLike {
+  synthesize: (
+    text: string,
+    config: AppConfig["tts"],
+    options?: { signal?: AbortSignal; timeoutMs?: number }
+  ) => Promise<{ audioBlob: Blob }>;
+}
+
 export class AppPipeline {
   constructor(
-    private readonly llm = new OpenAiCompatibleLlmService(),
-    private readonly tts = new OpenAiCompatibleTtsService()
+    private readonly llm: LlmServiceLike = new OpenAiCompatibleLlmService(),
+    private readonly tts: TtsServiceLike = new OpenAiCompatibleTtsService()
   ) {}
 
   async run(

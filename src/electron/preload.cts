@@ -1,4 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type {
+  ProviderModelsRequest,
+  ProviderOcrRequest,
+  ProviderOcrStreamEvent,
+  ProviderTtsRequest,
+  ProviderVoicesRequest
+} from "./provider-ipc.js";
 
 function recordStartupPhase(phase: string, details?: Record<string, unknown>): void {
   ipcRenderer.send("startup:phase", { phase, details });
@@ -279,5 +286,33 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   writeTextToClipboard: (text: string) => {
     return ipcRenderer.invoke("clipboard:write-text", text) as Promise<void>;
+  },
+  extractProviderText: (request: ProviderOcrRequest) => {
+    return ipcRenderer.invoke("provider:extract-text", request);
+  },
+  startProviderOcrStream: (request: ProviderOcrRequest) => {
+    return ipcRenderer.invoke("provider:start-ocr-stream", request);
+  },
+  synthesizeProviderText: (request: ProviderTtsRequest) => {
+    return ipcRenderer.invoke("provider:synthesize-text", request);
+  },
+  fetchProviderModels: (request: ProviderModelsRequest) => {
+    return ipcRenderer.invoke("provider:fetch-models", request);
+  },
+  fetchProviderVoices: (request: ProviderVoicesRequest) => {
+    return ipcRenderer.invoke("provider:fetch-voices", request);
+  },
+  cancelProviderRequest: (requestId: string) => {
+    return ipcRenderer.invoke("provider:cancel-request", requestId) as Promise<void>;
+  },
+  onProviderOcrStreamEvent: (handler: (event: ProviderOcrStreamEvent) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+      if (!payload || typeof payload !== "object") return;
+      handler(payload as ProviderOcrStreamEvent);
+    };
+    ipcRenderer.on("provider:ocr-stream-event", listener);
+    return () => {
+      ipcRenderer.removeListener("provider:ocr-stream-event", listener);
+    };
   }
 });

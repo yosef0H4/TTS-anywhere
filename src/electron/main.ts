@@ -14,6 +14,20 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  ElectronProviderLlmService,
+  ElectronProviderTtsService,
+  extractErrorMessage,
+  fetchProviderModels,
+  fetchProviderVoices
+} from "./provider-service.js";
+import type {
+  ProviderModelsRequest,
+  ProviderOcrRequest,
+  ProviderOcrStreamEvent,
+  ProviderTtsRequest,
+  ProviderVoicesRequest
+} from "./provider-ipc.js";
 import { syncBundledServicesToRuntime as syncBundledServicesToRuntimeHelper } from "./runtime-services.js";
 
 type LogLevel = "debug" | "info" | "warn" | "error";
@@ -118,6 +132,9 @@ let appCloseInFlight = false;
 let shutdownWatchdog: NodeJS.Timeout | null = null;
 let managedServiceChildren: Partial<Record<ManagedServiceId, ManagedStackChild>> = {};
 let managedServiceLaunchPromises: Partial<Record<ManagedServiceId, Promise<ManagedServiceStatus>>> = {};
+const providerLlmService = new ElectronProviderLlmService();
+const providerTtsService = new ElectronProviderTtsService();
+const providerAbortControllers = new Map<string, AbortController>();
 let managedServicesStatus: ManagedServicesStatus = {
   rapid: {
     state: "stopped",
@@ -835,6 +852,23 @@ function diag(event: string, data?: Record<string, unknown>): void {
     // no-op
   }
   noteStartupPhase(event, data);
+}
+
+function createProviderController(requestId: string): AbortController {
+  const existing = providerAbortControllers.get(requestId);
+  existing?.abort();
+  const controller = new AbortController();
+  providerAbortControllers.set(requestId, controller);
+  return controller;
+}
+
+function finishProviderController(requestId: string): void {
+  providerAbortControllers.delete(requestId);
+}
+
+function sendProviderOcrStreamEvent(event: ProviderOcrStreamEvent): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send("provider:ocr-stream-event", event);
 }
 
 function clearLogs(): void {
@@ -2374,6 +2408,73 @@ ipcMain.handle("stack:get-services-status", () => managedServicesStatusSnapshot(
 ipcMain.handle("stack:launch-service", async (_event, serviceId: ManagedServiceId) => launchManagedService(serviceId));
 ipcMain.handle("stack:stop-service", async (_event, serviceId: ManagedServiceId) => stopManagedService(serviceId));
 ipcMain.handle("stack:open-runtime-services", async () => openRuntimeServicesFolder());
+ipcMain.handle("provider:extract-text", async (_event, request: ProviderOcrRequest) => {
+  const controller = createProviderController(request.requestId);
+  diag("provider.ocr.request.begin", { requestId: request.requestId, model: request.config.model });
+  try {
+    const result = await providerLlmService.extractTextFromImage(request.imageDataUrl, request.config, { signal: controller.signal });
+    diag("provider.ocr.request.end", { requestId: request.requestId, textLength: result.text.length });
+    return result;
+  } catch (error) {
+    const message = extractErrorMessage(error);
+    diag("provider.ocr.request.failed", { requestId: request.requestId, error: message });
+    throw new Error(message);
+  } finally {
+    finishProviderController(request.requestId);
+  }
+});
+ipcMain.handle("provider:start-ocr-stream", async (_event, request: ProviderOcrRequest) => {
+  const controller = createProviderController(request.requestId);
+  diag("provider.ocr.stream.begin", { requestId: request.requestId, model: request.config.model });
+  try {
+    const result = await providerLlmService.extractTextFromImageStream(request.imageDataUrl, request.config, {
+      signal: controller.signal,
+      onToken: (token) => {
+        sendProviderOcrStreamEvent({ requestId: request.requestId, type: "token", token });
+      }
+    });
+    sendProviderOcrStreamEvent({ requestId: request.requestId, type: "done", text: result.text });
+    diag("provider.ocr.stream.end", { requestId: request.requestId, textLength: result.text.length });
+    return result;
+  } catch (error) {
+    const message = extractErrorMessage(error);
+    sendProviderOcrStreamEvent({ requestId: request.requestId, type: "error", error: message });
+    diag("provider.ocr.stream.failed", { requestId: request.requestId, error: message });
+    throw new Error(message);
+  } finally {
+    finishProviderController(request.requestId);
+  }
+});
+ipcMain.handle("provider:synthesize-text", async (_event, request: ProviderTtsRequest) => {
+  const controller = createProviderController(request.requestId);
+  diag("provider.tts.request.begin", { requestId: request.requestId, model: request.config.model, voice: request.config.voice });
+  try {
+    const result = await providerTtsService.synthesize(
+      request.text,
+      request.config,
+      request.timeoutMs === undefined
+        ? { signal: controller.signal }
+        : { signal: controller.signal, timeoutMs: request.timeoutMs }
+    );
+    diag("provider.tts.request.end", { requestId: request.requestId, bytes: result.audioBytes.byteLength });
+    return result;
+  } catch (error) {
+    const message = extractErrorMessage(error);
+    diag("provider.tts.request.failed", { requestId: request.requestId, error: message });
+    throw new Error(message);
+  } finally {
+    finishProviderController(request.requestId);
+  }
+});
+ipcMain.handle("provider:fetch-models", async (_event, request: ProviderModelsRequest) => {
+  return fetchProviderModels(request);
+});
+ipcMain.handle("provider:fetch-voices", async (_event, request: ProviderVoicesRequest) => {
+  return fetchProviderVoices(request);
+});
+ipcMain.handle("provider:cancel-request", (_event, requestId: string) => {
+  providerAbortControllers.get(requestId)?.abort();
+});
 
 ipcMain.on("startup:phase", (_event, payload: { phase?: string; details?: Record<string, unknown> }) => {
   if (!payload?.phase) return;
@@ -2424,6 +2525,10 @@ app.on("window-all-closed", () => {
 app.on("will-quit", () => {
   diag("app.will-quit.begin");
   clearShutdownWatchdog();
+  for (const controller of providerAbortControllers.values()) {
+    controller.abort();
+  }
+  providerAbortControllers.clear();
   for (const entry of Object.values(managedServiceChildren)) {
     if (!entry) continue;
     terminateChildTreeSync(entry.child);

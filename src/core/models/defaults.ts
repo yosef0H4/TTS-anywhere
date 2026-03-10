@@ -3,9 +3,9 @@ import { resolveUiLanguage } from "./locale";
 
 export const DEFAULT_CONFIG: AppConfig = {
   llm: {
-    baseUrl: "https://api.openai.com/v1",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
     apiKey: "",
-    model: "gpt-4.1-mini",
+    model: "models/gemini-2.5-flash-lite",
     promptTemplate: "Extract all text from this image. Return only the extracted text, no additional commentary.",
     imageDetail: "low",
     ocrStreamingEnabled: true,

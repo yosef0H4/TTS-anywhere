@@ -35,17 +35,14 @@ import { filterBySize, finalizeOcrBoxes, manualToRaw, mergeCloseBoxes, selection
 import { PreprocPreviewRenderer } from "../features/preprocessing/preview-renderer";
 import type { FilteredBox, MergeGroup, RawBox } from "../features/preprocessing/types";
 import { APP_ICONS } from "../ui/lucide-icons";
-import { joinApiPath, makeOptionCacheKey, resolveVoiceSelection, type VoiceListQuery } from "./tts-option-utils";
+import { makeOptionCacheKey, resolveVoiceSelection } from "./tts-option-utils";
+import { ElectronBackedLlmService, ElectronBackedProviderCatalog, ElectronBackedTtsService } from "./electron-provider-client";
 import { applyTranslationsToElement, translate, type TranslationKey } from "./i18n";
 import "../ui/styles.css";
 
 interface NamedOption {
   value: string;
   label: string;
-}
-
-interface ModelListResponse {
-  data?: Array<{ id?: string }>;
 }
 
 type RequestLane = "ocr" | "detect_main" | "detect_modal";
@@ -105,6 +102,23 @@ type CaptureContext = {
 };
 
 const rendererBootAt = performance.now();
+const ELECTRON_ONLY_ERROR = "Available in Electron only.";
+
+class ElectronOnlyLlmService {
+  async extractTextFromImage(): Promise<never> {
+    throw new Error(ELECTRON_ONLY_ERROR);
+  }
+
+  async extractTextFromImageStream(): Promise<never> {
+    throw new Error(ELECTRON_ONLY_ERROR);
+  }
+}
+
+class ElectronOnlyTtsService {
+  async synthesize(): Promise<never> {
+    throw new Error(ELECTRON_ONLY_ERROR);
+  }
+}
 
 function dismissBootScreen(): void {
   const boot = document.getElementById("boot-screen");
@@ -115,7 +129,13 @@ function dismissBootScreen(): void {
 
 export class WebApp {
   private readonly store = new SettingsStore();
-  private readonly pipeline = new AppPipeline();
+  private readonly pipeline = window.electronAPI
+    ? new AppPipeline(
+        new ElectronBackedLlmService(window.electronAPI),
+        new ElectronBackedTtsService(window.electronAPI)
+      )
+    : new AppPipeline(new ElectronOnlyLlmService(), new ElectronOnlyTtsService());
+  private readonly providerCatalog = window.electronAPI ? new ElectronBackedProviderCatalog(window.electronAPI) : null;
   private readonly config: AppConfig = this.store.load();
   private readonly audio = new Audio();
   private lastPlaybackText = "";
@@ -830,16 +850,21 @@ export class WebApp {
   }
 
   private async fetchLlmModels(force: boolean): Promise<void> {
-    const options = await this.fetchOptionsFromModelsEndpoint(this.config.llm.baseUrl, this.config.llm.apiKey, force, "llm-models");
+    const options = await this.fetchOptionsFromElectron(this.config.llm.baseUrl, this.config.llm.apiKey, force, "llm-models");
     this.applyOptions(this.llmModelSelect, options, this.config.llm.model);
   }
 
   private async fetchTtsModels(force: boolean): Promise<void> {
-    const options = await this.fetchOptionsFromModelsEndpoint(this.config.tts.baseUrl, this.config.tts.apiKey, force, "tts-models");
+    const options = await this.fetchOptionsFromElectron(this.config.tts.baseUrl, this.config.tts.apiKey, force, "tts-models");
     this.applyOptions(this.ttsModelSelect, options, this.config.tts.model);
   }
 
   private async fetchTtsVoices(force: boolean): Promise<void> {
+    if (!this.providerCatalog) {
+      this.updateStatusChip("tts-status-chip", this.t("stack.electronOnly"), "idle");
+      this.setStatus(this.t("stack.electronOnly"));
+      return;
+    }
     const base = this.config.tts.baseUrl;
     const key = this.config.tts.apiKey;
     const model = this.config.tts.model;
@@ -850,7 +875,7 @@ export class WebApp {
       return;
     }
 
-    const voices = await this.tryFetchVoiceOptions(base, key, { model });
+    const voices = await this.fetchTtsVoicesFromElectron(base, key, model);
     this.optionCache.set(cacheKey, voices);
     this.applyOptions(this.ttsVoiceSelect, voices, this.config.tts.voice);
   }
@@ -1074,61 +1099,45 @@ export class WebApp {
     this.setStatus(this.t("status.runtimeServicesOpened"));
   }
 
-  private async tryFetchVoiceOptions(baseUrl: string, apiKey: string, query: VoiceListQuery = {}): Promise<NamedOption[]> {
-    const candidates = ["/voices", "/audio/voices", "/models"];
-    for (const path of candidates) {
-      try {
-        const response = await fetch(this.joinApiPath(baseUrl, path, query), {
-          headers: this.authHeaders(apiKey)
-        });
-        if (!response.ok) continue;
-        const body = (await response.json()) as unknown;
-        const options = this.parseOptions(body);
-        if (options.length > 0) {
-          this.updateStatusChip("tts-status-chip", this.t("statuschip.voicesLoaded"), "ok");
-          return options;
-        }
-      } catch {
-        // try next endpoint
+  private async fetchTtsVoicesFromElectron(baseUrl: string, apiKey: string, model: string): Promise<NamedOption[]> {
+    if (!this.providerCatalog) {
+      return this.config.tts.voice ? [{ value: this.config.tts.voice, label: this.config.tts.voice }] : [];
+    }
+    try {
+      const options = await this.providerCatalog.fetchVoices({ baseUrl, apiKey, model });
+      if (options.length > 0) {
+        this.updateStatusChip("tts-status-chip", this.t("statuschip.voicesLoaded"), "ok");
+        return options;
       }
+    } catch (error) {
+      this.setStatus(this.withApiBaseUrlHint(this.t("status.fetchFailed", { namespace: "tts-voices", reason: String(error) }), "tts", baseUrl));
+      this.updateStatusChip("tts-status-chip", this.t("statuschip.networkError"), "error");
+      return this.config.tts.voice ? [{ value: this.config.tts.voice, label: this.config.tts.voice }] : [];
     }
     this.updateStatusChip("tts-status-chip", this.t("statuschip.voiceListUnavailable"), "error");
     this.setStatus(this.withApiBaseUrlHint(this.t("status.voiceListUnavailable"), "tts", baseUrl));
     return this.config.tts.voice ? [{ value: this.config.tts.voice, label: this.config.tts.voice }] : [];
   }
 
-  private async fetchOptionsFromModelsEndpoint(
+  private async fetchOptionsFromElectron(
     baseUrl: string,
     apiKey: string,
     force: boolean,
     namespace: string
   ): Promise<NamedOption[]> {
+    if (!this.providerCatalog) {
+      this.setStatus(this.t("stack.electronOnly"));
+      if (namespace.startsWith("llm")) this.updateStatusChip("llm-status-chip", this.t("stack.electronOnly"), "idle");
+      if (namespace.startsWith("tts")) this.updateStatusChip("tts-status-chip", this.t("stack.electronOnly"), "idle");
+      return [];
+    }
     const cacheKey = this.makeCacheKey(namespace, baseUrl, apiKey);
     if (!force && this.optionCache.has(cacheKey)) {
       return this.optionCache.get(cacheKey) ?? [];
     }
 
     try {
-      const response = await fetch(this.joinApiPath(baseUrl, "/models"), {
-        headers: this.authHeaders(apiKey)
-      });
-      if (!response.ok) {
-        this.setStatus(this.withApiBaseUrlHint(
-          this.t("status.fetchFailed", { namespace, reason: response.status }),
-          namespace.startsWith("llm") ? "ocr" : "tts",
-          baseUrl
-        ));
-        if (namespace.startsWith("llm")) this.updateStatusChip("llm-status-chip", `HTTP ${response.status}`, "error");
-        if (namespace.startsWith("tts")) this.updateStatusChip("tts-status-chip", `HTTP ${response.status}`, "error");
-        return [];
-      }
-
-      const payload = (await response.json()) as ModelListResponse;
-      const options = (payload.data ?? [])
-        .map((item) => item.id?.trim() ?? "")
-        .filter((id) => id.length > 0)
-        .map((id) => ({ value: id, label: id }));
-
+      const options = await this.providerCatalog.fetchModels({ baseUrl, apiKey });
       this.optionCache.set(cacheKey, options);
       if (force) {
         this.setStatus(this.t("status.refetched", { namespace }));
@@ -1148,41 +1157,6 @@ export class WebApp {
     }
   }
 
-  private parseOptions(payload: unknown): NamedOption[] {
-    if (!payload || typeof payload !== "object") return [];
-    const obj = payload as Record<string, unknown>;
-
-    if (Array.isArray(obj.data)) {
-      return obj.data
-        .map((item) => {
-          if (typeof item !== "object" || !item) return null;
-          const record = item as Record<string, unknown>;
-          const id = typeof record.id === "string" ? record.id : "";
-          if (!id) return null;
-          return { value: id, label: id };
-        })
-        .filter((item): item is NamedOption => item !== null);
-    }
-
-    if (Array.isArray(obj.voices)) {
-      return obj.voices
-        .map((entry) => {
-          if (typeof entry === "string") return { value: entry, label: entry };
-          if (typeof entry === "object" && entry) {
-            const record = entry as Record<string, unknown>;
-            const id = typeof record.id === "string" ? record.id : "";
-            const name = typeof record.name === "string" ? record.name : id;
-            if (!id) return null;
-            return { value: id, label: name };
-          }
-          return null;
-        })
-        .filter((item): item is NamedOption => item !== null);
-    }
-
-    return [];
-  }
-
   private applyOptions(select: TomSelect | null, options: NamedOption[], current: string): void {
     if (!select) return;
     select.clearOptions();
@@ -1200,13 +1174,6 @@ export class WebApp {
     select.refreshOptions(false);
   }
 
-  private authHeaders(apiKey: string): HeadersInit {
-    if (!apiKey) {
-      return {};
-    }
-    return { Authorization: `Bearer ${apiKey}` };
-  }
-
   private resolveVoiceSelectionForModel(model: string, preferredVoice: string): string {
     const voices = this.currentCachedTtsVoices(model);
     return resolveVoiceSelection(preferredVoice, voices);
@@ -1218,10 +1185,6 @@ export class WebApp {
 
   private makeCacheKey(namespace: string, baseUrl: string, apiKey: string, discriminator = ""): string {
     return makeOptionCacheKey(namespace, baseUrl, apiKey, discriminator);
-  }
-
-  private joinApiPath(baseUrl: string, path: string, query: Record<string, string | undefined> = {}): string {
-    return joinApiPath(baseUrl, path, query);
   }
 
   private withApiBaseUrlHint(message: string, kind: "ocr" | "tts", baseUrl: string): string {
