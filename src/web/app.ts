@@ -1093,7 +1093,7 @@ export class WebApp {
       }
     }
     this.updateStatusChip("tts-status-chip", this.t("statuschip.voiceListUnavailable"), "error");
-    this.setStatus(this.t("status.voiceListUnavailable"));
+    this.setStatus(this.withApiBaseUrlHint(this.t("status.voiceListUnavailable"), "tts", baseUrl));
     return this.config.tts.voice ? [{ value: this.config.tts.voice, label: this.config.tts.voice }] : [];
   }
 
@@ -1113,7 +1113,11 @@ export class WebApp {
         headers: this.authHeaders(apiKey)
       });
       if (!response.ok) {
-        this.setStatus(this.t("status.fetchFailed", { namespace, reason: response.status }));
+        this.setStatus(this.withApiBaseUrlHint(
+          this.t("status.fetchFailed", { namespace, reason: response.status }),
+          namespace.startsWith("llm") ? "ocr" : "tts",
+          baseUrl
+        ));
         if (namespace.startsWith("llm")) this.updateStatusChip("llm-status-chip", `HTTP ${response.status}`, "error");
         if (namespace.startsWith("tts")) this.updateStatusChip("tts-status-chip", `HTTP ${response.status}`, "error");
         return [];
@@ -1133,7 +1137,11 @@ export class WebApp {
       if (namespace.startsWith("tts")) this.updateStatusChip("tts-status-chip", this.t("statuschip.loadedCount", { count: options.length }), "ok");
       return options;
     } catch (error) {
-      this.setStatus(this.t("status.fetchFailed", { namespace, reason: String(error) }));
+      this.setStatus(this.withApiBaseUrlHint(
+        this.t("status.fetchFailed", { namespace, reason: String(error) }),
+        namespace.startsWith("llm") ? "ocr" : "tts",
+        baseUrl
+      ));
       if (namespace.startsWith("llm")) this.updateStatusChip("llm-status-chip", this.t("statuschip.networkError"), "error");
       if (namespace.startsWith("tts")) this.updateStatusChip("tts-status-chip", this.t("statuschip.networkError"), "error");
       return [];
@@ -1214,6 +1222,15 @@ export class WebApp {
 
   private joinApiPath(baseUrl: string, path: string, query: Record<string, string | undefined> = {}): string {
     return joinApiPath(baseUrl, path, query);
+  }
+
+  private withApiBaseUrlHint(message: string, kind: "ocr" | "tts", baseUrl: string): string {
+    const normalized = baseUrl.trim().replace(/\/+$/, "");
+    if (!normalized || normalized.endsWith("/v1")) {
+      return message;
+    }
+    const service = kind === "ocr" ? this.t("ocr.title") : this.t("tts.title");
+    return `${message} ${this.t("status.apiBaseUrlHint", { service })}`;
   }
 
   private setStatus(text: string): void {
@@ -2145,7 +2162,7 @@ export class WebApp {
     try {
       await this.startOrResumePlayback();
     } catch (error) {
-      this.setStatus(this.t("status.playbackFailed", { error: String(error) }));
+      this.setStatus(this.withApiBaseUrlHint(this.t("status.playbackFailed", { error: String(error) }), "tts", this.config.tts.baseUrl));
     }
   }
 
@@ -2587,8 +2604,8 @@ export class WebApp {
         loggers.pipeline.error("Pipeline failed", { error: String(error) });
         this.setStatus(
           captureContext.resultMode === "clipboard"
-            ? this.t("status.ocrCopyToClipboardFailed", { error: String(error) })
-            : this.t("status.pipelineError", { error: String(error) })
+            ? this.withApiBaseUrlHint(this.t("status.ocrCopyToClipboardFailed", { error: String(error) }), "ocr", this.config.llm.baseUrl)
+            : this.withApiBaseUrlHint(this.t("status.pipelineError", { error: String(error) }), "ocr", this.config.llm.baseUrl)
         );
       }
     } finally {
@@ -2653,7 +2670,7 @@ export class WebApp {
       if (this.isAbortError(error)) {
         throw error;
       }
-      this.setStatus(this.t("status.ocrStreamError", { error: String(error) }));
+      this.setStatus(this.withApiBaseUrlHint(this.t("status.ocrStreamError", { error: String(error) }), "ocr", this.config.llm.baseUrl));
       return { text: this.getPlaybackText() };
     } finally {
       if (streamSession === this.ocrStreamSession) {
@@ -2677,7 +2694,7 @@ export class WebApp {
     if (this.maxPlayableChunkIndex() < 0) return;
     this.playbackStartInFlight = true;
     void this.startOrResumePlayback().catch((error) => {
-      this.setStatus(this.t("status.playbackFailed", { error: String(error) }));
+      this.setStatus(this.withApiBaseUrlHint(this.t("status.playbackFailed", { error: String(error) }), "tts", this.config.tts.baseUrl));
     }).finally(() => {
       this.playbackStartInFlight = false;
     });
@@ -2759,7 +2776,7 @@ export class WebApp {
       if (this.isAbortError(error)) {
         loggers.pipeline.info("Prepared OCR cancelled", { runId });
       } else {
-        this.setStatus(this.t("status.pipelineError", { error: String(error) }));
+        this.setStatus(this.withApiBaseUrlHint(this.t("status.pipelineError", { error: String(error) }), "ocr", this.config.llm.baseUrl));
       }
     } finally {
       this.finishRun(runId);

@@ -9,7 +9,7 @@ describe("tts-option-utils", () => {
 
   it("adds the model query parameter to voice-list requests", () => {
     expect(joinApiPath("http://127.0.0.1:8014", "/voices", { model: "KittenML/kitten-tts-mini-0.8" }))
-      .toBe("http://127.0.0.1:8014/v1/voices?model=KittenML%2Fkitten-tts-mini-0.8");
+      .toBe("http://127.0.0.1:8014/voices?model=KittenML%2Fkitten-tts-mini-0.8");
   });
 
   it("keeps the current voice when still available", () => {

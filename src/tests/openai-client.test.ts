@@ -92,4 +92,28 @@ describe("openai compatible clients", () => {
       })
     ).rejects.toThrow("Cancelled");
   });
+
+  it("keeps OCR error endpoints exact when baseUrl has no /v1", async () => {
+    const create = vi.fn().mockRejectedValue(new Error("Connection error."));
+    const service = new OpenAiCompatibleLlmService(() => ({
+      chat: {
+        completions: {
+          create
+        }
+      }
+    }));
+
+    await expect(
+      service.extractTextFromImage("data:image/png;base64,abc", {
+        baseUrl: "https://example.com/openai",
+        apiKey: "k",
+        model: "m",
+        promptTemplate: "Extract",
+        imageDetail: "low",
+        ocrStreamingEnabled: true,
+        ocrStreamingFallbackToNonStream: true,
+        maxTokens: 4096
+      })
+    ).rejects.toThrow("OCR request failed (https://example.com/openai/chat/completions): Connection error.");
+  });
 });

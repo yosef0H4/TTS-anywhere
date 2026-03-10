@@ -36,13 +36,7 @@ function createClient(baseUrl: string, apiKey: string): OpenAI {
 
 function normalizeOpenAiBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, "");
-  if (!trimmed) {
-    return trimmed;
-  }
-  if (trimmed.endsWith("/v1")) {
-    return trimmed;
-  }
-  return `${trimmed}/v1`;
+  return trimmed;
 }
 
 function extractErrorMessage(error: unknown): string {

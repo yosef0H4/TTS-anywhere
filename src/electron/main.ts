@@ -531,7 +531,7 @@ async function launchRapidServiceInternal(): Promise<ManagedServiceStatus> {
   const rapidPort = await resolveAvailablePort(8091);
   const urls: ManagedRapidServiceUrls = {
     detectionBaseUrl: `http://127.0.0.1:${rapidPort}`,
-    ocrBaseUrl: `http://127.0.0.1:${rapidPort}`
+    ocrBaseUrl: `http://127.0.0.1:${rapidPort}/v1`
   };
   const baseEnv = windowsEnv(process.env, { UV_CACHE_DIR: uvCacheDir });
   await runManagedCommand(
@@ -592,7 +592,8 @@ async function launchRapidServiceInternal(): Promise<ManagedServiceStatus> {
 async function launchEdgeServiceInternal(): Promise<ManagedServiceStatus> {
   const { uvCacheDir, edgeServiceDir, edgeEnvDir } = getManagedServicePaths();
   const edgePort = await resolveAvailablePort(8012);
-  const ttsUrl = `http://127.0.0.1:${edgePort}`;
+  const ttsUrl = `http://127.0.0.1:${edgePort}/v1`;
+  const edgeHealthUrl = `http://127.0.0.1:${edgePort}`;
   const baseEnv = windowsEnv(process.env, { UV_CACHE_DIR: uvCacheDir });
   await runManagedCommand(
     "recommendedCpu.edge.sync",
@@ -609,7 +610,7 @@ async function launchEdgeServiceInternal(): Promise<ManagedServiceStatus> {
     windowsEnv(baseEnv, { UV_PROJECT_ENVIRONMENT: edgeEnvDir })
   );
   writeBackendLog("info", "stack", "recommendedCpu.edge.started", { pid: edgeChild.pid, port: edgePort });
-  await waitForServiceHealth(ttsUrl, 60000, (payload) => payload.ok === true);
+  await waitForServiceHealth(edgeHealthUrl, 60000, (payload) => payload.ok === true);
   return setManagedServiceStatus("edge", {
     state: "running",
     managed: true,
