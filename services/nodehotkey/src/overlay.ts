@@ -3,9 +3,10 @@ import {
   DestroyWindow,
   HWND_TOPMOST,
   InvalidateRect,
+  SS_BLACKRECT,
+  SS_WHITERECT,
   SetWindowPos,
   ShowWindow,
-  SS_BLACKRECT,
   SW_HIDE,
   SW_SHOWNA,
   SWP_NOACTIVATE,
@@ -23,22 +24,29 @@ export type RawRect = { left: number; top: number; right: number; bottom: number
 type BorderWindows = { top: unknown; right: unknown; bottom: unknown; left: unknown };
 
 export class BorderOverlay {
-  private readonly windows: BorderWindows;
+  private readonly outerWindows: BorderWindows;
+  private readonly innerWindows: BorderWindows;
   private readonly thickness: number;
 
   constructor(thickness: number) {
     this.thickness = Math.max(1, thickness);
-    this.windows = {
-      top: this.createBorderWindow(),
-      right: this.createBorderWindow(),
-      bottom: this.createBorderWindow(),
-      left: this.createBorderWindow()
+    this.outerWindows = {
+      top: this.createBorderWindow(SS_BLACKRECT),
+      right: this.createBorderWindow(SS_BLACKRECT),
+      bottom: this.createBorderWindow(SS_BLACKRECT),
+      left: this.createBorderWindow(SS_BLACKRECT)
+    };
+    this.innerWindows = {
+      top: this.createBorderWindow(SS_WHITERECT),
+      right: this.createBorderWindow(SS_WHITERECT),
+      bottom: this.createBorderWindow(SS_WHITERECT),
+      left: this.createBorderWindow(SS_WHITERECT)
     };
   }
 
-  private createBorderWindow(): unknown {
+  private createBorderWindow(rectStyle: number): unknown {
     const exStyle = WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE;
-    const hwnd = CreateWindowExW(exStyle, "STATIC", "", WS_POPUP | SS_BLACKRECT, 0, 0, 1, 1, null, null, null, null);
+    const hwnd = CreateWindowExW(exStyle, "STATIC", "", WS_POPUP | rectStyle, 0, 0, 1, 1, null, null, null, null);
     if (!hwnd) throw new Error("CreateWindowExW(STATIC) failed");
     return hwnd;
   }
@@ -56,25 +64,42 @@ export class BorderOverlay {
     const width = Math.max(1, rect.right - rect.left);
     const height = Math.max(1, rect.bottom - rect.top);
     const t = this.thickness;
+    const innerLeft = rect.left + t;
+    const innerTop = rect.top + t;
+    const innerWidth = Math.max(1, width - t * 2);
+    const innerHeight = Math.max(1, height - t * 2);
 
-    this.positionWindow(this.windows.top, rect.left, rect.top, width, t);
-    this.positionWindow(this.windows.bottom, rect.left, rect.bottom - t, width, t);
-    this.positionWindow(this.windows.left, rect.left, rect.top, t, height);
-    this.positionWindow(this.windows.right, rect.right - t, rect.top, t, height);
+    this.positionWindow(this.outerWindows.top, rect.left, rect.top, width, t);
+    this.positionWindow(this.outerWindows.bottom, rect.left, rect.bottom - t, width, t);
+    this.positionWindow(this.outerWindows.left, rect.left, rect.top, t, height);
+    this.positionWindow(this.outerWindows.right, rect.right - t, rect.top, t, height);
+
+    this.positionWindow(this.innerWindows.top, innerLeft, innerTop, innerWidth, t);
+    this.positionWindow(this.innerWindows.bottom, innerLeft, rect.bottom - t * 2, innerWidth, t);
+    this.positionWindow(this.innerWindows.left, innerLeft, innerTop, t, innerHeight);
+    this.positionWindow(this.innerWindows.right, rect.right - t * 2, innerTop, t, innerHeight);
   }
 
   hide(): void {
-    ShowWindow(this.windows.top, SW_HIDE);
-    ShowWindow(this.windows.right, SW_HIDE);
-    ShowWindow(this.windows.bottom, SW_HIDE);
-    ShowWindow(this.windows.left, SW_HIDE);
+    ShowWindow(this.outerWindows.top, SW_HIDE);
+    ShowWindow(this.outerWindows.right, SW_HIDE);
+    ShowWindow(this.outerWindows.bottom, SW_HIDE);
+    ShowWindow(this.outerWindows.left, SW_HIDE);
+    ShowWindow(this.innerWindows.top, SW_HIDE);
+    ShowWindow(this.innerWindows.right, SW_HIDE);
+    ShowWindow(this.innerWindows.bottom, SW_HIDE);
+    ShowWindow(this.innerWindows.left, SW_HIDE);
   }
 
   destroy(): void {
     this.hide();
-    DestroyWindow(this.windows.top);
-    DestroyWindow(this.windows.right);
-    DestroyWindow(this.windows.bottom);
-    DestroyWindow(this.windows.left);
+    DestroyWindow(this.outerWindows.top);
+    DestroyWindow(this.outerWindows.right);
+    DestroyWindow(this.outerWindows.bottom);
+    DestroyWindow(this.outerWindows.left);
+    DestroyWindow(this.innerWindows.top);
+    DestroyWindow(this.innerWindows.right);
+    DestroyWindow(this.innerWindows.bottom);
+    DestroyWindow(this.innerWindows.left);
   }
 }

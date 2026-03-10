@@ -1,12 +1,15 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 import ignore from "ignore";
 
 const projectRoot = process.cwd();
 const outputRoot = path.join(projectRoot, ".bundle-resources");
 const servicesOutputRoot = path.join(outputRoot, "services");
 const binOutputRoot = path.join(outputRoot, "bin");
+const bundleManifestPath = path.join(servicesOutputRoot, ".bundle-manifest.json");
 const requireUv = process.argv.includes("--require-uv");
 
 const serviceRoots = [
@@ -131,6 +134,43 @@ function assertNotBanned(relativePath) {
   }
 }
 
+export async function sha256File(filePath) {
+  const hash = crypto.createHash("sha256");
+  hash.update(await fs.readFile(filePath));
+  return hash.digest("hex");
+}
+
+export async function createBundleManifest(servicesRoot) {
+  const files = await listFiles(servicesRoot, () => false);
+  const entries = [];
+  for (const absolutePath of files) {
+    const relativePath = path.relative(servicesRoot, absolutePath).split(path.sep).join("/");
+    if (relativePath === ".bundle-manifest.json") {
+      continue;
+    }
+    entries.push({
+      path: relativePath,
+      sha256: await sha256File(absolutePath)
+    });
+  }
+  entries.sort((left, right) => left.path.localeCompare(right.path));
+
+  const bundleHash = crypto.createHash("sha256");
+  for (const entry of entries) {
+    bundleHash.update(entry.path);
+    bundleHash.update("\n");
+    bundleHash.update(entry.sha256);
+    bundleHash.update("\n");
+  }
+
+  return {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    hash: bundleHash.digest("hex"),
+    services: entries
+  };
+}
+
 async function copyService(serviceRoot) {
   const matcher = await buildIgnoreMatcher(serviceRoot);
   const sourceRoot = path.join(projectRoot, serviceRoot);
@@ -174,14 +214,27 @@ async function copyBundledUv() {
   await fs.copyFile(source, path.join(binOutputRoot, path.basename(source)));
 }
 
-async function main() {
+async function writeBundleManifest() {
+  const manifest = await createBundleManifest(servicesOutputRoot);
+  await fs.writeFile(bundleManifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  return manifest;
+}
+
+export async function stageBundleResources() {
   await fs.rm(outputRoot, { recursive: true, force: true });
   await fs.mkdir(servicesOutputRoot, { recursive: true });
   for (const serviceRoot of serviceRoots) {
     await copyService(serviceRoot);
   }
   await copyBundledUv();
+  const manifest = await writeBundleManifest();
   console.log(`[bundle] staged services into ${servicesOutputRoot}`);
+  console.log(`[bundle] services hash ${manifest.hash}`);
 }
 
-await main();
+const entryFilePath = process.argv[1] ? path.resolve(process.argv[1]) : null;
+const isDirectRun = entryFilePath !== null && fileURLToPath(import.meta.url) === entryFilePath;
+
+if (isDirectRun) {
+  await stageBundleResources();
+}

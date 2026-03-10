@@ -1,70 +1,166 @@
 # Paddle Text Processing Server
 
-PaddleOCR-based preprocessing service with:
-- detect-only box extraction for the main app preprocessing flow
-- an optional OpenAI-compatible OCR adapter for image text extraction
-- a launcher that manages uv environments for CPU-only and GPU-capable runtime setups
+PaddleOCR-based preprocessing service with a detect endpoint and an optional OpenAI-compatible OCR endpoint.
 
-## Run
+## What This Service Does
 
-The Windows host scripts are the supported launcher entrypoints. They require `uv`, not a system Python install.
+- serves `/v1/detect` for box extraction
+- serves `/v1/chat/completions` for OCR through an OpenAI-style API
+- manages separate CPU and GPU environments with `launcher.py`
+- lets detect and OCR run on different devices
 
-The service pins Python with `.python-version`. The scripts ensure the selected env exists, then run `launcher.py` inside that env. The launcher owns dependency sync and runtime package switching.
+## Requirements
 
-## GPU runtime
+- Windows is the main supported launcher flow
+- `uv` installed or the bundled `uv.exe` from TTS Anywhere
+- Python version matching `.python-version`
+- CPU or GPU depending on the device selection you want
 
-CPU works out of the box. GPU launch defaults to:
+## Quick Start
 
-- `paddlepaddle-gpu==3.3.0`
-- `https://www.paddlepaddle.org.cn/packages/stable/cu129/`
+Use one of the preset scripts in `scripts\`:
 
-So the GPU scripts can run directly on a CUDA 12.9 machine.
-
-Override the defaults if needed:
-
-```bash
-set PADDLE_GPU_INDEX_URL=https://www.paddlepaddle.org.cn/packages/stable/cu118/
+```bat
+scripts\host_both.bat 127.0.0.1 8093
 scripts\host_both_gpu.bat 127.0.0.1 8093
+scripts\host_both_cpu_ocr_gpu.bat 127.0.0.1 8093
+scripts\host_both_gpu_ocr_cpu.bat 127.0.0.1 8093
 ```
 
-Optionally override the package string:
+## What The Launcher Script Does
 
-```bash
-set PADDLE_GPU_PACKAGE=paddlepaddle-gpu==3.2.0
-set PADDLE_GPU_INDEX_URL=https://www.paddlepaddle.org.cn/packages/stable/cu118/
-scripts\host_both_cpu_ocr_gpu.bat
+The preset scripts are wrappers around `scripts\_serve.bat`, and `_serve.bat` is a wrapper around `launcher.py`.
+
+The scripts do this:
+
+1. find `uv`
+2. read `.python-version`
+3. choose `.venv-cpu` or `.venv-gpu`
+4. create the environment if missing
+5. run `launcher.py` with:
+   - `--enable-detect`
+   - `--enable-openai-ocr`
+   - `--detect-device ...`
+   - `--ocr-device ...`
+
+`launcher.py` then:
+
+- runs `uv sync --group dev --inexact` inside the selected environment
+- installs `paddlepaddle==3.2.0` for CPU-only use
+- installs `paddlepaddle-gpu==3.3.0` from the CUDA 12.9 index by default when GPU is requested
+- sets Paddle cache and runtime environment variables
+- starts:
+
+```bat
+".venv-...\Scripts\python.exe" -m paddle_text_processing.cli serve --host ... --port ... --enable-detect --enable-openai-ocr --detect-device ... --ocr-device ...
 ```
 
-## Windows scripts
+## Manual Launch Without The .bat Script
 
-Use the scripts in `scripts\`:
+### CPU detect + CPU OCR
 
-- `host_both.bat` for both APIs on CPU
-- `host_both_gpu.bat` for both APIs on GPU
-- `host_both_cpu_ocr_gpu.bat` for detect on CPU and OCR on GPU
-- `host_both_gpu_ocr_cpu.bat` for detect on GPU and OCR on CPU
+```bat
+uv venv .venv-cpu --python 3.11
+set UV_PROJECT_ENVIRONMENT=%CD%\.venv-cpu
+.\.venv-cpu\Scripts\python.exe launcher.py --host 127.0.0.1 --port 8093 --enable-detect --enable-openai-ocr --detect-device cpu --ocr-device cpu
+```
 
-Each script accepts optional `host` and `port` arguments.
+### GPU detect + GPU OCR
 
-## Runtime notes
+```bat
+uv venv .venv-gpu --python 3.11
+set UV_PROJECT_ENVIRONMENT=%CD%\.venv-gpu
+.\.venv-gpu\Scripts\python.exe launcher.py --host 127.0.0.1 --port 8093 --enable-detect --enable-openai-ocr --detect-device gpu --ocr-device gpu
+```
 
-- The scripts use `.venv-cpu` or `.venv-gpu` and run `launcher.py` with that env's Python
-- Any preset that uses GPU for either detect or OCR uses `.venv-gpu`
-- On Windows, `launcher.py` uses a temp-directory `uv` cache and `UV_LINK_MODE=copy` to avoid cache rename failures on mapped/project drives
-- The launcher installs the shared package set with `uv sync --group dev --inexact`
-- `TextDetection.predict(...)` powers `/v1/detect`
-- `PaddleOCR.predict(...)` powers `/v1/chat/completions`
-- `/healthz` reports enabled features plus requested/resolved detect and OCR devices
-- The server defaults Paddle cache/model downloads into `.paddlex-cache`
-- `auto` is not supported in the CLI or launcher flow anymore
+### CPU detect + GPU OCR
 
-## Endpoints
+```bat
+uv venv .venv-gpu --python 3.11
+set UV_PROJECT_ENVIRONMENT=%CD%\.venv-gpu
+.\.venv-gpu\Scripts\python.exe launcher.py --host 127.0.0.1 --port 8093 --enable-detect --enable-openai-ocr --detect-device cpu --ocr-device gpu
+```
+
+### GPU detect + CPU OCR
+
+```bat
+uv venv .venv-gpu --python 3.11
+set UV_PROJECT_ENVIRONMENT=%CD%\.venv-gpu
+.\.venv-gpu\Scripts\python.exe launcher.py --host 127.0.0.1 --port 8093 --enable-detect --enable-openai-ocr --detect-device gpu --ocr-device cpu
+```
+
+### Override the GPU package or index URL
+
+The launcher reads these overrides:
+
+```bat
+set PADDLE_GPU_PACKAGE=paddlepaddle-gpu==3.3.0
+set PADDLE_GPU_INDEX_URL=https://www.paddlepaddle.org.cn/packages/stable/cu129/
+.\.venv-gpu\Scripts\python.exe launcher.py --host 127.0.0.1 --port 8093 --enable-detect --enable-openai-ocr --detect-device gpu --ocr-device gpu
+```
+
+### Direct CLI start after the environment is prepared
+
+If the launcher has already set up the runtime, you can start the API directly:
+
+```bat
+set PADDLE_PDX_CACHE_HOME=%CD%\.paddlex-cache
+set PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
+set PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT=False
+set PYTHONPATH=%CD%\src
+.\.venv-cpu\Scripts\python.exe -m paddle_text_processing.cli serve --host 127.0.0.1 --port 8093 --enable-detect --enable-openai-ocr --detect-device cpu --ocr-device cpu
+```
+
+For GPU runs, replace `.venv-cpu` with `.venv-gpu` and use the device values you need.
+
+## API Endpoints
 
 - `GET /healthz`
 - `POST /v1/detect` when `--enable-detect` is set
 - `GET /v1/models` when `--enable-openai-ocr` is set
 - `POST /v1/chat/completions` when `--enable-openai-ocr` is set
 
-`/v1/detect` returns detected boxes in both pixel and normalized coordinates.
+## Verification
 
-`/v1/chat/completions` accepts OpenAI-style image OCR requests and returns a non-streaming or fake-streaming chat completion payload.
+Health check:
+
+```bash
+curl http://127.0.0.1:8093/healthz
+```
+
+List models:
+
+```bash
+curl http://127.0.0.1:8093/v1/models
+```
+
+Detect request:
+
+```bash
+curl -X POST http://127.0.0.1:8093/v1/detect -F "image=@example.png"
+```
+
+OCR request:
+
+```bash
+curl -X POST http://127.0.0.1:8093/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d "{\"model\":\"paddleocr\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Extract all text from this image.\"},{\"type\":\"input_image\",\"image_url\":\"data:image/png;base64,<BASE64_IMAGE>\"}]}]}"
+```
+
+## Troubleshooting
+
+- Wrong environment selected
+  CPU-only runs use `.venv-cpu`. Any GPU preset uses `.venv-gpu`.
+- GPU startup fails
+  Confirm your Paddle GPU package and index URL match your CUDA stack.
+- Models downloading to an unexpected location
+  The launcher defaults Paddle assets into `.paddlex-cache`.
+- Direct CLI startup misses environment variables
+  Start through `launcher.py` if you want the supported managed setup.
+
+## Notes
+
+- The launcher sets `UV_LINK_MODE=copy` and a temp `uv` cache on Windows.
+- CPU uses `paddlepaddle==3.2.0`.
+- GPU defaults to `paddlepaddle-gpu==3.3.0` from the CUDA 12.9 package index.

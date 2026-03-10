@@ -11,6 +11,7 @@ export const WS_EX_TOOLWINDOW = 0x00000080;
 export const WS_EX_TRANSPARENT = 0x00000020;
 export const WS_EX_NOACTIVATE = 0x08000000;
 export const SS_BLACKRECT = 0x0004;
+export const SS_WHITERECT = 0x0006;
 export const WM_HOTKEY = 0x0312;
 export const WM_KEYDOWN = 0x0100;
 export const WM_KEYUP = 0x0101;

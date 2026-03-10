@@ -2,53 +2,117 @@
 
 OpenAI-compatible TTS adapter around the Piper binary.
 
-## Why
-- Piper is lightweight and local (CPU friendly).
-- This adapter exposes OpenAI-style endpoints so your app can switch providers by URL/model only.
+## What This Service Does
+
+- serves `/v1/audio/speech` for OpenAI-style speech synthesis
+- exposes `/v1/models` and `/healthz`
+- can synthesize files directly from the CLI
+- can auto-download the Piper binary and voice models when needed
 
 ## Requirements
-- Piper binary can be auto-downloaded from official `rhasspy/piper` GitHub releases when missing.
-- Optional: local `.onnx` model file (and matching `.onnx.json` config).
-- If model is not present locally, adapter auto-downloads from `rhasspy/piper-voices` on Hugging Face.
 
-## Environment
-- `PIPER_BIN`: path to piper executable (default: `piper`)
-- `PIPER_BIN_DIR`: where auto-downloaded Piper binaries are cached (default `./bin`)
-- `PIPER_MODEL`: default model path (`.onnx`)
-- `PIPER_MODELS`: optional JSON map for multiple model IDs
-  - Example: `{"en_US-amy-medium":"C:/models/en_US-amy-medium.onnx"}`
-- `PIPER_SPEAKER`: optional integer speaker id
-- `PIPER_MODEL_DIR`: where downloaded models are cached (default `./models`)
-- `PIPER_VOICES_REPO`: HF repo id for model catalog (default `rhasspy/piper-voices`)
-- `PIPER_DEFAULT_MODEL`: fallback model when `--model` is omitted (default `en_US-lessac-medium`)
-- `API_KEY`: optional bearer token for auth
+- `uv`
+- local CPU is enough for normal use
 
-## Run API
+## Quick Start
+
+Helper script:
+
+```bat
+scripts\host.bat 127.0.0.1 8011
+```
+
+Manual direct startup:
+
 ```bash
 uv run tts-piper serve --host 127.0.0.1 --port 8011
 ```
 
-## CLI synth
+## What The Launcher Script Does
+
+This service does not have a custom Python launcher. `scripts\host.bat` is only a wrapper for:
+
+```bat
+uv run tts-piper serve --host %HOST% --port %PORT%
+```
+
+The command entrypoint comes from `pyproject.toml`:
+
+```text
+tts-piper = "tts_piper_adapter.cli:main"
+```
+
+`scripts\client.bat` is only a wrapper around the same `uv run tts-piper synth ...` CLI path.
+
+## Manual Launch Without The .bat Script
+
+Start the API directly:
+
+```bash
+uv run tts-piper serve --host 127.0.0.1 --port 8011
+```
+
+Synthesize using an explicit model:
+
 ```bash
 uv run tts-piper synth --text "hello" --out out.wav --model en_US-amy-medium
 ```
 
-Model argument is optional now; it uses `PIPER_DEFAULT_MODEL` and auto-installs if missing:
+Synthesize using the default model:
+
 ```bash
 uv run tts-piper synth --text "hello" --out out.wav
 ```
 
-## OpenAI-compatible endpoint
-- `POST /v1/audio/speech`
+If you want to override binary or model locations for standalone use:
+
+```bat
+set PIPER_BIN=C:\path\to\piper.exe
+set PIPER_MODEL_DIR=%CD%\models
+set PIPER_DEFAULT_MODEL=en_US-lessac-medium
+uv run tts-piper serve --host 127.0.0.1 --port 8011
+```
+
+## API Endpoints
+
+- `GET /healthz`
 - `GET /v1/models`
+- `POST /v1/audio/speech`
 
-Current output format: `wav`.
+## Verification
 
-## Notes on model auto-install
-- The adapter downloads `voices.json` from HF and resolves model IDs/aliases.
-- It downloads both `*.onnx` and `*.onnx.json` using `huggingface_hub` APIs.
-- This is based on `rhasspy/piper-voices` catalog structure.
+Health check:
 
-## Notes on Piper binary auto-install
-- If `PIPER_BIN` is not found on PATH and not a valid file path, adapter auto-downloads Piper from latest release assets.
-- Source: `https://github.com/rhasspy/piper/releases`.
+```bash
+curl http://127.0.0.1:8011/healthz
+```
+
+List models:
+
+```bash
+curl http://127.0.0.1:8011/v1/models
+```
+
+Synthesize speech:
+
+```bash
+curl -X POST http://127.0.0.1:8011/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"input":"hello world","model":"en_US-lessac-medium"}' \
+  --output out.wav
+```
+
+## Troubleshooting
+
+- Piper binary not found
+  The adapter can auto-download it unless you set `PIPER_BIN` to a bad path.
+- Model not found
+  The adapter can auto-download models from `rhasspy/piper-voices`.
+- Wrong voice/model selection
+  Check `/v1/models` or set `PIPER_DEFAULT_MODEL` explicitly.
+
+## Notes
+
+- Current output format is `wav`.
+- `PIPER_BIN_DIR` controls where downloaded Piper binaries are cached.
+- `PIPER_MODEL_DIR` controls where models are cached.

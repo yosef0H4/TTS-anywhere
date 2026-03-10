@@ -1,13 +1,22 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import type { BundledServicesManifest } from "./service-bundle-manifest.js";
+
 export interface RuntimeServicesSyncOptions {
-  appVersion: string;
   isPackaged: boolean;
   sourceRoot: string;
   targetRoot: string;
-  versionFile: string;
-  logSync?: (context: { version: string; sourceRoot: string; targetRoot: string }) => void;
+  bundledManifest: BundledServicesManifest | null;
+  manifestFile: string;
+  logSync?: (context: {
+    action: "skipped" | "synced";
+    reason: string;
+    sourceRoot: string;
+    targetRoot: string;
+    bundledHash: string | null;
+    runtimeHash: string | null;
+  }) => void;
 }
 
 const SKIPPED_DIRECTORY_NAMES = new Set([
@@ -52,17 +61,34 @@ function copyBundledServiceTree(sourceDir: string, targetDir: string): void {
   }
 }
 
-function readRuntimeServicesVersion(versionFile: string): string | null {
+function readRuntimeServicesManifest(manifestFile: string): BundledServicesManifest | null {
   try {
-    return fs.readFileSync(versionFile, "utf-8").trim() || null;
+    const raw = fs.readFileSync(manifestFile, "utf-8");
+    const parsed = JSON.parse(raw) as Partial<BundledServicesManifest>;
+    if (parsed.schemaVersion !== 1) return null;
+    if (typeof parsed.generatedAt !== "string") return null;
+    if (typeof parsed.hash !== "string" || parsed.hash.length === 0) return null;
+    if (!Array.isArray(parsed.services)) return null;
+    return {
+      schemaVersion: 1,
+      generatedAt: parsed.generatedAt,
+      hash: parsed.hash,
+      services: parsed.services.filter(
+        (entry): entry is BundledServicesManifest["services"][number] =>
+          typeof entry === "object" &&
+          entry !== null &&
+          typeof entry.path === "string" &&
+          typeof entry.sha256 === "string"
+      )
+    };
   } catch {
     return null;
   }
 }
 
-function writeRuntimeServicesVersion(versionFile: string, version: string): void {
-  ensureDir(path.dirname(versionFile));
-  fs.writeFileSync(versionFile, version, "utf-8");
+function writeRuntimeServicesManifest(manifestFile: string, manifest: BundledServicesManifest): void {
+  ensureDir(path.dirname(manifestFile));
+  fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`, "utf-8");
 }
 
 function resetRuntimeServicesRoot(targetRoot: string): void {
@@ -75,9 +101,20 @@ export function syncBundledServicesToRuntime(options: RuntimeServicesSyncOptions
     return options.sourceRoot;
   }
 
-  const currentVersion = options.appVersion;
-  const existingVersion = readRuntimeServicesVersion(options.versionFile);
-  if (existingVersion === currentVersion && fs.existsSync(options.targetRoot)) {
+  const bundledHash = options.bundledManifest?.hash ?? null;
+  const runtimeManifest = readRuntimeServicesManifest(options.manifestFile);
+  const runtimeHash = runtimeManifest?.hash ?? null;
+  const hasTargetRoot = fs.existsSync(options.targetRoot);
+
+  if (bundledHash !== null && runtimeHash === bundledHash && hasTargetRoot) {
+    options.logSync?.({
+      action: "skipped",
+      reason: "bundle hash matched existing runtime services",
+      sourceRoot: options.sourceRoot,
+      targetRoot: options.targetRoot,
+      bundledHash,
+      runtimeHash
+    });
     return options.targetRoot;
   }
 
@@ -87,11 +124,29 @@ export function syncBundledServicesToRuntime(options: RuntimeServicesSyncOptions
     if (!entry.isDirectory() || runtimeCopyShouldSkipName(entry.name)) continue;
     copyBundledServiceTree(path.join(options.sourceRoot, entry.name), path.join(options.targetRoot, entry.name));
   }
-  writeRuntimeServicesVersion(options.versionFile, currentVersion);
+
+  if (options.bundledManifest) {
+    writeRuntimeServicesManifest(options.manifestFile, options.bundledManifest);
+  } else {
+    fs.rmSync(options.manifestFile, { force: true });
+  }
+
   options.logSync?.({
-    version: currentVersion,
+    action: "synced",
+    reason:
+      bundledHash === null
+        ? "bundled services manifest missing or invalid"
+        : runtimeHash === null
+          ? hasTargetRoot
+            ? "runtime services manifest missing or invalid"
+            : "runtime services directory missing"
+          : !hasTargetRoot
+            ? "runtime services directory missing"
+            : "bundle hash changed",
     sourceRoot: options.sourceRoot,
-    targetRoot: options.targetRoot
+    targetRoot: options.targetRoot,
+    bundledHash,
+    runtimeHash
   });
   return options.targetRoot;
 }

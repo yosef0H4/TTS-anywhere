@@ -1,78 +1,125 @@
 # Kokoro TTS Adapter
 
-OpenAI-compatible adapter for Kokoro TTS (GPU-only).
+OpenAI-compatible adapter for Kokoro TTS.
+
+## What This Service Does
+
+- serves `/v1/audio/speech` for OpenAI-style speech synthesis
+- exposes `/v1/models`, `/v1/voices`, and `/healthz`
+- provides CLI commands for listing models, listing voices, and synthesizing files
+- requires a GPU for synthesis
 
 ## Requirements
 
-- Python 3.10+
+- `uv`
 - CUDA-capable GPU
-- uv package manager
+- Python version accepted by the package
 
-## Installation
+## Quick Start
 
-```bash
-cd services/tts/kokoro
-uv venv
-uv pip install -e .
+Helper script:
+
+```bat
+scripts\host.bat 127.0.0.1 8040
 ```
 
-## Usage
-
-### Start API Server
+Manual direct startup:
 
 ```bash
-uv run tts-kokoro serve --port 8013
+uv run tts-kokoro serve --host 127.0.0.1 --port 8013
 ```
 
-### CLI Commands
+The helper script defaults to port `8040`, while the CLI and app settings default to port `8013`. Pick one explicitly if you want consistent behavior.
+
+## What The Launcher Script Does
+
+This service does not have a custom `launcher.py`. `scripts\host.bat` is only a wrapper for:
+
+```bat
+uv run tts-kokoro serve --host %HOST% --port %PORT%
+```
+
+The command entrypoint comes from `pyproject.toml`:
+
+```text
+tts-kokoro = "tts_kokoro_adapter.cli:main"
+```
+
+## Manual Launch Without The .bat Script
+
+Start the API directly:
 
 ```bash
-# List available models
+uv run tts-kokoro serve --host 127.0.0.1 --port 8013
+```
+
+List models:
+
+```bash
 uv run tts-kokoro models
-
-# List available voices
-uv run tts-kokoro voices
-
-# Synthesize text to WAV
-uv run tts-kokoro synth --text "hello world" --out test.wav --voice af_heart
 ```
 
-### API Endpoints
-
-- `GET /v1/models` - List available models
-- `GET /v1/voices` - List available voices
-- `POST /v1/audio/speech` - Synthesize speech
-- `GET /healthz` - Health check
-
-### Example API Request
+List voices:
 
 ```bash
-curl -X POST http://localhost:8013/v1/audio/speech \
-  -H "Content-Type: application/json" \
-  -d '{"input": "hello world", "voice": "af_heart"}' \
-  --output test.wav
+uv run tts-kokoro voices
 ```
 
-## Available Voices
+Synthesize a file:
 
-### American English (lang_code='a')
-- af_heart, af_bella, af_nicole, af_sarah, af_sky
-- am_michael, am_adam, am_gurney
+```bash
+uv run tts-kokoro synth --text "hello world" --out out.wav --voice af_heart
+```
 
-### British English (lang_code='b')
-- bf_emma, bm_george, bm_lewis
+The helper client script is only a wrapper around the same `uv run tts-kokoro synth ...` command.
 
-## Environment Variables
+## API Endpoints
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| API_KEY | None | Optional API key for authentication |
-| KOKORO_DEFAULT_VOICE | af_heart | Default voice |
-| KOKORO_DEFAULT_SPEED | 1.0 | Default speech speed |
-| KOKORO_PORT | 8013 | Default server port |
+- `GET /healthz`
+- `GET /v1/models`
+- `GET /v1/voices`
+- `POST /v1/audio/speech`
+
+## Verification
+
+Health check:
+
+```bash
+curl http://127.0.0.1:8013/healthz
+```
+
+List models:
+
+```bash
+curl http://127.0.0.1:8013/v1/models
+```
+
+List voices:
+
+```bash
+curl http://127.0.0.1:8013/v1/voices
+```
+
+Synthesize speech:
+
+```bash
+curl -X POST http://127.0.0.1:8013/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"input":"hello world","voice":"af_heart"}' \
+  --output out.wav
+```
+
+## Troubleshooting
+
+- No GPU detected
+  Kokoro synthesis requires CUDA. The app logs and `/v1/audio/speech` responses will report the missing GPU.
+- First run is slow
+  Model assets may be downloaded from Hugging Face.
+- English fallback issues
+  `espeak-ng` may still be needed in some environments.
 
 ## Notes
 
-- First run downloads ~300MB model from HuggingFace
-- Sample rate is fixed at 24000 Hz
-- espeak-ng may be required on some systems for English OOD fallback
+- `KOKORO_PORT` defaults to `8013`.
+- First run can download roughly 300 MB of model data.
+- Sample rate is fixed at 24000 Hz.

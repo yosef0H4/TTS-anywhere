@@ -34,6 +34,7 @@ import type {
   ProviderTtsRequest,
   ProviderVoicesRequest
 } from "./provider-ipc.js";
+import { readBundledServicesManifest } from "./service-bundle-manifest.js";
 import { syncBundledServicesToRuntime as syncBundledServicesToRuntimeHelper } from "./runtime-services.js";
 
 type LogLevel = "debug" | "info" | "warn" | "error";
@@ -278,8 +279,12 @@ function runtimeServicesRoot(): string {
   return path.join(app.getPath("userData"), "runtime", "services");
 }
 
-function runtimeSyncVersionFile(): string {
-  return path.join(app.getPath("userData"), "runtime", ".bundled-services-version");
+function bundledServicesManifestPath(): string {
+  return path.join(servicesBasePath(), ".bundle-manifest.json");
+}
+
+function runtimeSyncManifestFile(): string {
+  return path.join(app.getPath("userData"), "runtime", ".bundled-services-manifest.json");
 }
 
 function managedServiceStatusSnapshot(serviceId: ManagedServiceId): ManagedServiceStatus {
@@ -328,17 +333,20 @@ function ensureDir(dirPath: string): void {
 }
 
 function syncBundledServicesToRuntime(): string {
+  const bundledManifest = readBundledServicesManifest(bundledServicesManifestPath());
   return syncBundledServicesToRuntimeHelper({
-    appVersion: app.getVersion(),
     isPackaged: app.isPackaged,
     sourceRoot: servicesBasePath(),
     targetRoot: runtimeServicesRoot(),
-    versionFile: runtimeSyncVersionFile(),
-    logSync: ({ version, sourceRoot, targetRoot }) => {
-      writeBackendLog("info", "stack", "runtime.services.synced", {
-        version,
+    bundledManifest,
+    manifestFile: runtimeSyncManifestFile(),
+    logSync: ({ action, reason, sourceRoot, targetRoot, bundledHash, runtimeHash }) => {
+      writeBackendLog("info", "stack", `runtime.services.${action}`, {
+        reason,
         sourceRoot,
-        targetRoot
+        targetRoot,
+        bundledHash,
+        runtimeHash
       });
     }
   });
@@ -1621,7 +1629,7 @@ if (!hasSingleInstanceLock) {
     diag("app.main-window.create.begin");
     mainWindow = createMainWindow();
     diag("app.main-window.create.end", { hasWindow: Boolean(mainWindow) });
-    overlay = new BorderOverlay(2);
+    overlay = new BorderOverlay(3);
     diag("app.overlay.created");
     diag("app.capture-session.create.begin", { hotkey: activeCaptureHotkey });
     captureHotkeySession = new HotkeySession({
