@@ -29,6 +29,7 @@ export type FrozenCaptureHandle = {
   id: number;
   bounds: MonitorBounds;
   capturedAt: number;
+  captureAttempts?: number;
 };
 
 export type CaptureCropRect = {

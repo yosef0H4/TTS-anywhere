@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, ipcMain, shell } from "electron";
+import { app, BrowserWindow, clipboard, ipcMain, nativeImage, shell } from "electron";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
   beginFrozenMonitorCaptureAtPoint,
@@ -922,6 +922,136 @@ function diag(event: string, data?: Record<string, unknown>): void {
   noteStartupPhase(event, data);
 }
 
+type CaptureAuditStats = {
+  width: number;
+  height: number;
+  pixelCount: number;
+  opaqueBlackPixels: number;
+  transparentPixels: number;
+  nonBlackPixels: number;
+  blackRatio: number;
+  transparentRatio: number;
+  blankRatio: number;
+  isProbablyBlackFrame: boolean;
+  isProbablyBlankFrame: boolean;
+};
+
+function sanitizeCaptureAuditName(value: string): string {
+  return value.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "capture";
+}
+
+function inspectCapturePng(pngBuffer: Buffer): CaptureAuditStats {
+  const image = nativeImage.createFromBuffer(pngBuffer);
+  const size = image.getSize();
+  const bitmap = image.toBitmap();
+  const pixelCount = size.width * size.height;
+  let opaqueBlackPixels = 0;
+  let transparentPixels = 0;
+
+  for (let index = 0; index < bitmap.length; index += 4) {
+    const blue = bitmap[index] ?? 0;
+    const green = bitmap[index + 1] ?? 0;
+    const red = bitmap[index + 2] ?? 0;
+    const alpha = bitmap[index + 3] ?? 0;
+    if (alpha === 0) {
+      transparentPixels += 1;
+      continue;
+    }
+    if (red === 0 && green === 0 && blue === 0) {
+      opaqueBlackPixels += 1;
+    }
+  }
+
+  const nonBlackPixels = Math.max(0, pixelCount - opaqueBlackPixels - transparentPixels);
+  const blackRatio = pixelCount > 0 ? opaqueBlackPixels / pixelCount : 0;
+  const transparentRatio = pixelCount > 0 ? transparentPixels / pixelCount : 0;
+  const blankRatio = pixelCount > 0 ? (opaqueBlackPixels + transparentPixels) / pixelCount : 0;
+  return {
+    width: size.width,
+    height: size.height,
+    pixelCount,
+    opaqueBlackPixels,
+    transparentPixels,
+    nonBlackPixels,
+    blackRatio,
+    transparentRatio,
+    blankRatio,
+    isProbablyBlackFrame: pixelCount > 0 && blackRatio >= 0.98,
+    isProbablyBlankFrame: pixelCount > 0 && blankRatio >= 0.98
+  };
+}
+
+function persistCapturedScreenshot(
+  pngBuffer: Buffer,
+  details: {
+    captureKind: "selection" | "fullscreen" | "window";
+    hotkey?: ElectronHotkeyKey;
+    resultMode?: "editor" | "clipboard";
+  }
+): { filePath: string; fileName: string } {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const modePart = details.resultMode ? `-${sanitizeCaptureAuditName(details.resultMode)}` : "";
+  const hotkeyPart = details.hotkey ? `-${sanitizeCaptureAuditName(details.hotkey)}` : "";
+  const fileName = `${stamp}-${sanitizeCaptureAuditName(details.captureKind)}${modePart}${hotkeyPart}.png`;
+  return {
+    fileName,
+    filePath: path.join(getLogDir(), "screenshot", fileName)
+  };
+}
+
+function emitCapturedImage(
+  pngBuffer: Buffer,
+  details: {
+    captureKind: "selection" | "fullscreen" | "window";
+    hotkey?: ElectronHotkeyKey;
+    resultMode?: "editor" | "clipboard";
+    bounds?: Record<string, unknown>;
+    frozen?: FrozenCaptureHandle | null;
+    crop?: Record<string, unknown>;
+    sourceEvent: string;
+  }
+): void {
+  const persisted = persistCapturedScreenshot(pngBuffer, details);
+  const audit = inspectCapturePng(pngBuffer);
+  diag(`${details.sourceEvent}.buffer`, {
+    bytes: pngBuffer.byteLength,
+    savedPath: persisted.filePath,
+    captureKind: details.captureKind,
+    hotkey: details.hotkey,
+    resultMode: details.resultMode,
+    bounds: details.bounds,
+    crop: details.crop,
+    frozenAgeMs: details.frozen ? Date.now() - details.frozen.capturedAt : undefined,
+    captureAttempts: details.frozen?.captureAttempts,
+    ...audit
+  });
+  if (audit.isProbablyBlankFrame) {
+    diag("capture.blank-frame.detected", {
+      sourceEvent: details.sourceEvent,
+      savedPath: persisted.filePath,
+      captureKind: details.captureKind,
+      hotkey: details.hotkey,
+      resultMode: details.resultMode,
+      bounds: details.bounds,
+      crop: details.crop,
+      blankRatio: audit.blankRatio,
+      blackRatio: audit.blackRatio,
+      transparentRatio: audit.transparentRatio,
+      bytes: pngBuffer.byteLength,
+      frozenAgeMs: details.frozen ? Date.now() - details.frozen.capturedAt : undefined,
+      captureAttempts: details.frozen?.captureAttempts
+    });
+  }
+
+  const dataUrl = `data:image/png;base64,${pngBuffer.toString("base64")}`;
+  mainWindow?.webContents.send("capture-image", {
+    dataUrl,
+    captureKind: details.captureKind,
+    resultMode: details.resultMode ?? "editor",
+    hotkey: details.hotkey
+  });
+}
+
 function createProviderController(requestId: string): AbortController {
   const existing = providerAbortControllers.get(requestId);
   existing?.abort();
@@ -1307,12 +1437,24 @@ async function finalizeSelection(point: { x: number; y: number }): Promise<void>
       height: payload.height
     });
 
-    const dataUrl = `data:image/png;base64,${pngBuffer.toString("base64")}`;
-    mainWindow?.webContents.send("capture-image", {
-      dataUrl,
+    emitCapturedImage(pngBuffer, {
       captureKind: "selection",
       resultMode,
-      hotkey: resultMode === "clipboard" ? "ocrClipboard" : "capture"
+      hotkey: resultMode === "clipboard" ? "ocrClipboard" : "capture",
+      bounds: {
+        left: frozen.bounds.left,
+        top: frozen.bounds.top,
+        width: frozen.bounds.width,
+        height: frozen.bounds.height
+      },
+      frozen,
+      crop: {
+        x: cropLeft,
+        y: cropTop,
+        width: payload.width,
+        height: payload.height
+      },
+      sourceEvent: "capture.image.sent"
     });
     diag("capture.image.sent", {
       width: payload.width,
@@ -1366,8 +1508,24 @@ async function replayLastCaptureRect(): Promise<void> {
       height: rect.height
     });
 
-    const dataUrl = `data:image/png;base64,${pngBuffer.toString("base64")}`;
-    mainWindow?.webContents.send("capture-image", { dataUrl, captureKind: "selection", hotkey: "replayCapture" });
+    emitCapturedImage(pngBuffer, {
+      captureKind: "selection",
+      hotkey: "replayCapture",
+      bounds: {
+        left: frozen.bounds.left,
+        top: frozen.bounds.top,
+        width: frozen.bounds.width,
+        height: frozen.bounds.height
+      },
+      frozen,
+      crop: {
+        x: cropLeft,
+        y: cropTop,
+        width: rect.width,
+        height: rect.height
+      },
+      sourceEvent: "capture.replay.sent"
+    });
     emitHotkeyFeedback("replayCapture", "success");
     diag("capture.replay.sent", {
       left: rect.left,
@@ -1404,8 +1562,24 @@ async function captureFullScreenAtPoint(point: { x: number; y: number }): Promis
       height: frozen.bounds.height
     });
 
-    const dataUrl = `data:image/png;base64,${pngBuffer.toString("base64")}`;
-    mainWindow?.webContents.send("capture-image", { dataUrl, captureKind: "fullscreen", hotkey: "fullCapture" });
+    emitCapturedImage(pngBuffer, {
+      captureKind: "fullscreen",
+      hotkey: "fullCapture",
+      bounds: {
+        left: frozen.bounds.left,
+        top: frozen.bounds.top,
+        width: frozen.bounds.width,
+        height: frozen.bounds.height
+      },
+      frozen,
+      crop: {
+        x: 0,
+        y: 0,
+        width: frozen.bounds.width,
+        height: frozen.bounds.height
+      },
+      sourceEvent: "capture.fullscreen.sent"
+    });
     emitHotkeyFeedback("fullCapture", "success");
     diag("capture.fullscreen.sent", {
       left: frozen.bounds.left,
@@ -1457,8 +1631,28 @@ async function captureActiveWindow(): Promise<void> {
       height: bounds.height
     });
 
-    const dataUrl = `data:image/png;base64,${pngBuffer.toString("base64")}`;
-    mainWindow?.webContents.send("capture-image", { dataUrl, captureKind: "window", hotkey: "activeWindowCapture" });
+    emitCapturedImage(pngBuffer, {
+      captureKind: "window",
+      hotkey: "activeWindowCapture",
+      bounds: {
+        left: frozen.bounds.left,
+        top: frozen.bounds.top,
+        width: frozen.bounds.width,
+        height: frozen.bounds.height,
+        windowLeft: bounds.left,
+        windowTop: bounds.top,
+        windowWidth: bounds.width,
+        windowHeight: bounds.height
+      },
+      frozen,
+      crop: {
+        x: bounds.left - frozen.bounds.left,
+        y: bounds.top - frozen.bounds.top,
+        width: bounds.width,
+        height: bounds.height
+      },
+      sourceEvent: "capture.window.sent"
+    });
     emitHotkeyFeedback("activeWindowCapture", "success");
     diag("capture.window.sent", {
       left: bounds.left,

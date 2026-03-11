@@ -38,6 +38,7 @@ struct FrozenFrame {
   int32_t id;
   Bounds bounds;
   uint64_t captured_at;
+  uint32_t capture_attempts;
   std::vector<uint8_t> pixels;
 };
 
@@ -225,6 +226,13 @@ std::vector<uint8_t> CropBgra(const std::vector<uint8_t>& pixels, uint32_t sourc
   return cropped;
 }
 
+bool IsZeroedFrame(const std::vector<uint8_t>& pixels) {
+  for (uint8_t value : pixels) {
+    if (value != 0) return false;
+  }
+  return true;
+}
+
 std::vector<uint8_t> EncodePngBgra(const std::vector<uint8_t>& pixels, uint32_t width, uint32_t height) {
   ComPtr<IWICImagingFactory> factory;
   ThrowIfFailed(
@@ -278,12 +286,31 @@ FrozenFrame CaptureFrozenAtPoint(LONG x, LONG y) {
   OutputSelection selection = FindOutputAtPoint(x, y);
   uint32_t width = 0;
   uint32_t height = 0;
-  std::vector<uint8_t> pixels = CaptureOutputBgra(selection, &width, &height);
+  std::vector<uint8_t> pixels;
+  uint32_t attempt_count = 0;
+  constexpr uint32_t kMaxCaptureAttempts = 4;
+
+  for (; attempt_count < kMaxCaptureAttempts; ++attempt_count) {
+    width = 0;
+    height = 0;
+    pixels = CaptureOutputBgra(selection, &width, &height);
+    if (!IsZeroedFrame(pixels)) {
+      break;
+    }
+    if (attempt_count + 1 < kMaxCaptureAttempts) {
+      Sleep(16);
+    }
+  }
+
+  if (IsZeroedFrame(pixels)) {
+    throw std::runtime_error("Captured desktop frame was blank after retries");
+  }
 
   FrozenFrame frame{};
   frame.id = g_next_session_id++;
   frame.bounds = Bounds{ selection.bounds.left, selection.bounds.top, static_cast<LONG>(width), static_cast<LONG>(height) };
   frame.captured_at = CurrentUnixMs();
+  frame.capture_attempts = attempt_count + 1;
   frame.pixels = std::move(pixels);
   return frame;
 }
@@ -332,6 +359,7 @@ Napi::Value BeginFrozenMonitorCaptureAtPointWrapped(const Napi::CallbackInfo& in
   obj.Set("id", Napi::Number::New(env, id));
   obj.Set("bounds", BoundsToObject(env, bounds));
   obj.Set("capturedAt", Napi::Number::New(env, static_cast<double>(captured_at)));
+  obj.Set("captureAttempts", Napi::Number::New(env, frame.capture_attempts));
   return obj;
 }
 
