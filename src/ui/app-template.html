@@ -46,45 +46,6 @@
           </div>
         </section>
 
-        <section class="setting-section setting-section--half" data-section="logging">
-          <div class="setting-section-head">
-            <h3 data-i18n="logging.title">Logging</h3>
-            <span class="advanced-hint" data-i18n="logging.hint">Debug and crash analysis</span>
-          </div>
-          <div class="setting-group">
-            <label data-i18n="logging.level">Log Level</label>
-            <select id="log-level">
-              <option value="debug" data-i18n="logging.level.debug">Debug (verbose)</option>
-              <option value="info" data-i18n="logging.level.info">Info (default)</option>
-              <option value="warn" data-i18n="logging.level.warn">Warn</option>
-              <option value="error" data-i18n="logging.level.error">Error</option>
-            </select>
-          </div>
-          <div class="setting-group setting-toggle-row">
-            <label for="log-console-enabled" data-i18n="logging.console">Console Logging</label>
-            <label class="setting-switch" for="log-console-enabled">
-              <input id="log-console-enabled" type="checkbox">
-              <span class="setting-switch-track" aria-hidden="true">
-                <span class="setting-switch-thumb"></span>
-              </span>
-            </label>
-          </div>
-          <div class="setting-group setting-toggle-row">
-            <label for="log-file-enabled" data-i18n="logging.file">File Logging</label>
-            <label class="setting-switch" for="log-file-enabled">
-              <input id="log-file-enabled" type="checkbox">
-              <span class="setting-switch-track" aria-hidden="true">
-                <span class="setting-switch-thumb"></span>
-              </span>
-            </label>
-          </div>
-          <div class="settings-actions-grid">
-            <button type="button" id="btn-view-logs"><i data-lucide="file-text" class="ui-icon"></i><span data-i18n="logging.view">View Logs</span></button>
-            <button type="button" id="btn-clear-logs" class="danger"><i data-lucide="trash-2" class="ui-icon"></i><span data-i18n="logging.clear">Clear Logs</span></button>
-          </div>
-          <div class="setting-footnote" id="log-path-display" data-i18n="logging.path.unavailable">Log path: not available</div>
-        </section>
-
         <section class="setting-section setting-section--full" data-section="ocr">
           <div class="setting-section-head">
             <h3 data-i18n="ocr.title">OCR</h3>
@@ -597,6 +558,45 @@
           </div>
           <input id="import-settings-file" type="file" accept="application/json" hidden>
           <div class="setting-footnote" id="settings-last-import"></div>
+        </section>
+
+        <section class="setting-section setting-section--half" data-section="logging">
+          <div class="setting-section-head">
+            <h3 data-i18n="logging.title">Logging</h3>
+            <span class="advanced-hint" data-i18n="logging.hint">Debug and crash analysis</span>
+          </div>
+          <div class="setting-group">
+            <label data-i18n="logging.level">Log Level</label>
+            <select id="log-level">
+              <option value="debug" data-i18n="logging.level.debug">Debug (verbose)</option>
+              <option value="info" data-i18n="logging.level.info">Info (default)</option>
+              <option value="warn" data-i18n="logging.level.warn">Warn</option>
+              <option value="error" data-i18n="logging.level.error">Error</option>
+            </select>
+          </div>
+          <div class="setting-group setting-toggle-row">
+            <label for="log-console-enabled" data-i18n="logging.console">Console Logging</label>
+            <label class="setting-switch" for="log-console-enabled">
+              <input id="log-console-enabled" type="checkbox">
+              <span class="setting-switch-track" aria-hidden="true">
+                <span class="setting-switch-thumb"></span>
+              </span>
+            </label>
+          </div>
+          <div class="setting-group setting-toggle-row">
+            <label for="log-file-enabled" data-i18n="logging.file">File Logging</label>
+            <label class="setting-switch" for="log-file-enabled">
+              <input id="log-file-enabled" type="checkbox">
+              <span class="setting-switch-track" aria-hidden="true">
+                <span class="setting-switch-thumb"></span>
+              </span>
+            </label>
+          </div>
+          <div class="settings-actions-grid">
+            <button type="button" id="btn-view-logs"><i data-lucide="file-text" class="ui-icon"></i><span data-i18n="logging.view">View Logs</span></button>
+            <button type="button" id="btn-clear-logs" class="danger"><i data-lucide="trash-2" class="ui-icon"></i><span data-i18n="logging.clear">Clear Logs</span></button>
+          </div>
+          <div class="setting-footnote" id="log-path-display" data-i18n="logging.path.unavailable">Log path: not available</div>
         </section>
 
       </div>
