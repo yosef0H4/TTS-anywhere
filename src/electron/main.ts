@@ -40,6 +40,22 @@ import { readBundledServicesManifest } from "./service-bundle-manifest.js";
 import { syncBundledServicesToRuntime as syncBundledServicesToRuntimeHelper } from "./runtime-services.js";
 
 type LogLevel = "debug" | "info" | "warn" | "error";
+type UiTheme = "zen" | "pink";
+
+const OVERLAY_THEME_COLORS: Record<UiTheme, { outer: string; inner: string }> = {
+  zen: {
+    outer: "#ef6b57",
+    inner: "#111111"
+  },
+  pink: {
+    outer: "#db2777",
+    inner: "#111111"
+  }
+};
+
+function isUiTheme(value: unknown): value is UiTheme {
+  return value === "zen" || value === "pink";
+}
 
 interface BackendLogEntry {
   timestamp: string;
@@ -126,6 +142,7 @@ let volumeDownHotkeyBeforeEdit: string | null = null;
 let replayCaptureHotkeyBeforeEdit: string | null = null;
 let drawSelectionRectangle = true;
 let overlay: BorderOverlay | null = null;
+let activeTheme: UiTheme = "zen";
 let selectionTicker: NodeJS.Timeout | null = null;
 let selectionActive = false;
 let selectionStart: { x: number; y: number } | null = null;
@@ -200,6 +217,7 @@ interface NativePrefs {
   volumeUpHotkey?: string;
   volumeDownHotkey?: string;
   replayCaptureHotkey?: string;
+  theme?: UiTheme;
   lastCaptureRect?: { left?: number; top?: number; width?: number; height?: number };
 }
 
@@ -747,6 +765,34 @@ function saveNativePrefs(next: NativePrefs): void {
 
 function savePinnedPref(value: boolean): void {
   saveNativePrefs({ alwaysOnTop: value });
+}
+
+function getOverlayThemeColors(theme: UiTheme): { outerColor: string; innerColor: string } {
+  const colors = OVERLAY_THEME_COLORS[theme];
+  return {
+    outerColor: colors.outer,
+    innerColor: colors.inner
+  };
+}
+
+function applyOverlayTheme(theme: UiTheme): void {
+  activeTheme = theme;
+  const colors = getOverlayThemeColors(theme);
+  overlay?.setColors(colors);
+  diag("overlay.theme.applied", {
+    theme,
+    outerColor: colors.outerColor,
+    innerColor: colors.innerColor
+  });
+}
+
+function setOverlayTheme(theme: UiTheme): void {
+  applyOverlayTheme(theme);
+  saveNativePrefs({ theme });
+  writeBackendLog("info", "electron", "overlay.theme.updated", {
+    theme,
+    ...getOverlayThemeColors(theme)
+  });
 }
 
 function setAlwaysOnTopState(value: boolean, targetWindow?: BrowserWindow | null): boolean {
@@ -1635,6 +1681,7 @@ if (!hasSingleInstanceLock) {
     activeVolumeUpHotkey = readStoredHotkey(nativePrefs.volumeUpHotkey, activeVolumeUpHotkey);
     activeVolumeDownHotkey = readStoredHotkey(nativePrefs.volumeDownHotkey, activeVolumeDownHotkey);
     activeReplayCaptureHotkey = readStoredHotkey(nativePrefs.replayCaptureHotkey, activeReplayCaptureHotkey);
+    activeTheme = isUiTheme(nativePrefs.theme) ? nativePrefs.theme : "zen";
     lastSavedCaptureRect = isValidStoredRect(nativePrefs.lastCaptureRect) ? nativePrefs.lastCaptureRect : null;
     drawSelectionRectangle = nativePrefs.captureDrawRectangle ?? drawSelectionRectangle;
     diag("app.native-prefs.loaded", {
@@ -1651,14 +1698,19 @@ if (!hasSingleInstanceLock) {
       activeVolumeUpHotkey,
       activeVolumeDownHotkey,
       activeReplayCaptureHotkey,
+      activeTheme,
       lastSavedCaptureRect,
       drawSelectionRectangle
     });
     diag("app.main-window.create.begin");
     mainWindow = createMainWindow();
     diag("app.main-window.create.end", { hasWindow: Boolean(mainWindow) });
-    overlay = new BorderOverlay(2);
+    overlay = new BorderOverlay({
+      thickness: 2,
+      ...getOverlayThemeColors(activeTheme)
+    });
     diag("app.overlay.created");
+    applyOverlayTheme(activeTheme);
     diag("app.capture-session.create.begin", { hotkey: activeCaptureHotkey });
     captureHotkeySession = new HotkeySession({
       initialHotkey: activeCaptureHotkey,
@@ -2443,6 +2495,15 @@ ipcMain.handle("capture:set-draw-rectangle", (_event, enabled: boolean) => {
 });
 
 ipcMain.handle("capture:get-draw-rectangle", () => drawSelectionRectangle);
+
+ipcMain.handle("overlay-theme:set", (_event, theme: unknown) => {
+  if (!isUiTheme(theme)) {
+    throw new Error(`Unsupported overlay theme: ${String(theme)}`);
+  }
+  setOverlayTheme(theme);
+});
+
+ipcMain.handle("overlay-theme:get", () => activeTheme);
 ipcMain.handle("clipboard:write-text", (_event, text: string) => {
   clipboard.writeText(String(text ?? ""));
 });

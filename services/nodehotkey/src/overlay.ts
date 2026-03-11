@@ -27,12 +27,42 @@ import {
 } from "./win32-bindings.js";
 
 export type RawRect = { left: number; top: number; right: number; bottom: number };
+export interface BorderOverlayOptions {
+  thickness: number;
+  outerColor: string;
+  innerColor: string;
+}
 
 type BorderWindows = { top: unknown; right: unknown; bottom: unknown; left: unknown };
 type OverlayClassRegistration = { className: string; brush: unknown };
 
 const overlayClassRegistry = new Map<string, OverlayClassRegistration>();
 const defaultWindowProc = registerWindowProc((hWnd, msg, wParam, lParam) => DefWindowProcW(hWnd, msg, wParam, lParam));
+
+function normalizeHexColor(color: string): string {
+  const trimmed = color.trim();
+  const match = /^#?([0-9a-f]{6})$/i.exec(trimmed);
+  if (!match) {
+    throw new Error(`Unsupported overlay color "${color}"`);
+  }
+  const hex = match[1];
+  if (!hex) {
+    throw new Error(`Unsupported overlay color "${color}"`);
+  }
+  return `#${hex.toLowerCase()}`;
+}
+
+function hexToColorRef(color: string): number {
+  const normalized = normalizeHexColor(color);
+  const red = Number.parseInt(normalized.slice(1, 3), 16);
+  const green = Number.parseInt(normalized.slice(3, 5), 16);
+  const blue = Number.parseInt(normalized.slice(5, 7), 16);
+  return rgb(red, green, blue);
+}
+
+function colorClassName(prefix: string, color: string): string {
+  return `${prefix}_${normalizeHexColor(color).slice(1)}`;
+}
 
 function registerOverlayClass(className: string, color: number): OverlayClassRegistration {
   const existing = overlayClassRegistry.get(className);
@@ -70,26 +100,39 @@ function registerOverlayClass(className: string, color: number): OverlayClassReg
 }
 
 export class BorderOverlay {
-  private readonly outerWindows: BorderWindows;
-  private readonly innerWindows: BorderWindows;
+  private outerWindows: BorderWindows;
+  private innerWindows: BorderWindows;
   private readonly thickness: number;
+  private outerColor: string;
+  private innerColor: string;
 
-  constructor(thickness: number) {
-    this.thickness = Math.max(1, thickness);
-    const outerClass = registerOverlayClass("TTSAnywhereOverlayOuter", rgb(57, 255, 20));
-    const innerClass = registerOverlayClass("TTSAnywhereOverlayInner", rgb(0, 0, 0));
-    this.outerWindows = {
-      top: this.createBorderWindow(outerClass.className),
-      right: this.createBorderWindow(outerClass.className),
-      bottom: this.createBorderWindow(outerClass.className),
-      left: this.createBorderWindow(outerClass.className)
+  constructor(options: number | BorderOverlayOptions) {
+    const normalized = typeof options === "number"
+      ? { thickness: options, outerColor: "#39ff14", innerColor: "#000000" }
+      : options;
+    this.thickness = Math.max(1, normalized.thickness);
+    this.outerColor = normalizeHexColor(normalized.outerColor);
+    this.innerColor = normalizeHexColor(normalized.innerColor);
+    this.outerWindows = this.createWindowSet("TTSAnywhereOverlayOuter", this.outerColor);
+    this.innerWindows = this.createWindowSet("TTSAnywhereOverlayInner", this.innerColor);
+  }
+
+  private createWindowSet(prefix: string, color: string): BorderWindows {
+    const className = colorClassName(prefix, color);
+    const registration = registerOverlayClass(className, hexToColorRef(color));
+    return {
+      top: this.createBorderWindow(registration.className),
+      right: this.createBorderWindow(registration.className),
+      bottom: this.createBorderWindow(registration.className),
+      left: this.createBorderWindow(registration.className)
     };
-    this.innerWindows = {
-      top: this.createBorderWindow(innerClass.className),
-      right: this.createBorderWindow(innerClass.className),
-      bottom: this.createBorderWindow(innerClass.className),
-      left: this.createBorderWindow(innerClass.className)
-    };
+  }
+
+  private destroyWindowSet(windows: BorderWindows): void {
+    DestroyWindow(windows.top);
+    DestroyWindow(windows.right);
+    DestroyWindow(windows.bottom);
+    DestroyWindow(windows.left);
   }
 
   private createBorderWindow(className: string): unknown {
@@ -139,15 +182,25 @@ export class BorderOverlay {
     ShowWindow(this.innerWindows.left, SW_HIDE);
   }
 
+  setColors(colors: Pick<BorderOverlayOptions, "outerColor" | "innerColor">): void {
+    const nextOuterColor = normalizeHexColor(colors.outerColor);
+    const nextInnerColor = normalizeHexColor(colors.innerColor);
+    if (nextOuterColor === this.outerColor && nextInnerColor === this.innerColor) {
+      return;
+    }
+
+    this.hide();
+    this.destroyWindowSet(this.outerWindows);
+    this.destroyWindowSet(this.innerWindows);
+    this.outerColor = nextOuterColor;
+    this.innerColor = nextInnerColor;
+    this.outerWindows = this.createWindowSet("TTSAnywhereOverlayOuter", this.outerColor);
+    this.innerWindows = this.createWindowSet("TTSAnywhereOverlayInner", this.innerColor);
+  }
+
   destroy(): void {
     this.hide();
-    DestroyWindow(this.outerWindows.top);
-    DestroyWindow(this.outerWindows.right);
-    DestroyWindow(this.outerWindows.bottom);
-    DestroyWindow(this.outerWindows.left);
-    DestroyWindow(this.innerWindows.top);
-    DestroyWindow(this.innerWindows.right);
-    DestroyWindow(this.innerWindows.bottom);
-    DestroyWindow(this.innerWindows.left);
+    this.destroyWindowSet(this.outerWindows);
+    this.destroyWindowSet(this.innerWindows);
   }
 }

@@ -31,7 +31,7 @@ import {
 import { canResumePlayback } from "../core/playback/session";
 import { AppPipeline } from "../core/pipeline/app-pipeline";
 import { LEGACY_SETTINGS_KEYS, SettingsStore, SETTINGS_KEY } from "../core/services/settings-store";
-import type { ManagedServiceId, ManagedServiceStatus, ManagedServicesStatus } from "../core/services/platform";
+import type { ManagedServiceId, ManagedServiceStatus, ManagedServicesStatus, UiTheme } from "../core/services/platform";
 import { WorkspaceResizer } from "../ui/workspace-resizer";
 import { cleanTextForTts, findChunkIndexByTime } from "../core/utils/chunking";
 import { RequestPreemptor } from "../core/utils/request-preemptor";
@@ -1572,6 +1572,7 @@ export class WebApp {
       this.store.save(this.config);
       this.updateTimelineFromRawText();
       void this.syncAllElectronHotkeysFromSettings();
+      void this.syncElectronOverlayTheme();
       void this.syncElectronCaptureRectangleSetting();
       this.setStatus(this.t("status.settingsReset"));
     });
@@ -2031,6 +2032,18 @@ export class WebApp {
     this.renderAlwaysOnTopButton();
   }
 
+  private async syncElectronOverlayTheme(): Promise<void> {
+    if (!window.electronAPI?.setOverlayTheme) return;
+    try {
+      await window.electronAPI.setOverlayTheme(this.config.ui.theme);
+    } catch (error) {
+      loggers.settings.warn("Failed to sync overlay theme", {
+        error: String(error),
+        theme: this.config.ui.theme
+      });
+    }
+  }
+
   private applyUiState(): void {
     const shell = this.must<HTMLElement>("app-shell");
     shell.dataset.theme = this.config.ui.theme;
@@ -2127,10 +2140,11 @@ export class WebApp {
     return this.config.textProcessing.detectorBaseUrl;
   }
 
-  private setTheme(theme: "zen" | "pink"): void {
+  private setTheme(theme: UiTheme): void {
     this.config.ui.theme = theme;
     this.applyUiState();
     this.store.save(this.config);
+    void this.syncElectronOverlayTheme();
   }
 
   private exportSettings(): void {
@@ -2195,6 +2209,7 @@ export class WebApp {
       this.updateTimelineFromRawText();
       this.store.save(this.config);
       void this.syncAllElectronHotkeysFromSettings();
+      void this.syncElectronOverlayTheme();
       void this.syncElectronCaptureRectangleSetting();
       this.setStatus(this.t("status.settingsImported"));
       loggers.settings.info("Settings imported");
@@ -2421,6 +2436,7 @@ export class WebApp {
       this.handleHotkeyFeedback(event);
     });
     void this.syncAlwaysOnTopButton();
+    void this.syncElectronOverlayTheme();
   }
 
   private bindMainPreviewRenderer(): void {

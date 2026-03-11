@@ -1,5 +1,7 @@
 import type { ConfigurableHotkeyKey, HotkeyFeedbackEvent } from "../models/types";
 
+export type UiTheme = "zen" | "pink";
+
 export interface PlatformBridge {
   onCapturedImage(handler: (payload: {
     dataUrl: string;
@@ -180,6 +182,8 @@ export interface ElectronApi {
   getReplayCaptureHotkey: () => Promise<string>;
   setCaptureDrawRectangle: (enabled: boolean) => Promise<boolean>;
   getCaptureDrawRectangle: () => Promise<boolean>;
+  setOverlayTheme: (theme: UiTheme) => Promise<void>;
+  getOverlayTheme: () => Promise<UiTheme>;
   launchManagedService: (serviceId: ManagedServiceId) => Promise<ManagedServiceStatus>;
   stopManagedService: (serviceId: ManagedServiceId) => Promise<ManagedServiceStatus>;
   openRuntimeServicesFolder: () => Promise<string>;
