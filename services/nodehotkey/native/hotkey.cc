@@ -46,7 +46,26 @@ struct SessionState {
   SessionSpec spec;
   bool running = false;
   bool held = false;
+  bool repair_lctrl = false;
+  bool repair_rctrl = false;
+  bool repair_lshift = false;
+  bool repair_rshift = false;
+  bool repair_lalt = false;
+  bool repair_ralt = false;
+  bool repair_lwin = false;
+  bool repair_rwin = false;
   Napi::ThreadSafeFunction callback;
+};
+
+struct ModifierState {
+  bool lctrl = false;
+  bool rctrl = false;
+  bool lshift = false;
+  bool rshift = false;
+  bool lalt = false;
+  bool ralt = false;
+  bool lwin = false;
+  bool rwin = false;
 };
 
 Napi::Object SessionEventToJs(Napi::Env env, const SessionEvent& payload) {
@@ -96,8 +115,10 @@ class HotkeyManager {
       std::scoped_lock lock(mutex_);
       auto it = sessions_.find(id);
       if (it == sessions_.end()) return;
+      RepairSuppressedModifiersLocked(*it->second);
       it->second->running = false;
       it->second->held = false;
+      ClearRepairStateLocked(*it->second);
       removed = std::move(it->second);
       sessions_.erase(it);
     }
@@ -113,22 +134,27 @@ class HotkeyManager {
     if (!session) throw std::runtime_error("Invalid hotkey session id");
     session->running = true;
     session->held = false;
+    ClearRepairStateLocked(*session);
   }
 
   void StopSession(int32_t id) {
     std::scoped_lock lock(mutex_);
     auto session = FindSessionLocked(id);
     if (!session) return;
+    RepairSuppressedModifiersLocked(*session);
     session->running = false;
     session->held = false;
+    ClearRepairStateLocked(*session);
   }
 
   void SetSessionSpec(int32_t id, const SessionSpec& spec) {
     std::scoped_lock lock(mutex_);
     auto session = FindSessionLocked(id);
     if (!session) throw std::runtime_error("Invalid hotkey session id");
+    RepairSuppressedModifiersLocked(*session);
     session->spec = spec;
     session->held = false;
+    ClearRepairStateLocked(*session);
   }
 
   POINT GetCursor() const {
@@ -155,9 +181,10 @@ class HotkeyManager {
       return CallNextHookEx(hook_, code, w_param, reinterpret_cast<LPARAM>(info));
     }
 
-    bool suppress = false;
-
     std::scoped_lock lock(mutex_);
+    const int physical_vk = ResolvePhysicalVk(info);
+    ApplyPhysicalModifierEventLocked(physical_vk, is_key_down, is_key_up);
+    bool suppress = false;
     for (const auto& entry : sessions_) {
       const auto& session = entry.second;
       if (!session->running) continue;
@@ -167,6 +194,7 @@ class HotkeyManager {
         suppress = true;
         if (!session->held) {
           session->held = true;
+          ClearRepairStateLocked(*session);
           QueueEventLocked(*session, SessionEvent::Type::TriggerDown);
         }
         continue;
@@ -174,12 +202,17 @@ class HotkeyManager {
 
       if (!session->held) continue;
 
-      if (ShouldSuppressWhileHeld(session->spec, static_cast<int>(info->vkCode))) {
+      if (ShouldSuppressWhileHeld(session->spec, physical_vk)) {
         suppress = true;
+        if (is_key_up) {
+          MarkModifierForRepairLocked(*session, physical_vk);
+        }
       }
 
       if (is_key_up && info->vkCode == session->spec.release_vk) {
+        RepairSuppressedModifiersLocked(*session);
         session->held = false;
+        ClearRepairStateLocked(*session);
         QueueEventLocked(*session, SessionEvent::Type::TriggerUp);
       }
     }
@@ -203,8 +236,10 @@ class HotkeyManager {
         hook_ = nullptr;
       }
       for (auto& entry : sessions_) {
+        RepairSuppressedModifiersLocked(*entry.second);
         entry.second->running = false;
         entry.second->held = false;
+        ClearRepairStateLocked(*entry.second);
         to_release.push_back(entry.second);
       }
       sessions_.clear();
@@ -225,7 +260,21 @@ class HotkeyManager {
   HotkeyManager& operator=(const HotkeyManager&) = delete;
 
   static bool IsModifierVkDown(int modifier_vk) {
-    return (GetAsyncKeyState(modifier_vk) & 0x8000) != 0;
+    const ModifierState& state = Instance().modifier_state_;
+    switch (modifier_vk) {
+      case VK_CONTROL:
+        return state.lctrl || state.rctrl;
+      case VK_SHIFT:
+        return state.lshift || state.rshift;
+      case VK_MENU:
+        return state.lalt || state.ralt;
+      case VK_LWIN:
+        return state.lwin;
+      case VK_RWIN:
+        return state.rwin;
+      default:
+        return (GetAsyncKeyState(modifier_vk) & 0x8000) != 0;
+    }
   }
 
   static bool AreRequiredModifiersDown(unsigned int modifiers) {
@@ -260,6 +309,101 @@ class HotkeyManager {
   static bool ShouldSuppressWhileHeld(const SessionSpec& spec, int vk_code) {
     if (vk_code == static_cast<int>(spec.release_vk)) return true;
     return MatchesModifierVk(spec.modifiers & kSupportedMods, vk_code);
+  }
+
+  static int ResolvePhysicalVk(const KBDLLHOOKSTRUCT* info) {
+    const UINT vk_code = info->vkCode;
+    if (vk_code == VK_CONTROL) {
+      return (info->flags & LLKHF_EXTENDED) != 0 ? VK_RCONTROL : VK_LCONTROL;
+    }
+    if (vk_code == VK_MENU) {
+      return (info->flags & LLKHF_EXTENDED) != 0 ? VK_RMENU : VK_LMENU;
+    }
+    if (vk_code == VK_SHIFT) {
+      const UINT mapped = MapVirtualKeyW(info->scanCode, MAPVK_VSC_TO_VK_EX);
+      if (mapped == VK_LSHIFT || mapped == VK_RSHIFT) {
+        return static_cast<int>(mapped);
+      }
+    }
+    return static_cast<int>(vk_code);
+  }
+
+  void ApplyPhysicalModifierEventLocked(int vk_code, bool is_key_down, bool is_key_up) {
+    bool* state = ModifierFlagLocked(vk_code);
+    if (!state) return;
+    if (is_key_down) *state = true;
+    if (is_key_up) *state = false;
+  }
+
+  bool* ModifierFlagLocked(int vk_code) {
+    switch (vk_code) {
+      case VK_LCONTROL: return &modifier_state_.lctrl;
+      case VK_RCONTROL: return &modifier_state_.rctrl;
+      case VK_LSHIFT: return &modifier_state_.lshift;
+      case VK_RSHIFT: return &modifier_state_.rshift;
+      case VK_LMENU: return &modifier_state_.lalt;
+      case VK_RMENU: return &modifier_state_.ralt;
+      case VK_LWIN: return &modifier_state_.lwin;
+      case VK_RWIN: return &modifier_state_.rwin;
+      default: return nullptr;
+    }
+  }
+
+  void MarkModifierForRepairLocked(SessionState& session, int vk_code) {
+    switch (vk_code) {
+      case VK_LCONTROL: session.repair_lctrl = true; break;
+      case VK_RCONTROL: session.repair_rctrl = true; break;
+      case VK_LSHIFT: session.repair_lshift = true; break;
+      case VK_RSHIFT: session.repair_rshift = true; break;
+      case VK_LMENU: session.repair_lalt = true; break;
+      case VK_RMENU: session.repair_ralt = true; break;
+      case VK_LWIN: session.repair_lwin = true; break;
+      case VK_RWIN: session.repair_rwin = true; break;
+      default: break;
+    }
+  }
+
+  void ClearRepairStateLocked(SessionState& session) {
+    session.repair_lctrl = false;
+    session.repair_rctrl = false;
+    session.repair_lshift = false;
+    session.repair_rshift = false;
+    session.repair_lalt = false;
+    session.repair_ralt = false;
+    session.repair_lwin = false;
+    session.repair_rwin = false;
+  }
+
+  void RepairSuppressedModifiersLocked(SessionState& session) {
+    RepairModifierIfNeededLocked(session.repair_lctrl, VK_LCONTROL, modifier_state_.lctrl);
+    RepairModifierIfNeededLocked(session.repair_rctrl, VK_RCONTROL, modifier_state_.rctrl);
+    RepairModifierIfNeededLocked(session.repair_lshift, VK_LSHIFT, modifier_state_.lshift);
+    RepairModifierIfNeededLocked(session.repair_rshift, VK_RSHIFT, modifier_state_.rshift);
+    RepairModifierIfNeededLocked(session.repair_lalt, VK_LMENU, modifier_state_.lalt);
+    RepairModifierIfNeededLocked(session.repair_ralt, VK_RMENU, modifier_state_.ralt);
+    RepairModifierIfNeededLocked(session.repair_lwin, VK_LWIN, modifier_state_.lwin);
+    RepairModifierIfNeededLocked(session.repair_rwin, VK_RWIN, modifier_state_.rwin);
+  }
+
+  static DWORD ModifierKeyFlags(int vk_code) {
+    switch (vk_code) {
+      case VK_RCONTROL:
+      case VK_RMENU:
+      case VK_LWIN:
+      case VK_RWIN:
+        return KEYEVENTF_EXTENDEDKEY;
+      default:
+        return 0;
+    }
+  }
+
+  static void RepairModifierIfNeededLocked(bool should_repair, int vk_code, bool physical_down) {
+    if (!should_repair || physical_down) return;
+    INPUT input{};
+    input.type = INPUT_KEYBOARD;
+    input.ki.wVk = static_cast<WORD>(vk_code);
+    input.ki.dwFlags = KEYEVENTF_KEYUP | ModifierKeyFlags(vk_code);
+    SendInput(1, &input, sizeof(INPUT));
   }
 
   void QueueEventLocked(SessionState& session, SessionEvent::Type type) {
@@ -359,6 +503,7 @@ class HotkeyManager {
   mutable std::mutex mutex_;
   std::condition_variable init_cv_;
   std::unordered_map<int32_t, std::shared_ptr<SessionState>> sessions_;
+  ModifierState modifier_state_{};
   std::thread thread_;
   HHOOK hook_ = nullptr;
   DWORD thread_id_ = 0;
