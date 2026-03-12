@@ -1,6 +1,6 @@
-import type { ConfigurableHotkeyKey, HotkeyFeedbackEvent } from "../models/types";
+import type { BaseUiTheme, ConfigurableHotkeyKey, HotkeyFeedbackEvent } from "../models/types";
 
-export type UiTheme = "zen" | "pink";
+export type UiTheme = BaseUiTheme | "dark-zen" | "dark-pink";
 
 export interface PlatformBridge {
   onCapturedImage(handler: (payload: {
@@ -15,23 +15,23 @@ export interface PlatformBridge {
   onHotkeyFeedback(handler: (event: HotkeyFeedbackEvent) => void): void;
 }
 
-export interface ManagedRapidServiceUrls {
+export interface ManagedOcrServiceUrls {
   detectionBaseUrl: string;
   ocrBaseUrl: string;
 }
 
-export type ManagedServiceId = "rapid" | "edge";
+export type ManagedServiceId = "paddle" | "edge";
 
 export interface ManagedServiceStatus {
   state: "stopped" | "starting" | "running" | "failed";
   managed: boolean;
   url: string | null;
   error: string | null;
-  urls: ManagedRapidServiceUrls | null;
+  urls: ManagedOcrServiceUrls | null;
 }
 
 export interface ManagedServicesStatus {
-  rapid: ManagedServiceStatus;
+  paddle: ManagedServiceStatus;
   edge: ManagedServiceStatus;
 }
 

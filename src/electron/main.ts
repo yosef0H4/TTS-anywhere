@@ -40,7 +40,7 @@ import { readBundledServicesManifest } from "./service-bundle-manifest.js";
 import { syncBundledServicesToRuntime as syncBundledServicesToRuntimeHelper } from "./runtime-services.js";
 
 type LogLevel = "debug" | "info" | "warn" | "error";
-type UiTheme = "zen" | "pink";
+type UiTheme = "zen" | "pink" | "dark-zen" | "dark-pink";
 
 const OVERLAY_THEME_COLORS: Record<UiTheme, { outer: string; inner: string }> = {
   zen: {
@@ -50,11 +50,19 @@ const OVERLAY_THEME_COLORS: Record<UiTheme, { outer: string; inner: string }> = 
   pink: {
     outer: "#db2777",
     inner: "#111111"
+  },
+  "dark-zen": {
+    outer: "#f28b76",
+    inner: "#f3ecdf"
+  },
+  "dark-pink": {
+    outer: "#f472b6",
+    inner: "#fff1f7"
   }
 };
 
 function isUiTheme(value: unknown): value is UiTheme {
-  return value === "zen" || value === "pink";
+  return value === "zen" || value === "pink" || value === "dark-zen" || value === "dark-pink";
 }
 
 interface BackendLogEntry {
@@ -66,24 +74,39 @@ interface BackendLogEntry {
   source: "frontend" | "backend";
 }
 
-interface ManagedRapidServiceUrls {
+interface ManagedOcrServiceUrls {
   detectionBaseUrl: string;
   ocrBaseUrl: string;
 }
 
-type ManagedServiceId = "rapid" | "edge";
+type ManagedServiceId = "paddle" | "edge";
 
 interface ManagedServiceStatus {
   state: "stopped" | "starting" | "running" | "failed";
   managed: boolean;
   url: string | null;
   error: string | null;
-  urls: ManagedRapidServiceUrls | null;
+  urls: ManagedOcrServiceUrls | null;
 }
 
 interface ManagedServicesStatus {
-  rapid: ManagedServiceStatus;
+  paddle: ManagedServiceStatus;
   edge: ManagedServiceStatus;
+}
+
+class ManagedServiceLaunchCancelledError extends Error {
+  constructor(serviceId: ManagedServiceId) {
+    super(`Managed service launch cancelled: ${serviceId}`);
+    this.name = "ManagedServiceLaunchCancelledError";
+  }
+}
+
+type PaddleStartupMode = "warm" | "cold";
+
+interface PaddleProvisioningState {
+  mode: PaddleStartupMode;
+  reason: "ready" | "missing_venv" | "missing_python" | "missing_paddle_package" | "wrong_paddle_version" | "probe_failed";
+  installedVersion: string | null;
 }
 
 interface ManagedStackChild {
@@ -97,6 +120,10 @@ const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
   warn: 30,
   error: 40
 };
+const PADDLE_CPU_PACKAGE_NAME = "paddlepaddle";
+const PADDLE_CPU_PACKAGE_VERSION = "3.2.0";
+const PADDLE_WARM_START_TIMEOUT_MS = 120000;
+const PADDLE_COLD_START_TIMEOUT_MS = 10 * 60 * 1000;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -158,13 +185,15 @@ let appCloseInFlight = false;
 let shutdownWatchdog: NodeJS.Timeout | null = null;
 let managedServiceChildren: Partial<Record<ManagedServiceId, ManagedStackChild>> = {};
 let managedServiceLaunchPromises: Partial<Record<ManagedServiceId, Promise<ManagedServiceStatus>>> = {};
+let managedServiceLaunchTokens: Partial<Record<ManagedServiceId, number>> = {};
+let managedServiceLaunchTokenCounter = 0;
 const providerLlmService = new ElectronProviderLlmService();
 const providerTtsService = new ElectronProviderTtsService();
 const geminiSdkLlmService = new GeminiSdkLlmService();
 const geminiSdkTtsService = new GeminiSdkTtsService();
 const providerAbortControllers = new Map<string, AbortController>();
 let managedServicesStatus: ManagedServicesStatus = {
-  rapid: {
+  paddle: {
     state: "stopped",
     managed: false,
     url: null,
@@ -317,7 +346,7 @@ function managedServiceStatusSnapshot(serviceId: ManagedServiceId): ManagedServi
 
 function managedServicesStatusSnapshot(): ManagedServicesStatus {
   return {
-    rapid: managedServiceStatusSnapshot("rapid"),
+    paddle: managedServiceStatusSnapshot("paddle"),
     edge: managedServiceStatusSnapshot("edge")
   };
 }
@@ -331,6 +360,26 @@ function setManagedServiceStatus(serviceId: ManagedServiceId, next: Partial<Mana
     }
   };
   return managedServiceStatusSnapshot(serviceId);
+}
+
+function beginManagedServiceLaunch(serviceId: ManagedServiceId): number {
+  const token = ++managedServiceLaunchTokenCounter;
+  managedServiceLaunchTokens[serviceId] = token;
+  return token;
+}
+
+function cancelManagedServiceLaunch(serviceId: ManagedServiceId): void {
+  managedServiceLaunchTokens[serviceId] = ++managedServiceLaunchTokenCounter;
+}
+
+function isManagedServiceLaunchCurrent(serviceId: ManagedServiceId, token: number): boolean {
+  return managedServiceLaunchTokens[serviceId] === token;
+}
+
+function assertManagedServiceLaunchCurrent(serviceId: ManagedServiceId, token: number): void {
+  if (!isManagedServiceLaunchCurrent(serviceId, token)) {
+    throw new ManagedServiceLaunchCancelledError(serviceId);
+  }
 }
 
 function preferredUvCommand(): string {
@@ -386,6 +435,55 @@ function envPythonPath(envDir: string): string {
     return path.join(envDir, "Scripts", "python.exe");
   }
   return path.join(envDir, "bin", "python");
+}
+
+function detectPaddleProvisioningState(paddleEnvDir: string): PaddleProvisioningState {
+  if (!fs.existsSync(paddleEnvDir)) {
+    return { mode: "cold", reason: "missing_venv", installedVersion: null };
+  }
+
+  const pythonPath = envPythonPath(paddleEnvDir);
+  if (!fs.existsSync(pythonPath)) {
+    return { mode: "cold", reason: "missing_python", installedVersion: null };
+  }
+
+  const probe = spawnSync(
+    pythonPath,
+    [
+      "-c",
+      [
+        "import importlib.metadata as m, json",
+        `name=${JSON.stringify(PADDLE_CPU_PACKAGE_NAME)}`,
+        "try:",
+        "    version = m.version(name)",
+        "except m.PackageNotFoundError:",
+        "    version = None",
+        "print(json.dumps({'version': version}))"
+      ].join("\n")
+    ],
+    {
+      windowsHide: true,
+      encoding: "utf-8"
+    }
+  );
+
+  if (probe.status !== 0) {
+    return { mode: "cold", reason: "probe_failed", installedVersion: null };
+  }
+
+  try {
+    const payload = JSON.parse(probe.stdout || "{}") as { version?: unknown };
+    const installedVersion = typeof payload.version === "string" ? payload.version : null;
+    if (!installedVersion) {
+      return { mode: "cold", reason: "missing_paddle_package", installedVersion: null };
+    }
+    if (installedVersion !== PADDLE_CPU_PACKAGE_VERSION) {
+      return { mode: "cold", reason: "wrong_paddle_version", installedVersion };
+    }
+    return { mode: "warm", reason: "ready", installedVersion };
+  } catch {
+    return { mode: "cold", reason: "probe_failed", installedVersion: null };
+  }
 }
 
 function attachManagedChildLogging(name: ManagedStackChild["name"], child: ChildProcess): void {
@@ -555,9 +653,9 @@ function getManagedServicePaths(): {
   stackRoot: string;
   uvCacheDir: string;
   runtimeServicesDir: string;
-  rapidServiceDir: string;
+  paddleServiceDir: string;
   edgeServiceDir: string;
-  rapidEnvDir: string;
+  paddleEnvDir: string;
   edgeEnvDir: string;
 } {
   if (process.platform !== "win32") {
@@ -566,12 +664,12 @@ function getManagedServicePaths(): {
   const stackRoot = recommendedCpuStackRuntimeRoot();
   const uvCacheDir = path.join(stackRoot, "uv-cache");
   const runtimeServicesDir = syncBundledServicesToRuntime();
-  const rapidServiceDir = path.join(runtimeServicesDir, "text_processing", "rapid");
+  const paddleServiceDir = path.join(runtimeServicesDir, "text_processing", "paddle");
   const edgeServiceDir = path.join(runtimeServicesDir, "tts", "edge");
-  const rapidEnvDir = path.join(rapidServiceDir, ".venv-cpu");
+  const paddleEnvDir = path.join(paddleServiceDir, ".venv-cpu");
   const edgeEnvDir = path.join(edgeServiceDir, ".venv");
-  if (!fs.existsSync(rapidServiceDir)) {
-    throw new Error(`Rapid service directory not found: ${rapidServiceDir}`);
+  if (!fs.existsSync(paddleServiceDir)) {
+    throw new Error(`Paddle service directory not found: ${paddleServiceDir}`);
   }
   if (!fs.existsSync(edgeServiceDir)) {
     throw new Error(`Edge service directory not found: ${edgeServiceDir}`);
@@ -581,63 +679,75 @@ function getManagedServicePaths(): {
     stackRoot,
     uvCacheDir,
     runtimeServicesDir,
-    rapidServiceDir,
+    paddleServiceDir,
     edgeServiceDir,
-    rapidEnvDir,
+    paddleEnvDir,
     edgeEnvDir
   };
 }
 
-async function launchRapidServiceInternal(): Promise<ManagedServiceStatus> {
-  const { uvCacheDir, rapidServiceDir, rapidEnvDir } = getManagedServicePaths();
-  const rapidPort = await resolveAvailablePort(8091);
-  const urls: ManagedRapidServiceUrls = {
-    detectionBaseUrl: `http://127.0.0.1:${rapidPort}`,
-    ocrBaseUrl: `http://127.0.0.1:${rapidPort}/v1`
+async function launchPaddleServiceInternal(launchToken: number): Promise<ManagedServiceStatus> {
+  const { uvCacheDir, paddleServiceDir, paddleEnvDir } = getManagedServicePaths();
+  const paddlePort = await resolveAvailablePort(8091);
+  const urls: ManagedOcrServiceUrls = {
+    detectionBaseUrl: `http://127.0.0.1:${paddlePort}`,
+    ocrBaseUrl: `http://127.0.0.1:${paddlePort}/v1`
   };
   const baseEnv = windowsEnv(process.env, { UV_CACHE_DIR: uvCacheDir });
-  const rapidEnv = windowsEnv(baseEnv, { UV_PROJECT_ENVIRONMENT: rapidEnvDir });
-  const rapidPythonPath = envPythonPath(rapidEnvDir);
-  if (!fs.existsSync(rapidPythonPath)) {
+  const paddleEnv = windowsEnv(baseEnv, { UV_PROJECT_ENVIRONMENT: paddleEnvDir });
+  const provisioning = detectPaddleProvisioningState(paddleEnvDir);
+  const healthTimeoutMs = provisioning.mode === "cold" ? PADDLE_COLD_START_TIMEOUT_MS : PADDLE_WARM_START_TIMEOUT_MS;
+  writeBackendLog("info", "stack", "recommendedCpu.paddle.preflight", {
+    mode: provisioning.mode,
+    reason: provisioning.reason,
+    installedVersion: provisioning.installedVersion,
+    expectedVersion: PADDLE_CPU_PACKAGE_VERSION,
+    timeoutMs: healthTimeoutMs,
+    envDir: paddleEnvDir
+  });
+  const paddlePythonPath = envPythonPath(paddleEnvDir);
+  if (!fs.existsSync(paddlePythonPath)) {
     await runManagedCommand(
-      "recommendedCpu.rapid.venv",
+      "recommendedCpu.paddle.venv",
       preferredUvCommand(),
-      ["venv", rapidEnvDir, "--python", readProjectPythonVersion(rapidServiceDir)],
-      rapidServiceDir,
-      rapidEnv
+      ["venv", paddleEnvDir, "--python", readProjectPythonVersion(paddleServiceDir)],
+      paddleServiceDir,
+      paddleEnv
     );
+    assertManagedServiceLaunchCurrent("paddle", launchToken);
   }
 
-  const rapidChild = spawnManagedChild(
-    "rapid",
-    rapidPythonPath,
+  const paddleChild = spawnManagedChild(
+    "paddle",
+    paddlePythonPath,
     [
       "launcher.py",
       "--host",
       "127.0.0.1",
       "--port",
-      String(rapidPort),
+      String(paddlePort),
       "--enable-detect",
       "--enable-openai-ocr",
-      "--detect-provider",
+      "--detect-device",
       "cpu",
-      "--ocr-provider",
+      "--ocr-device",
       "cpu"
     ],
-    rapidServiceDir,
-    rapidEnv
+    paddleServiceDir,
+    paddleEnv
   );
-  writeBackendLog("info", "stack", "recommendedCpu.rapid.started", { pid: rapidChild.pid, port: rapidPort });
+  writeBackendLog("info", "stack", "recommendedCpu.paddle.started", { pid: paddleChild.pid, port: paddlePort });
   await waitForServiceHealth(
     urls.detectionBaseUrl,
-    120000,
+    healthTimeoutMs,
     (payload) => payload.ok === true
       && typeof payload.features === "object"
       && payload.features !== null
       && (payload.features as Record<string, unknown>).detect === true
       && (payload.features as Record<string, unknown>).openai_ocr === true
   );
-  return setManagedServiceStatus("rapid", {
+  assertManagedServiceLaunchCurrent("paddle", launchToken);
+  return setManagedServiceStatus("paddle", {
     state: "running",
     managed: true,
     url: urls.ocrBaseUrl,
@@ -646,7 +756,7 @@ async function launchRapidServiceInternal(): Promise<ManagedServiceStatus> {
   });
 }
 
-async function launchEdgeServiceInternal(): Promise<ManagedServiceStatus> {
+async function launchEdgeServiceInternal(launchToken: number): Promise<ManagedServiceStatus> {
   const { uvCacheDir, edgeServiceDir, edgeEnvDir } = getManagedServicePaths();
   const edgePort = await resolveAvailablePort(8012);
   const ttsUrl = `http://127.0.0.1:${edgePort}/v1`;
@@ -659,6 +769,7 @@ async function launchEdgeServiceInternal(): Promise<ManagedServiceStatus> {
     edgeServiceDir,
     windowsEnv(baseEnv, { UV_PROJECT_ENVIRONMENT: edgeEnvDir })
   );
+  assertManagedServiceLaunchCurrent("edge", launchToken);
   const edgeChild = spawnManagedChild(
     "edge",
     envPythonPath(edgeEnvDir),
@@ -668,6 +779,7 @@ async function launchEdgeServiceInternal(): Promise<ManagedServiceStatus> {
   );
   writeBackendLog("info", "stack", "recommendedCpu.edge.started", { pid: edgeChild.pid, port: edgePort });
   await waitForServiceHealth(edgeHealthUrl, 60000, (payload) => payload.ok === true);
+  assertManagedServiceLaunchCurrent("edge", launchToken);
   return setManagedServiceStatus("edge", {
     state: "running",
     managed: true,
@@ -676,13 +788,17 @@ async function launchEdgeServiceInternal(): Promise<ManagedServiceStatus> {
   });
 }
 
+async function terminateManagedServiceChild(serviceId: ManagedServiceId): Promise<void> {
+  const child = managedServiceChildren[serviceId]?.child ?? null;
+  if (!child) return;
+  delete managedServiceChildren[serviceId];
+  await terminateChildTree(child);
+}
+
 async function stopManagedService(serviceId: ManagedServiceId): Promise<ManagedServiceStatus> {
   delete managedServiceLaunchPromises[serviceId];
-  const child = managedServiceChildren[serviceId]?.child ?? null;
-  if (child) {
-    delete managedServiceChildren[serviceId];
-    await terminateChildTree(child);
-  }
+  cancelManagedServiceLaunch(serviceId);
+  await terminateManagedServiceChild(serviceId);
   return setManagedServiceStatus(serviceId, {
     state: "stopped",
     managed: false,
@@ -708,14 +824,18 @@ async function launchManagedService(serviceId: ManagedServiceId): Promise<Manage
     urls: null,
     error: null
   });
-
-  managedServiceLaunchPromises[serviceId] = (async () => {
+  const launchToken = beginManagedServiceLaunch(serviceId);
+  const launchPromise = (async () => {
     try {
-      return serviceId === "rapid"
-        ? await launchRapidServiceInternal()
-        : await launchEdgeServiceInternal();
+      return serviceId === "paddle"
+        ? await launchPaddleServiceInternal(launchToken)
+        : await launchEdgeServiceInternal(launchToken);
     } catch (error) {
-      await stopManagedService(serviceId);
+      if (error instanceof ManagedServiceLaunchCancelledError || !isManagedServiceLaunchCurrent(serviceId, launchToken)) {
+        return managedServiceStatusSnapshot(serviceId);
+      }
+      delete managedServiceLaunchPromises[serviceId];
+      await terminateManagedServiceChild(serviceId);
       return setManagedServiceStatus(serviceId, {
         state: "failed",
         managed: false,
@@ -724,11 +844,14 @@ async function launchManagedService(serviceId: ManagedServiceId): Promise<Manage
         error: String(error)
       });
     } finally {
-      delete managedServiceLaunchPromises[serviceId];
+      if (isManagedServiceLaunchCurrent(serviceId, launchToken)) {
+        delete managedServiceLaunchPromises[serviceId];
+      }
     }
   })();
+  managedServiceLaunchPromises[serviceId] = launchPromise;
 
-  return managedServiceLaunchPromises[serviceId] as Promise<ManagedServiceStatus>;
+  return launchPromise;
 }
 
 function loadPinnedPref(): boolean {
@@ -2848,7 +2971,7 @@ app.on("will-quit", () => {
   }
   managedServiceChildren = {};
   managedServicesStatus = {
-    rapid: { state: "stopped", managed: false, url: null, urls: null, error: null },
+    paddle: { state: "stopped", managed: false, url: null, urls: null, error: null },
     edge: { state: "stopped", managed: false, url: null, urls: null, error: null }
   };
   disposeNativeResources();

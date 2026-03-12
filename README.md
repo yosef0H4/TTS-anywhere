@@ -86,8 +86,8 @@ OCR normally starts the readout immediately. The editor is still there for manua
 
 | Local stack | Type | Notes |
 | --- | --- | --- |
-| RapidOCR service | Local OCR + text detection | Good lightweight local preprocessing/OCR option |
-| PaddleOCR service | Local OCR + text detection | Local preprocessing/OCR with CPU and GPU launch paths |
+| PaddleOCR service | Local OCR + text detection | Recommended managed local OCR stack; supports CPU and GPU launch paths |
+| RapidOCR service | Local OCR + text detection | Lightweight local OCR alternative |
 | H2OVL Mississippi | Local OCR | OpenAI-compatible GPU OCR service for `h2oai/h2ovl-mississippi-800m` |
 
 ### Local TTS Support
@@ -105,7 +105,7 @@ OCR normally starts the readout immediately. The editor is still there for manua
 - Cloud and local providers are both first-class options in the app.
 - Local services are useful when you want self-hosting, lower cloud usage, or tighter control over preprocessing and model selection.
 - Detection boxes and the full local preprocessing flow require a local RapidOCR or PaddleOCR service.
-- The UI can launch the recommended managed local services directly for Rapid OCR + Detection and Edge TTS.
+- The UI can launch the recommended managed local services directly for Paddle OCR + Detection and Edge TTS.
 
 ## Development
 

@@ -1,6 +1,6 @@
 import { DEFAULT_CONFIG } from "../models/defaults";
 import { resolveUiLanguage } from "../models/locale";
-import type { AppConfig, GeminiSdkLlmSettings, GeminiSdkTtsSettings, OpenAiCompatibleLlmSettings, OpenAiCompatibleTtsSettings } from "../models/types";
+import type { AppConfig, BaseUiTheme, GeminiSdkLlmSettings, GeminiSdkTtsSettings, OpenAiCompatibleLlmSettings, OpenAiCompatibleTtsSettings } from "../models/types";
 
 export const SETTINGS_KEY = "tts-anywhere:settings";
 export const LEGACY_SETTINGS_KEYS = ["tts-snipper:settings"] as const;
@@ -22,6 +22,8 @@ export class SettingsStore {
         ui: {
           ...DEFAULT_CONFIG.ui,
           ...parsed.ui,
+          theme: this.readUiTheme(parsed.ui?.theme, DEFAULT_CONFIG.ui.theme),
+          darkMode: this.readBoolean(parsed.ui?.darkMode, DEFAULT_CONFIG.ui.darkMode),
           language: parsed.ui?.language === "ar" || parsed.ui?.language === "en" ? parsed.ui.language : resolveUiLanguage(),
           panels: migratedPanels
         },
@@ -104,6 +106,10 @@ export class SettingsStore {
 
   private readBoolean(value: unknown, fallback: boolean): boolean {
     return typeof value === "boolean" ? value : fallback;
+  }
+
+  private readUiTheme(value: unknown, fallback: BaseUiTheme): BaseUiTheme {
+    return value === "zen" || value === "pink" ? value : fallback;
   }
 
   private cloneDefaults(): AppConfig {

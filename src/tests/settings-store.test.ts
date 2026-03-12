@@ -48,6 +48,8 @@ describe("settings store", () => {
     cfg.tts.voice = "nova";
     cfg.tts.geminiSdk.voice = "nova";
     cfg.ui.language = "ar";
+    cfg.ui.theme = "pink";
+    cfg.ui.darkMode = true;
     cfg.system.abortHotkey = "ctrl+shift+alt+z";
     cfg.system.playPauseHotkey = "ctrl+shift+alt+space";
     cfg.system.replayCaptureHotkey = "ctrl+shift+alt+d";
@@ -66,6 +68,8 @@ describe("settings store", () => {
     expect(store.load().llm.model).toBe("vision-model");
     expect(store.load().tts.voice).toBe("nova");
     expect(store.load().ui.language).toBe("ar");
+    expect(store.load().ui.theme).toBe("pink");
+    expect(store.load().ui.darkMode).toBe(true);
     expect(store.load().system.abortHotkey).toBe("ctrl+shift+alt+z");
     expect(store.load().system.playPauseHotkey).toBe("ctrl+shift+alt+space");
     expect(store.load().system.replayCaptureHotkey).toBe("ctrl+shift+alt+d");
@@ -148,6 +152,40 @@ describe("settings store", () => {
     const restored = new SettingsStore().load();
 
     expect(restored.ui.language).toBe(resolveUiLanguage());
+  });
+
+  it("defaults missing dark mode to false for legacy settings", () => {
+    const legacy = {
+      ...DEFAULT_CONFIG,
+      ui: {
+        ...DEFAULT_CONFIG.ui,
+        theme: "pink"
+      }
+    };
+    delete (legacy.ui as Partial<typeof legacy.ui>).darkMode;
+
+    localStorage.setItem(LEGACY_SETTINGS_KEYS[0], JSON.stringify(legacy));
+    const restored = new SettingsStore().load();
+
+    expect(restored.ui.theme).toBe("pink");
+    expect(restored.ui.darkMode).toBe(false);
+  });
+
+  it("falls back to the default base theme when saved theme is invalid", () => {
+    const invalid = {
+      ...DEFAULT_CONFIG,
+      ui: {
+        ...DEFAULT_CONFIG.ui,
+        theme: "dark-pink",
+        darkMode: true
+      }
+    };
+
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(invalid));
+    const restored = new SettingsStore().load();
+
+    expect(restored.ui.theme).toBe(DEFAULT_CONFIG.ui.theme);
+    expect(restored.ui.darkMode).toBe(true);
   });
 
   it("fills missing full screen capture hotkey from defaults", () => {

@@ -13,6 +13,7 @@ import {
 import { DEFAULT_CONFIG } from "../core/models/defaults";
 import type {
   AppConfig,
+  BaseUiTheme,
   ConfigurableHotkeyKey,
   HotkeyFeedbackEvent,
   HotkeySoundId,
@@ -1094,7 +1095,7 @@ export class WebApp {
   }
 
   private getManagedServiceLabelKey(serviceId: ManagedServiceId): TranslationKey {
-    return serviceId === "rapid" ? "stack.rapid" : "stack.edge";
+    return serviceId === "paddle" ? "stack.paddle" : "stack.edge";
   }
 
   private renderManagedServiceControl(
@@ -1104,7 +1105,7 @@ export class WebApp {
       stopButtonId: string;
       statusChipId: string;
       footnoteId: string;
-      detailPrefix: "stack.detail.rapid" | "stack.detail.edge";
+      detailPrefix: "stack.detail.paddle" | "stack.detail.edge";
       runningLabel: TranslationKey;
     }
   ): void {
@@ -1123,11 +1124,11 @@ export class WebApp {
     const status = this.managedServicesStatus?.[serviceId];
     const state = status?.state ?? "stopped";
     launchButton.disabled = state === "starting" || state === "running";
-    stopButton.disabled = state === "stopped" || state === "failed" || state === "starting";
+    stopButton.disabled = state === "stopped" || state === "failed";
 
     if (state === "running" && status) {
       this.updateStatusChip(control.statusChipId, this.t("stack.status.running"), "ok");
-      footnote.textContent = serviceId === "rapid"
+      footnote.textContent = serviceId === "paddle"
         ? this.t(control.runningLabel, { detectionUrl: status.urls?.detectionBaseUrl ?? status.url ?? "", ocrUrl: status.urls?.ocrBaseUrl ?? status.url ?? "" })
         : this.t("stack.detail.edge.running", { ttsUrl: status.url ?? "" });
       return;
@@ -1151,13 +1152,13 @@ export class WebApp {
 
   private renderManagedServicesStatus(): void {
     this.must<HTMLButtonElement>("btn-open-runtime-services").disabled = !window.electronAPI?.openRuntimeServicesFolder;
-    this.renderManagedServiceControl("rapid", {
-      launchButtonId: "btn-launch-rapid-service",
-      stopButtonId: "btn-stop-rapid-service",
-      statusChipId: "rapid-service-status-chip",
-      footnoteId: "rapid-service-footnote",
-      detailPrefix: "stack.detail.rapid",
-      runningLabel: "stack.detail.rapid.running"
+    this.renderManagedServiceControl("paddle", {
+      launchButtonId: "btn-launch-paddle-service",
+      stopButtonId: "btn-stop-paddle-service",
+      statusChipId: "paddle-service-status-chip",
+      footnoteId: "paddle-service-footnote",
+      detailPrefix: "stack.detail.paddle",
+      runningLabel: "stack.detail.paddle.running"
     });
     this.renderManagedServiceControl("edge", {
       launchButtonId: "btn-launch-edge-service",
@@ -1180,7 +1181,7 @@ export class WebApp {
   }
 
   private applyManagedServiceUrls(serviceId: ManagedServiceId, status: ManagedServiceStatus): void {
-    if (serviceId === "rapid" && status.urls) {
+    if (serviceId === "paddle" && status.urls) {
       this.config.textProcessing.detectorBaseUrl = status.urls.detectionBaseUrl;
       this.config.llm.openaiCompatible.baseUrl = status.urls.ocrBaseUrl;
       this.config.llm.provider = "openai_compatible";
@@ -1194,7 +1195,7 @@ export class WebApp {
     this.store.save(this.config);
     this.renderConfig();
     this.renderManagedServicesStatus();
-    if (serviceId === "rapid") {
+    if (serviceId === "paddle") {
       void this.checkDetectorHealth(false);
     }
   }
@@ -1205,7 +1206,7 @@ export class WebApp {
       return;
     }
     const current = this.managedServicesStatus ?? {
-      rapid: { state: "stopped", managed: false, url: null, urls: null, error: null },
+      paddle: { state: "stopped", managed: false, url: null, urls: null, error: null },
       edge: { state: "stopped", managed: false, url: null, urls: null, error: null }
     };
     this.managedServicesStatus = {
@@ -1243,7 +1244,7 @@ export class WebApp {
     const status = await window.electronAPI.stopManagedService(serviceId);
     this.managedServicesStatus = {
       ...(this.managedServicesStatus ?? {
-        rapid: { state: "stopped", managed: false, url: null, urls: null, error: null },
+        paddle: { state: "stopped", managed: false, url: null, urls: null, error: null },
         edge: { state: "stopped", managed: false, url: null, urls: null, error: null }
       }),
       [serviceId]: status
@@ -1467,6 +1468,12 @@ export class WebApp {
 
     this.must<HTMLButtonElement>("theme-zen").addEventListener("click", () => this.setTheme("zen"));
     this.must<HTMLButtonElement>("theme-pink").addEventListener("click", () => this.setTheme("pink"));
+    this.must<HTMLInputElement>("ui-dark-mode").addEventListener("change", () => {
+      this.config.ui.darkMode = this.must<HTMLInputElement>("ui-dark-mode").checked;
+      this.applyUiState();
+      this.store.save(this.config);
+      void this.syncElectronOverlayTheme();
+    });
     this.must<HTMLSelectElement>("ui-language").addEventListener("change", () => {
       const value = this.must<HTMLSelectElement>("ui-language").value;
       this.config.ui.language = value === "ar" ? "ar" : "en";
@@ -1525,11 +1532,11 @@ export class WebApp {
     this.must<HTMLButtonElement>("detector-health").addEventListener("click", async () => {
       await this.checkDetectorHealth();
     });
-    this.must<HTMLButtonElement>("btn-launch-rapid-service").addEventListener("click", () => {
-      void this.launchManagedService("rapid");
+    this.must<HTMLButtonElement>("btn-launch-paddle-service").addEventListener("click", () => {
+      void this.launchManagedService("paddle");
     });
-    this.must<HTMLButtonElement>("btn-stop-rapid-service").addEventListener("click", () => {
-      void this.stopManagedService("rapid");
+    this.must<HTMLButtonElement>("btn-stop-paddle-service").addEventListener("click", () => {
+      void this.stopManagedService("paddle");
     });
     this.must<HTMLButtonElement>("btn-launch-edge-service").addEventListener("click", () => {
       void this.launchManagedService("edge");
@@ -2035,18 +2042,18 @@ export class WebApp {
   private async syncElectronOverlayTheme(): Promise<void> {
     if (!window.electronAPI?.setOverlayTheme) return;
     try {
-      await window.electronAPI.setOverlayTheme(this.config.ui.theme);
+      await window.electronAPI.setOverlayTheme(this.resolveActiveTheme());
     } catch (error) {
       loggers.settings.warn("Failed to sync overlay theme", {
         error: String(error),
-        theme: this.config.ui.theme
+        theme: this.resolveActiveTheme()
       });
     }
   }
 
   private applyUiState(): void {
     const shell = this.must<HTMLElement>("app-shell");
-    shell.dataset.theme = this.config.ui.theme;
+    shell.dataset.theme = this.resolveActiveTheme();
     shell.dataset.settingsOpen = this.config.ui.settingsDrawerOpen ? "true" : "false";
     shell.dataset.settingsPeek = this.settingsPeekOpen ? "true" : "false";
     shell.dataset.language = this.config.ui.language;
@@ -2056,6 +2063,7 @@ export class WebApp {
 
     this.must<HTMLElement>("settings-drawer").setAttribute("aria-hidden", this.config.ui.settingsDrawerOpen ? "false" : "true");
 
+    this.must<HTMLInputElement>("ui-dark-mode").checked = this.config.ui.darkMode;
     this.must<HTMLButtonElement>("theme-zen").classList.toggle("active", this.config.ui.theme === "zen");
     this.must<HTMLButtonElement>("theme-pink").classList.toggle("active", this.config.ui.theme === "pink");
     shell.style.setProperty("--workspace-left", `${this.config.ui.panels.desktop.leftPanePercent}%`);
@@ -2140,7 +2148,14 @@ export class WebApp {
     return this.config.textProcessing.detectorBaseUrl;
   }
 
-  private setTheme(theme: UiTheme): void {
+  private resolveActiveTheme(): UiTheme {
+    if (!this.config.ui.darkMode) {
+      return this.config.ui.theme;
+    }
+    return this.config.ui.theme === "pink" ? "dark-pink" : "dark-zen";
+  }
+
+  private setTheme(theme: BaseUiTheme): void {
     this.config.ui.theme = theme;
     this.applyUiState();
     this.store.save(this.config);

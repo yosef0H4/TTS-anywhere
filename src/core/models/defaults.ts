@@ -99,6 +99,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     playbackRate: 1,
     language: resolveUiLanguage(),
     theme: "zen",
+    darkMode: false,
     settingsDrawerOpen: false,
     showChunkDiagnostics: true
   },

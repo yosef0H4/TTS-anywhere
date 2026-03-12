@@ -79,7 +79,7 @@ function createApi(overrides: Partial<ElectronApi> = {}): ElectronApi {
     stopManagedService: async () => ({ state: "stopped", managed: false, url: null, error: null, urls: null }),
     openRuntimeServicesFolder: async () => "",
     getManagedServicesStatus: async () => ({
-      rapid: { state: "stopped", managed: false, url: null, error: null, urls: null },
+      paddle: { state: "stopped", managed: false, url: null, error: null, urls: null },
       edge: { state: "stopped", managed: false, url: null, error: null, urls: null }
     }),
     sendLogEntries: () => undefined,

@@ -1,6 +1,7 @@
 export type OcrProvider = "openai_compatible" | "gemini_sdk";
 export type TtsProvider = "openai_compatible" | "gemini_sdk";
 export type ThinkingMode = "provider_default" | "low" | "off";
+export type BaseUiTheme = "zen" | "pink";
 export type ConfigurableHotkeyKey =
   | "capture"
   | "ocrClipboard"
@@ -122,7 +123,8 @@ export interface UiConfig {
   volume: number;
   playbackRate: number;
   language: "en" | "ar";
-  theme: "zen" | "pink";
+  theme: BaseUiTheme;
+  darkMode: boolean;
   settingsDrawerOpen: boolean;
   showChunkDiagnostics: boolean;
 }

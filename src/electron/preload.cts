@@ -275,16 +275,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getCaptureDrawRectangle: () => {
     return ipcRenderer.invoke("capture:get-draw-rectangle") as Promise<boolean>;
   },
-  setOverlayTheme: (theme: "zen" | "pink") => {
+  setOverlayTheme: (theme: "zen" | "pink" | "dark-zen" | "dark-pink") => {
     return ipcRenderer.invoke("overlay-theme:set", theme) as Promise<void>;
   },
   getOverlayTheme: () => {
-    return ipcRenderer.invoke("overlay-theme:get") as Promise<"zen" | "pink">;
+    return ipcRenderer.invoke("overlay-theme:get") as Promise<"zen" | "pink" | "dark-zen" | "dark-pink">;
   },
-  launchManagedService: (serviceId: "rapid" | "edge") => {
+  launchManagedService: (serviceId: "paddle" | "edge") => {
     return ipcRenderer.invoke("stack:launch-service", serviceId);
   },
-  stopManagedService: (serviceId: "rapid" | "edge") => {
+  stopManagedService: (serviceId: "paddle" | "edge") => {
     return ipcRenderer.invoke("stack:stop-service", serviceId);
   },
   openRuntimeServicesFolder: () => {
