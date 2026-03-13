@@ -25,6 +25,10 @@ scripts\host_both.bat 127.0.0.1 8093
 scripts\host_both_gpu.bat 127.0.0.1 8093
 scripts\host_both_cpu_ocr_gpu.bat 127.0.0.1 8093
 scripts\host_both_gpu_ocr_cpu.bat 127.0.0.1 8093
+scripts\host_detect.bat 127.0.0.1 8093
+scripts\host_detect_gpu.bat 127.0.0.1 8093
+scripts\host_ocr.bat 127.0.0.1 8093
+scripts\host_ocr_gpu.bat 127.0.0.1 8093
 ```
 
 ## What The Launcher Script Does
@@ -38,8 +42,7 @@ The scripts do this:
 3. choose `.venv-cpu` or `.venv-gpu`
 4. create the environment if missing
 5. run `launcher.py` with:
-   - `--enable-detect`
-   - `--enable-openai-ocr`
+   - `--enable-detect` and/or `--enable-openai-ocr`
    - `--detect-device ...`
    - `--ocr-device ...`
 
@@ -65,12 +68,28 @@ set UV_PROJECT_ENVIRONMENT=%CD%\.venv-cpu
 .\.venv-cpu\Scripts\python.exe launcher.py --host 127.0.0.1 --port 8093 --enable-detect --enable-openai-ocr --detect-device cpu --ocr-device cpu
 ```
 
+### CPU detect only
+
+```bat
+uv venv .venv-cpu --python 3.11
+set UV_PROJECT_ENVIRONMENT=%CD%\.venv-cpu
+.\.venv-cpu\Scripts\python.exe launcher.py --host 127.0.0.1 --port 8093 --enable-detect --detect-device cpu --ocr-device cpu
+```
+
 ### GPU detect + GPU OCR
 
 ```bat
 uv venv .venv-gpu --python 3.11
 set UV_PROJECT_ENVIRONMENT=%CD%\.venv-gpu
 .\.venv-gpu\Scripts\python.exe launcher.py --host 127.0.0.1 --port 8093 --enable-detect --enable-openai-ocr --detect-device gpu --ocr-device gpu
+```
+
+### GPU detect only
+
+```bat
+uv venv .venv-gpu --python 3.11
+set UV_PROJECT_ENVIRONMENT=%CD%\.venv-gpu
+.\.venv-gpu\Scripts\python.exe launcher.py --host 127.0.0.1 --port 8093 --enable-detect --detect-device gpu --ocr-device cpu
 ```
 
 ### CPU detect + GPU OCR
@@ -87,6 +106,22 @@ set UV_PROJECT_ENVIRONMENT=%CD%\.venv-gpu
 uv venv .venv-gpu --python 3.11
 set UV_PROJECT_ENVIRONMENT=%CD%\.venv-gpu
 .\.venv-gpu\Scripts\python.exe launcher.py --host 127.0.0.1 --port 8093 --enable-detect --enable-openai-ocr --detect-device gpu --ocr-device cpu
+```
+
+### CPU OCR only
+
+```bat
+uv venv .venv-cpu --python 3.11
+set UV_PROJECT_ENVIRONMENT=%CD%\.venv-cpu
+.\.venv-cpu\Scripts\python.exe launcher.py --host 127.0.0.1 --port 8093 --enable-openai-ocr --detect-device cpu --ocr-device cpu
+```
+
+### GPU OCR only
+
+```bat
+uv venv .venv-gpu --python 3.11
+set UV_PROJECT_ENVIRONMENT=%CD%\.venv-gpu
+.\.venv-gpu\Scripts\python.exe launcher.py --host 127.0.0.1 --port 8093 --enable-openai-ocr --detect-device cpu --ocr-device gpu
 ```
 
 ### Override the GPU package or index URL
@@ -111,7 +146,7 @@ set PYTHONPATH=%CD%\src
 .\.venv-cpu\Scripts\python.exe -m paddle_text_processing.cli serve --host 127.0.0.1 --port 8093 --enable-detect --enable-openai-ocr --detect-device cpu --ocr-device cpu
 ```
 
-For GPU runs, replace `.venv-cpu` with `.venv-gpu` and use the device values you need.
+For GPU runs, replace `.venv-cpu` with `.venv-gpu` and use the device values you need. You can also pass only `--enable-detect` or only `--enable-openai-ocr`.
 
 ## API Endpoints
 

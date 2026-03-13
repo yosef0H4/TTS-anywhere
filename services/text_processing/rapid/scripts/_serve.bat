@@ -5,11 +5,20 @@ set "HOST=%~1"
 set "PORT=%~2"
 set "DETECT_PROVIDER=%~3"
 set "OCR_PROVIDER=%~4"
+set "ENABLE_DETECT=%~5"
+set "ENABLE_OPENAI_OCR=%~6"
 
 if "%HOST%"=="" set "HOST=127.0.0.1"
 if "%PORT%"=="" set "PORT=8091"
 if "%DETECT_PROVIDER%"=="" set "DETECT_PROVIDER=cpu"
 if "%OCR_PROVIDER%"=="" set "OCR_PROVIDER=cpu"
+if "%ENABLE_DETECT%"=="" set "ENABLE_DETECT=1"
+if "%ENABLE_OPENAI_OCR%"=="" set "ENABLE_OPENAI_OCR=1"
+
+if "%ENABLE_DETECT%"=="0" if "%ENABLE_OPENAI_OCR%"=="0" (
+  echo At least one feature must be enabled.
+  exit /b 1
+)
 
 cd /d "%~dp0\.."
 
@@ -62,7 +71,10 @@ if defined DRY_RUN (
   ) else (
     echo UV_VENV=skip
   )
-  echo RUN="%ENV_PYTHON%" launcher.py --host %HOST% --port %PORT% --enable-detect --enable-openai-ocr --detect-provider %DETECT_PROVIDER% --ocr-provider %OCR_PROVIDER%
+  set "RUN_CMD="%ENV_PYTHON%" launcher.py --host %HOST% --port %PORT% --detect-provider %DETECT_PROVIDER% --ocr-provider %OCR_PROVIDER%"
+  if "%ENABLE_DETECT%"=="1" set "RUN_CMD=%RUN_CMD% --enable-detect"
+  if "%ENABLE_OPENAI_OCR%"=="1" set "RUN_CMD=%RUN_CMD% --enable-openai-ocr"
+  echo RUN=%RUN_CMD%
   exit /b 0
 )
 
@@ -75,4 +87,8 @@ if "%CREATE_ENV%"=="1" (
   if errorlevel 1 exit /b 1
 )
 
-"%ENV_PYTHON%" launcher.py --host %HOST% --port %PORT% --enable-detect --enable-openai-ocr --detect-provider %DETECT_PROVIDER% --ocr-provider %OCR_PROVIDER%
+set "LAUNCHER_CMD="%ENV_PYTHON%" launcher.py --host %HOST% --port %PORT% --detect-provider %DETECT_PROVIDER% --ocr-provider %OCR_PROVIDER%"
+if "%ENABLE_DETECT%"=="1" set "LAUNCHER_CMD=%LAUNCHER_CMD% --enable-detect"
+if "%ENABLE_OPENAI_OCR%"=="1" set "LAUNCHER_CMD=%LAUNCHER_CMD% --enable-openai-ocr"
+
+call %LAUNCHER_CMD%

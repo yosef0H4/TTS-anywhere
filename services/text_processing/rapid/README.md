@@ -25,6 +25,10 @@ scripts\host_both.bat 127.0.0.1 8091
 scripts\host_both_gpu.bat 127.0.0.1 8091
 scripts\host_both_cpu_ocr_gpu.bat 127.0.0.1 8091
 scripts\host_both_gpu_ocr_cpu.bat 127.0.0.1 8091
+scripts\host_detect.bat 127.0.0.1 8091
+scripts\host_detect_gpu.bat 127.0.0.1 8091
+scripts\host_ocr.bat 127.0.0.1 8091
+scripts\host_ocr_gpu.bat 127.0.0.1 8091
 ```
 
 ## What The Launcher Script Does
@@ -38,8 +42,7 @@ The scripts do this:
 3. choose `.venv-cpu` or `.venv-gpu`
 4. create the environment if missing
 5. run `launcher.py` with:
-   - `--enable-detect`
-   - `--enable-openai-ocr`
+   - `--enable-detect` and/or `--enable-openai-ocr`
    - `--detect-provider ...`
    - `--ocr-provider ...`
 
@@ -64,12 +67,28 @@ set UV_PROJECT_ENVIRONMENT=%CD%\.venv-cpu
 .\.venv-cpu\Scripts\python.exe launcher.py --host 127.0.0.1 --port 8091 --enable-detect --enable-openai-ocr --detect-provider cpu --ocr-provider cpu
 ```
 
+### CPU detect only
+
+```bat
+uv venv .venv-cpu --python 3.11
+set UV_PROJECT_ENVIRONMENT=%CD%\.venv-cpu
+.\.venv-cpu\Scripts\python.exe launcher.py --host 127.0.0.1 --port 8091 --enable-detect --detect-provider cpu --ocr-provider cpu
+```
+
 ### CUDA detect + CUDA OCR
 
 ```bat
 uv venv .venv-gpu --python 3.11
 set UV_PROJECT_ENVIRONMENT=%CD%\.venv-gpu
 .\.venv-gpu\Scripts\python.exe launcher.py --host 127.0.0.1 --port 8091 --enable-detect --enable-openai-ocr --detect-provider cuda --ocr-provider cuda
+```
+
+### CUDA detect only
+
+```bat
+uv venv .venv-gpu --python 3.11
+set UV_PROJECT_ENVIRONMENT=%CD%\.venv-gpu
+.\.venv-gpu\Scripts\python.exe launcher.py --host 127.0.0.1 --port 8091 --enable-detect --detect-provider cuda --ocr-provider cpu
 ```
 
 ### CPU detect + CUDA OCR
@@ -88,6 +107,22 @@ set UV_PROJECT_ENVIRONMENT=%CD%\.venv-gpu
 .\.venv-gpu\Scripts\python.exe launcher.py --host 127.0.0.1 --port 8091 --enable-detect --enable-openai-ocr --detect-provider cuda --ocr-provider cpu
 ```
 
+### CPU OCR only
+
+```bat
+uv venv .venv-cpu --python 3.11
+set UV_PROJECT_ENVIRONMENT=%CD%\.venv-cpu
+.\.venv-cpu\Scripts\python.exe launcher.py --host 127.0.0.1 --port 8091 --enable-openai-ocr --detect-provider cpu --ocr-provider cpu
+```
+
+### CUDA OCR only
+
+```bat
+uv venv .venv-gpu --python 3.11
+set UV_PROJECT_ENVIRONMENT=%CD%\.venv-gpu
+.\.venv-gpu\Scripts\python.exe launcher.py --host 127.0.0.1 --port 8091 --enable-openai-ocr --detect-provider cpu --ocr-provider cuda
+```
+
 ### Direct CLI start after the environment is prepared
 
 If the launcher has already installed the right packages, you can run the CLI directly:
@@ -96,7 +131,7 @@ If the launcher has already installed the right packages, you can run the CLI di
 .\.venv-cpu\Scripts\python.exe -m rapid_text_processing.cli serve --host 127.0.0.1 --port 8091 --enable-detect --enable-openai-ocr --detect-provider cpu --ocr-provider cpu
 ```
 
-For GPU cases, replace `.venv-cpu` with `.venv-gpu` and use the provider values you want.
+For GPU cases, replace `.venv-cpu` with `.venv-gpu` and use the provider values you want. You can also pass only `--enable-detect` or only `--enable-openai-ocr`.
 
 ## API Endpoints
 
