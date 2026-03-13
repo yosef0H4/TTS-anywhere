@@ -10,10 +10,10 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-TORCH_CUDA_INDEX_URL = "https://download.pytorch.org/whl/cu128"
+TORCH_CUDA_INDEX_URL = "https://download.pytorch.org/whl/cu129"
 CPU_ONNXRUNTIME_PACKAGE = "onnxruntime>=1.24.2"
 GPU_ONNXRUNTIME_PACKAGE = "onnxruntime-gpu>=1.24.2"
-GPU_TORCH_PACKAGE = "torch>=2.4"
+GPU_TORCH_PACKAGE = "torch==2.8.0"
 LOCAL_UV_CACHE_DIR = Path(tempfile.gettempdir()) / "tts-electron-rapid-uv-cache" if os.name == "nt" else PROJECT_ROOT / ".cache" / "uv"
 
 

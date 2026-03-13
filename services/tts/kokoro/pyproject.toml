@@ -12,7 +12,7 @@ dependencies = [
   "kokoro>=0.9.4",
   "misaki[en]>=0.9.4",
   "soundfile>=0.13.1",
-  "torch>=2.0.0",
+  "torch==2.8.0",
   "huggingface_hub>=0.34.0",
   "pip>=26.0.1",
 ]
@@ -21,10 +21,10 @@ dependencies = [
 tts-kokoro = "tts_kokoro_adapter.cli:main"
 
 [tool.uv]
-# Use PyTorch CUDA index for torch package
+# Use the shared repo GPU torch baseline
 [[tool.uv.index]]
 name = "pytorch-cuda"
-url = "https://download.pytorch.org/whl/cu124"
+url = "https://download.pytorch.org/whl/cu129"
 explicit = true
 
 [tool.uv.sources]

@@ -50,7 +50,7 @@ The scripts do this:
 
 - runs `uv sync --inexact` inside the selected environment
 - installs `onnxruntime` for CPU-only use
-- installs `onnxruntime-gpu` plus CUDA torch in `.venv-gpu` when CUDA is requested
+- installs `onnxruntime-gpu` plus the shared CUDA torch baseline (`torch==2.8.0`) in `.venv-gpu` when CUDA is requested
 - starts:
 
 ```bat
@@ -177,4 +177,4 @@ curl -X POST http://127.0.0.1:8091/v1/chat/completions \
 
 - `launcher.py` sets `UV_LINK_MODE=copy` and a temp `uv` cache on Windows to avoid mapped-drive issues.
 - CPU uses `onnxruntime`.
-- GPU uses `onnxruntime-gpu` and a CUDA-enabled torch build in `.venv-gpu`.
+- GPU uses `onnxruntime-gpu` and the shared repo CUDA torch baseline (`torch==2.8.0`) in `.venv-gpu`.

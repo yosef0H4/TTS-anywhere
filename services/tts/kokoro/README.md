@@ -12,7 +12,7 @@ OpenAI-compatible adapter for Kokoro TTS.
 ## Requirements
 
 - `uv`
-- CUDA-capable GPU
+- CUDA-capable GPU with the repo-standard torch GPU stack (`torch==2.8.0` from the CUDA 12.9 index)
 - Python version accepted by the package
 
 ## Quick Start
@@ -33,7 +33,7 @@ The helper script defaults to port `8040`, while the CLI and app settings defaul
 
 ## What The Launcher Script Does
 
-This service does not have a custom `launcher.py`. `scripts\host.bat` is only a wrapper for:
+This service does not have a custom `launcher.py`. `scripts\host.bat` ensures the pinned Python environment exists, then wraps:
 
 ```bat
 uv run tts-kokoro serve --host %HOST% --port %PORT%
@@ -123,3 +123,4 @@ curl -X POST http://127.0.0.1:8013/v1/audio/speech \
 - `KOKORO_PORT` defaults to `8013`.
 - First run can download roughly 300 MB of model data.
 - Sample rate is fixed at 24000 Hz.
+- GPU torch is pinned to the same CUDA 12.9 / torch 2.8.0 baseline used by `services\text_processing\h2ovl`.
