@@ -63,7 +63,8 @@ export const DEFAULT_CONFIG: AppConfig = {
     }
   },
   reading: {
-    cleanTextBeforeTts: false,
+    cleanTextBeforeTts: true,
+    lowercaseTextBeforeTts: false,
     typingIdleMs: 600,
     minWordsPerChunk: 6,
     maxWordsPerChunk: 25,

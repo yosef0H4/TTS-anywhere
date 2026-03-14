@@ -103,6 +103,7 @@ export interface TtsConfig extends OpenAiCompatibleTtsSettings {
 
 export interface ReadingConfig {
   cleanTextBeforeTts: boolean;
+  lowercaseTextBeforeTts: boolean;
   typingIdleMs: number;
   minWordsPerChunk: number;
   maxWordsPerChunk: number;

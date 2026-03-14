@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { cleanTextForTts, findChunkIndexByTime } from "../core/utils/chunking";
+import { DEFAULT_CONFIG } from "../core/models/defaults";
 
 describe("chunking", () => {
+  it("enables clean text by default", () => {
+    expect(DEFAULT_CONFIG.reading.cleanTextBeforeTts).toBe(true);
+    expect(DEFAULT_CONFIG.reading.lowercaseTextBeforeTts).toBe(false);
+  });
+
   it("cleans text for tts", () => {
     expect(cleanTextForTts("Hi 😊   there!!!!\n\n#ok")).toBe("Hi there!!! #ok");
   });

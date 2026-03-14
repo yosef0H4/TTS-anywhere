@@ -1503,6 +1503,7 @@ export class WebApp {
       "chunk-min",
       "chunk-max",
       "clean-text-before-tts",
+      "lowercase-text-before-tts",
       "wpm",
       "stream-window-size",
       "chunk-concurrency",
@@ -1768,6 +1769,7 @@ export class WebApp {
       ? Math.max(this.config.reading.minWordsPerChunk, Math.floor(maxWords))
       : this.config.reading.minWordsPerChunk;
     this.config.reading.cleanTextBeforeTts = this.must<HTMLInputElement>("clean-text-before-tts").checked;
+    this.config.reading.lowercaseTextBeforeTts = this.must<HTMLInputElement>("lowercase-text-before-tts").checked;
     this.config.reading.wpmBase = Number(this.must<HTMLInputElement>("wpm").value);
     this.config.reading.streamWindowSize = Math.max(1, Math.floor(Number(this.must<HTMLInputElement>("stream-window-size").value) || 1));
     this.config.reading.chunkRequestConcurrency = Math.max(
@@ -1963,6 +1965,7 @@ export class WebApp {
     this.must<HTMLInputElement>("chunk-min").value = String(this.config.reading.minWordsPerChunk);
     this.must<HTMLInputElement>("chunk-max").value = String(this.config.reading.maxWordsPerChunk);
     this.must<HTMLInputElement>("clean-text-before-tts").checked = this.config.reading.cleanTextBeforeTts;
+    this.must<HTMLInputElement>("lowercase-text-before-tts").checked = this.config.reading.lowercaseTextBeforeTts;
     this.must<HTMLInputElement>("wpm").value = String(this.config.reading.wpmBase);
     this.must<HTMLInputElement>("stream-window-size").value = String(this.config.reading.streamWindowSize);
     this.must<HTMLInputElement>("chunk-concurrency").value = String(this.config.reading.chunkRequestConcurrency);
@@ -2943,7 +2946,7 @@ export class WebApp {
   }
 
   private normalizeTextForClipboard(text: string): string {
-    return this.config.reading.cleanTextBeforeTts ? cleanTextForTts(text) : text;
+    return this.prepareTextForPlayback(text);
   }
 
   private async runPipeline(dataUrl: string, captureContext: CaptureContext): Promise<void> {
@@ -3286,7 +3289,15 @@ export class WebApp {
 
   private getPlaybackText(): string {
     const raw = this.must<HTMLTextAreaElement>("raw-text").value;
-    return this.config.reading.cleanTextBeforeTts ? cleanTextForTts(raw) : raw;
+    return this.prepareTextForPlayback(raw);
+  }
+
+  private prepareTextForPlayback(text: string): string {
+    let prepared = this.config.reading.cleanTextBeforeTts ? cleanTextForTts(text) : text;
+    if (this.config.reading.lowercaseTextBeforeTts) {
+      prepared = prepared.toLowerCase();
+    }
+    return prepared;
   }
 
   private async startOrResumePlayback(): Promise<void> {
