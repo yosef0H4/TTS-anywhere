@@ -4,6 +4,8 @@ TTS Anywhere is a Windows-first desktop app for grabbing text from anywhere on y
 
 The app treats cloud and local providers as equal options. It has native support for the Google Gemini SDK, OpenAI-compatible APIs, and local OCR/TTS adapters. In practice, many people will likely use cloud providers, but the app is built so either path can be the main one.
 
+It is not meant to be a full screen reader. It is aimed more at people who want fast, selective read-aloud help: people with low vision, dyslexia, ADHD or other attention issues, people reading in a language they are not fully comfortable with, and people who simply prefer listening over reading in some situations.
+
 ![Read selected text anywhere](demo/select.webp)
 
 ## What It Does
