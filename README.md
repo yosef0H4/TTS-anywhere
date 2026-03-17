@@ -146,6 +146,36 @@ npm run dev:web
 - Detection boxes and the full local preprocessing flow require a local RapidOCR or PaddleOCR service.
 - The UI can launch the recommended managed local services directly for Paddle OCR + Detection and Edge TTS.
 
+### Windows Service Scripts
+
+When you use the packaged Windows app, the bundled service scripts are placed under:
+
+`AppData\Roaming\TTS Anywhere\runtime\services\...`
+
+For text-processing services, the same scripts also exist in the repo during development under:
+
+`services/text_processing/<provider>/scripts/`
+
+For example, Paddle detect-only hosting is available at:
+
+- Installed app: `AppData\Roaming\TTS Anywhere\runtime\services\text_processing\paddle\scripts\host_detect.bat`
+- Dev/repo: `services/text_processing/paddle/scripts/host_detect.bat`
+
+Use the text-processing batch files like this:
+
+- `host_detect.bat`: start only text box detection. Use this when you only want region detection for the preprocessing lab.
+- `host_ocr.bat`: start only OCR extraction.
+- `host_both.bat`: start both detection and OCR in one service.
+- `host_detect_gpu.bat`, `host_ocr_gpu.bat`, `host_both_gpu.bat`: GPU-oriented launch variants where supported.
+- `host_both_cpu_ocr_gpu.bat` and `host_both_gpu_ocr_cpu.bat`: mixed CPU/GPU launch variants where available.
+
+These script sets exist for both Paddle and Rapid text-processing services:
+
+- `services/text_processing/paddle/scripts/`
+- `services/text_processing/rapid/scripts/`
+
+If your goal is only preprocessing-lab box detection, start `host_detect.bat` for either Paddle or Rapid and point the app's Text Processing Server URL at that service.
+
 ## Development
 
 Useful commands:
