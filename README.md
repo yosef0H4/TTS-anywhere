@@ -1,18 +1,80 @@
 # TTS Anywhere
 
-TTS Anywhere is a desktop app for grabbing text from anywhere on your screen, cleaning it up when needed, and listening to it immediately. It is built around the Electron app experience first: capture a region, a full screen, the active window, or an image from your clipboard, run OCR, and send the result straight into playback.
+TTS Anywhere is a Windows-first desktop app for grabbing text from anywhere on your screen and hearing it immediately. It supports direct text selection, screenshot OCR, live playback while you edit, and optional local detector-assisted preprocessing when screenshots need more control.
 
 The app treats cloud and local providers as equal options. It has native support for the Google Gemini SDK, OpenAI-compatible APIs, and local OCR/TTS adapters. In practice, many people will likely use cloud providers, but the app is built so either path can be the main one.
 
-## What It Feels Like to Use
+![Read selected text anywhere](demo/select.webp)
 
-- Select part of your screen and have the extracted text read out loud right away.
-- Capture the active window or the full screen with dedicated hotkeys.
-- Paste an image from the clipboard when you already have the screenshot.
-- Open the preprocessing lab when OCR needs help with noisy, low-contrast, or cluttered images.
-- Let OCR feed directly into TTS, then edit the text if you want a second pass.
-- Use the editor as a place to paste text, write your own text, or clean up something that was already read.
-- Switch between providers without changing how you use the app.
+## What It Does
+
+- Read highlighted text from almost anywhere with a user-assigned hotkey.
+- Capture a region, full screen, or active window and send it through OCR straight into playback.
+- Keep editing the recognized text while chunked audio playback keeps up live.
+- Paste, drop, or load images when you already have the screenshot.
+- Optionally use RapidOCR or PaddleOCR to detect text boxes before OCR.
+- Refine image cleanup and box selection before OCR when screenshots are noisy.
+
+## Feature Tour
+
+### Read Selected Text Anywhere
+
+Select text anywhere on your PC, trigger your configured hotkey, and the app copies that selection into the editor and starts reading it aloud. This flow skips screenshot OCR entirely and is the fastest way to turn highlighted text into speech.
+
+![Read selected text anywhere](demo/select.webp)
+
+### OCR a Region, Full Screen, or Active Window
+
+If the text is not selectable, the app can capture a region, the full screen, or the active window, run OCR on the image, and start playback immediately. It also remembers the last selection rectangle so you can replay the same capture area again.
+
+![Region screenshot OCR](demo/screenshot.webp)
+
+![Full-screen and active-window OCR](demo/full_and_window_screenshot.webp)
+
+### Keep Editing While Audio Keeps Up
+
+Playback is chunked so the editor stays usable while audio is running. You can fix OCR mistakes, rewrite text, or keep typing while playback state updates around the active chunks instead of forcing a hard stop on every small edit.
+
+![Live editing during playback](demo/playback_live_edit.webp)
+
+## Optional Workflows
+
+### Detect Only the Text Regions First
+
+If you run a local RapidOCR or PaddleOCR detector, the app can identify likely text regions first and then send only those regions into OCR. That is useful for cluttered screenshots, mixed UI layouts, and anything where full-image OCR would pick up too much noise.
+
+![Text box detection support](demo/boxes_support.webp)
+
+### Refine the Image or Boxes Before OCR
+
+The preprocessing lab lets you tune threshold, contrast, brightness, dilation, inversion, selection masks, manual boxes, and merge/sort behavior before OCR runs. This is the path to use when the screenshot needs cleanup or when you want tighter control over which text gets sent to the model.
+
+![Image preprocessing and box refinement](demo/image_pre-processing.webp)
+
+## Common Workflows
+
+### Capture text from the screen
+
+Use the capture hotkeys or the app controls to:
+
+- select a region
+- capture the full screen
+- capture the active window
+- replay the last capture
+
+The normal flow is OCR into immediate playback. The captured text is also available in the editor if you want to fix it, replace it, paste something else in, or run it again.
+
+### OCR an existing image
+
+You can paste an image from the clipboard or load one into the app, then run OCR on it the same way you would with a screen capture.
+
+### Use the preprocessing lab
+
+The preprocessing lab is for images that are hard to read cleanly on the first pass. Use it when text is small, blurry, low-contrast, or mixed with UI chrome. Box-based text region detection in the lab depends on a local RapidOCR or PaddleOCR service. If you want detection boxes and region-aware preprocessing, you need one of those local services running.
+
+### Listen with TTS
+
+OCR normally starts the readout immediately. The editor is still there for manual use: paste text, write your own text, fix OCR mistakes, or rerun playback with edited text. Playback controls let you pause, resume, skip through chunks, replay the latest capture, or adjust volume.
 
 ## Best Way to Run It
 
@@ -47,31 +109,6 @@ If you only want the browser renderer during development:
 ```bash
 npm run dev:web
 ```
-
-## Common Workflows
-
-### Capture text from the screen
-
-Use the capture hotkeys or the app controls to:
-
-- select a region
-- capture the full screen
-- capture the active window
-- replay the last capture
-
-The normal flow is OCR into immediate playback. The captured text is also available in the editor if you want to fix it, replace it, paste something else in, or run it again.
-
-### OCR an existing image
-
-You can paste an image from the clipboard or load one into the app, then run OCR on it the same way you would with a screen capture.
-
-### Use the preprocessing lab
-
-The preprocessing lab is for images that are hard to read cleanly on the first pass. Use it when text is small, blurry, low-contrast, or mixed with UI chrome. Box-based text region detection in the lab depends on a local RapidOCR or PaddleOCR service. If you want detection boxes and region-aware preprocessing, you need one of those local services running.
-
-### Listen with TTS
-
-OCR normally starts the readout immediately. The editor is still there for manual use: paste text, write your own text, fix OCR mistakes, or rerun playback with edited text. Playback controls let you pause, resume, skip through chunks, replay the latest capture, or adjust volume.
 
 ## Provider Support
 

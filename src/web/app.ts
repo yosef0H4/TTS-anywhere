@@ -2497,6 +2497,16 @@ export class WebApp {
       },
       getCurrentImageDataUrl: () => this.lastOriginalImageDataUrl,
       setStatus: (text) => this.setStatus(text),
+      onCommitResult: (result) => {
+        this.currentOcrImageDataUrl = result.processedImageDataUrl;
+        this.currentOcrRegions = result.finalBoxes;
+        this.currentDetectedRawBoxes = result.rawBoxes;
+        this.currentFilterResults = result.filterResults;
+        this.currentMergedGroups = result.mergedGroups;
+        this.currentFilterStats = result.filterStats;
+        this.setPreviewImage(result.processedImageDataUrl);
+        this.renderMainPreviewOverlay();
+      },
       registerAbortController: (controller) => {
         this.modalAbortController = controller;
         this.updateBreakButtonState();

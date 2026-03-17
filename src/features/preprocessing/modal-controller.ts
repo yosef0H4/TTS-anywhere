@@ -1,7 +1,7 @@
 import { applyPreprocessToDataUrl, normalizeImageDataUrl, scaleDataUrlMaxDimension } from "./image";
 import { filterBySize, manualToRaw, mergeCloseBoxes, sanitizeRect, selectionKeepRatio, sortByReadingOrder } from "./logic";
 import { PREPROCESS_MODAL_TEMPLATE } from "./modal-template";
-import { PreprocPreviewRenderer, type FilterRule, type OverlayMode } from "./preview-renderer";
+import { PreprocPreviewRenderer, type FilterRule, type FilterStats, type OverlayMode } from "./preview-renderer";
 import { checkTextProcessingHealth, detectRawBoxes } from "./text-processing-client";
 import type { DrawRect, FilteredBox, RawBox, SelectionOp, ToolMode } from "./types";
 import type { AppConfig } from "../../core/models/types";
@@ -22,6 +22,10 @@ interface PreprocessResult {
   processedImageDataUrl: string;
   finalBoxes: DrawRect[];
   detectorRawCount: number;
+  rawBoxes: RawBox[];
+  filterResults: FilteredBox[];
+  mergedGroups: Array<{ rect: RawBox; members: RawBox[] }>;
+  filterStats: FilterStats;
 }
 
 interface ModalControllerOptions {
@@ -30,6 +34,7 @@ interface ModalControllerOptions {
   saveConfig: (cfg: AppConfig) => void;
   getCurrentImageDataUrl: () => string | null;
   setStatus: (text: string) => void;
+  onCommitResult?: (result: PreprocessResult) => void;
   registerAbortController?: (controller: AbortController | null) => void;
   preemptLane?: () => void;
   beginLane?: (parentSignal?: AbortSignal) => { signal: AbortSignal; token: number; done: () => void };
@@ -212,6 +217,20 @@ export class PreprocessModalController {
   }
 
   close(): void {
+    if (this.processedDataUrl) {
+      this.opts.onCommitResult?.({
+        processedImageDataUrl: this.processedDataUrl,
+        finalBoxes: [...this.finalBoxes],
+        detectorRawCount: this.rawBoxes.length,
+        rawBoxes: [...this.rawBoxes],
+        filterResults: [...this.filterResults],
+        mergedGroups: this.mergedGroups.map((group) => ({
+          rect: group.rect,
+          members: [...group.members]
+        })),
+        filterStats: { ...this.filterStats }
+      });
+    }
     this.previewRenderer.stopAutoSync();
     this.abortRunningWork();
     this.backdrop.hidden = true;
