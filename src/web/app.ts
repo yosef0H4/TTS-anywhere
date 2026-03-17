@@ -40,7 +40,7 @@ import { APP_TEMPLATE } from "../ui/template";
 import { PreprocessModalController, type DrawRect } from "../features/preprocessing";
 import { applyPreprocessToDataUrl, normalizeImageDataUrl, scaleDataUrlMaxDimension } from "../features/preprocessing/image";
 import { checkTextProcessingHealth, detectRawBoxes } from "../features/preprocessing/text-processing-client";
-import { filterBySize, finalizeOcrBoxes, manualToRaw, mergeCloseBoxes, selectionKeepRatio, sortByReadingOrder } from "../features/preprocessing/logic";
+import { adjustBoxPadding, filterBySize, finalizeOcrBoxes, manualToRaw, mergeCloseBoxes, selectionKeepRatio, sortByReadingOrder } from "../features/preprocessing/logic";
 import { PreprocPreviewRenderer } from "../features/preprocessing/preview-renderer";
 import type { FilteredBox, MergeGroup, RawBox } from "../features/preprocessing/types";
 import { APP_ICONS } from "../ui/lucide-icons";
@@ -3254,9 +3254,22 @@ export class WebApp {
     const filterResults = filterBySize(selectedDetected, dims.width, dims.height, pre.detectionFilter);
     const keptDetected = filterResults.filter((f) => f.keep).map((f) => f.box);
     const manualRaw = pre.selection.manualBoxes.map((m) => manualToRaw(m, dims.width, dims.height));
-    const ordered = sortByReadingOrder([...keptDetected, ...manualRaw], pre.sorting);
-    const mergedGroups = mergeCloseBoxes(ordered, pre.merge, dims.width, dims.height);
-    const mergedOrOrdered = mergedGroups.length ? mergedGroups.map((m) => m.rect) : ordered;
+    const orderedDetected = sortByReadingOrder(keptDetected, pre.sorting);
+    const mergedGroups = mergeCloseBoxes(orderedDetected, pre.merge, dims.width, dims.height)
+      .map((group) => ({
+        rect: adjustBoxPadding(group.rect, dims.width, dims.height, {
+          boxPaddingWidthRatio: pre.boxPaddingWidthRatio,
+          boxPaddingHeightRatio: pre.boxPaddingHeightRatio
+        }),
+        members: group.members
+      }));
+    const paddedDetected = mergedGroups.length
+      ? mergedGroups.map((m) => m.rect)
+      : orderedDetected.map((box) => adjustBoxPadding(box, dims.width, dims.height, {
+        boxPaddingWidthRatio: pre.boxPaddingWidthRatio,
+        boxPaddingHeightRatio: pre.boxPaddingHeightRatio
+      }));
+    const mergedOrOrdered = sortByReadingOrder([...paddedDetected, ...manualRaw], pre.sorting);
 
     const regions = finalizeOcrBoxes({
       rawBoxes: detectedBoxes,
@@ -3267,7 +3280,11 @@ export class WebApp {
       imageH: dims.height,
       filter: pre.detectionFilter,
       sorting: pre.sorting,
-      merge: pre.merge
+      merge: pre.merge,
+      adjustment: {
+        boxPaddingWidthRatio: pre.boxPaddingWidthRatio,
+        boxPaddingHeightRatio: pre.boxPaddingHeightRatio
+      }
     });
 
     const heights = filterResults.map((f) => f.box.px.y2 - f.box.px.y1).filter((h) => h > 0).sort((a, b) => a - b);

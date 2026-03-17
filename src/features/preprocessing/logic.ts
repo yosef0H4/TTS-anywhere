@@ -1,4 +1,15 @@
-import type { DetectionFilterSettings, DrawRect, FilteredBox, MergeGroup, MergeSettings, RawBox, ReadingDirection, SelectionOp, SortingSettings } from "./types";
+import type {
+  BoxAdjustmentSettings,
+  DetectionFilterSettings,
+  DrawRect,
+  FilteredBox,
+  MergeGroup,
+  MergeSettings,
+  RawBox,
+  ReadingDirection,
+  SelectionOp,
+  SortingSettings
+} from "./types";
 
 function median(values: number[]): number {
   if (!values.length) return 0;
@@ -175,6 +186,41 @@ export function manualToRaw(box: DrawRect, imageW: number, imageH: number): RawB
   };
 }
 
+export function adjustBoxPadding(box: RawBox, imageW: number, imageH: number, adjustment: BoxAdjustmentSettings): RawBox {
+  const widthRatio = adjustment.boxPaddingWidthRatio;
+  const heightRatio = adjustment.boxPaddingHeightRatio;
+  if (!widthRatio && !heightRatio) return box;
+
+  const width = Math.max(1, box.px.x2 - box.px.x1);
+  const height = Math.max(1, box.px.y2 - box.px.y1);
+  const padX = Math.round(width * widthRatio);
+  const padY = Math.round(height * heightRatio);
+
+  let x1 = box.px.x1 - padX;
+  let y1 = box.px.y1 - padY;
+  let x2 = box.px.x2 + padX;
+  let y2 = box.px.y2 + padY;
+
+  x1 = Math.max(0, Math.min(imageW - 1, x1));
+  y1 = Math.max(0, Math.min(imageH - 1, y1));
+  x2 = Math.max(x1 + 1, Math.min(imageW, x2));
+  y2 = Math.max(y1 + 1, Math.min(imageH, y2));
+
+  if (x2 <= x1) x2 = Math.min(imageW, x1 + 1);
+  if (y2 <= y1) y2 = Math.min(imageH, y1 + 1);
+
+  return {
+    id: box.id,
+    px: { x1, y1, x2, y2 },
+    norm: {
+      x: x1 / Math.max(1, imageW),
+      y: y1 / Math.max(1, imageH),
+      w: (x2 - x1) / Math.max(1, imageW),
+      h: (y2 - y1) / Math.max(1, imageH)
+    }
+  };
+}
+
 export function finalizeOcrBoxes(params: {
   rawBoxes: RawBox[];
   manualBoxes: DrawRect[];
@@ -185,15 +231,18 @@ export function finalizeOcrBoxes(params: {
   filter: DetectionFilterSettings;
   sorting: SortingSettings;
   merge: MergeSettings;
+  adjustment: BoxAdjustmentSettings;
 }): DrawRect[] {
   const selectedBoxes = params.rawBoxes.filter((b) => selectionKeepRatio(b, params.imageW, params.imageH, params.baseState, params.ops) > 0.1);
   const filteredBoxes = filterBySize(selectedBoxes, params.imageW, params.imageH, params.filter).filter((f) => f.keep).map((f) => f.box);
 
   const manualRaw = params.manualBoxes.map((m) => manualToRaw(m, params.imageW, params.imageH));
-  const input = sortByReadingOrder([...filteredBoxes, ...manualRaw], params.sorting);
-  const merged = mergeCloseBoxes(input, params.merge, params.imageW, params.imageH);
+  const orderedDetected = sortByReadingOrder(filteredBoxes, params.sorting);
+  const mergedDetected = mergeCloseBoxes(orderedDetected, params.merge, params.imageW, params.imageH);
+  const finalDetected = (mergedDetected.length ? mergedDetected.map((m) => m.rect) : orderedDetected)
+    .map((box) => adjustBoxPadding(box, params.imageW, params.imageH, params.adjustment));
 
-  const boxes = (merged.length ? merged.map((m) => m.rect) : input).map((b) => ({
+  const boxes = sortByReadingOrder([...finalDetected, ...manualRaw], params.sorting).map((b) => ({
     id: b.id,
     nx: b.norm.x,
     ny: b.norm.y,

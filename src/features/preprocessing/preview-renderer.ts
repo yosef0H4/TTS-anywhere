@@ -12,6 +12,7 @@ export interface FilterStats {
 
 export interface PreviewRendererElements {
   viewer: HTMLElement;
+  content?: HTMLDivElement;
   preview: HTMLImageElement;
   overlay: HTMLDivElement;
   overlaySvg: SVGSVGElement;
@@ -23,6 +24,8 @@ export interface PreviewRendererElements {
 export interface PreviewRendererState {
   overlayMode: OverlayMode;
   activeFilterRule: FilterRule;
+  analysisWidth: number;
+  analysisHeight: number;
   selectionBaseState: boolean;
   selectionOps: SelectionOp[];
   manualBoxes: DrawRect[];
@@ -47,6 +50,8 @@ export class PreprocPreviewRenderer {
   private state: PreviewRendererState = {
     overlayMode: "committed",
     activeFilterRule: null,
+    analysisWidth: 0,
+    analysisHeight: 0,
     selectionBaseState: true,
     selectionOps: [],
     manualBoxes: [],
@@ -55,9 +60,19 @@ export class PreprocPreviewRenderer {
     mergedGroups: [],
     filterStats: DEFAULT_STATS
   };
+  private viewport = {
+    zoom: 1,
+    panX: 0,
+    panY: 0,
+    minZoom: 1,
+    maxZoom: 8
+  };
   private resizeObserver: ResizeObserver | null = null;
   private rafId: number | null = null;
-  private readonly onPreviewLoad = (): void => this.requestRender();
+  private readonly onPreviewLoad = (): void => {
+    this.resetViewport();
+    this.requestRender();
+  };
 
   constructor(
     private readonly els: PreviewRendererElements,
@@ -110,7 +125,20 @@ export class PreprocPreviewRenderer {
     manualLayer.innerHTML = "";
 
     const g = this.getImageGeometry();
-    if (!g) return;
+    if (!g) {
+      if (this.els.content) {
+        this.els.content.style.width = "0px";
+        this.els.content.style.height = "0px";
+        this.els.content.style.transform = "";
+      }
+      return;
+    }
+
+    if (this.els.content) {
+      this.els.content.style.width = `${g.displayWidth}px`;
+      this.els.content.style.height = `${g.displayHeight}px`;
+      this.els.content.style.transform = `translate(${g.left}px, ${g.top}px) scale(${this.viewport.zoom})`;
+    }
 
     this.placeLayer(this.els.overlay, g);
     this.placeLayer(this.els.overlaySvg, g);
@@ -130,15 +158,103 @@ export class PreprocPreviewRenderer {
   }
 
   pointerToNormalized(clientX: number, clientY: number): { x: number; y: number } | null {
-    const rect = this.els.preview.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return null;
+    if (!this.els.content) {
+      const rect = this.els.preview.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return null;
+      return {
+        x: clamp((clientX - rect.left) / Math.max(1, rect.width), 0, 1),
+        y: clamp((clientY - rect.top) / Math.max(1, rect.height), 0, 1)
+      };
+    }
+    const g = this.getImageGeometry();
+    if (!g) return null;
+    const viewerRect = this.els.viewer.getBoundingClientRect();
+    const localX = clientX - viewerRect.left;
+    const localY = clientY - viewerRect.top;
+    const contentX = (localX - g.left) / Math.max(this.viewport.zoom, 0.001);
+    const contentY = (localY - g.top) / Math.max(this.viewport.zoom, 0.001);
+    if (contentX < 0 || contentY < 0 || contentX > g.displayWidth || contentY > g.displayHeight) return null;
     return {
-      x: clamp((clientX - rect.left) / Math.max(1, rect.width), 0, 1),
-      y: clamp((clientY - rect.top) / Math.max(1, rect.height), 0, 1)
+      x: clamp(contentX / Math.max(1, g.displayWidth), 0, 1),
+      y: clamp(contentY / Math.max(1, g.displayHeight), 0, 1)
     };
   }
 
+  resetViewport(): void {
+    this.viewport.zoom = 1;
+    this.viewport.panX = 0;
+    this.viewport.panY = 0;
+  }
+
+  zoomAt(clientX: number, clientY: number, deltaY: number): void {
+    const current = this.getImageGeometry();
+    if (!current) return;
+    const factor = deltaY < 0 ? 1.1 : 1 / 1.1;
+    const nextZoom = clamp(this.viewport.zoom * factor, this.viewport.minZoom, this.viewport.maxZoom);
+    if (Math.abs(nextZoom - this.viewport.zoom) < 0.0001) return;
+
+    const viewerRect = this.els.viewer.getBoundingClientRect();
+    const localX = clientX - viewerRect.left;
+    const localY = clientY - viewerRect.top;
+    const contentX = (localX - current.left) / Math.max(this.viewport.zoom, 0.001);
+    const contentY = (localY - current.top) / Math.max(this.viewport.zoom, 0.001);
+
+    this.viewport.zoom = nextZoom;
+    const base = this.getBaseGeometry();
+    if (!base) return;
+    this.viewport.panX = localX - base.left - contentX * this.viewport.zoom;
+    this.viewport.panY = localY - base.top - contentY * this.viewport.zoom;
+    this.clampViewport(base);
+    this.requestRender();
+  }
+
+  panBy(dx: number, dy: number): void {
+    const base = this.getBaseGeometry();
+    if (!base) return;
+    this.viewport.panX += dx;
+    this.viewport.panY += dy;
+    this.clampViewport(base);
+    this.requestRender();
+  }
+
+  getViewportSnapshot(): { zoom: number; panX: number; panY: number } {
+    return { zoom: this.viewport.zoom, panX: this.viewport.panX, panY: this.viewport.panY };
+  }
+
   private getImageGeometry(): ImageGeometry | null {
+    if (!this.els.content) {
+      return this.getLegacyImageGeometry();
+    }
+    const base = this.getBaseGeometry();
+    if (!base) return null;
+    return {
+      ...base,
+      left: base.left + this.viewport.panX,
+      top: base.top + this.viewport.panY
+    };
+  }
+
+  private getBaseGeometry(): ImageGeometry | null {
+    const { preview, viewer } = this.els;
+    if (!preview.src || preview.naturalWidth <= 0 || preview.naturalHeight <= 0) return null;
+    const viewRect = viewer.getBoundingClientRect();
+    if (viewRect.width <= 0 || viewRect.height <= 0) return null;
+    const scale = Math.min(viewRect.width / preview.naturalWidth, viewRect.height / preview.naturalHeight);
+    const displayWidth = Math.max(1, preview.naturalWidth * scale);
+    const displayHeight = Math.max(1, preview.naturalHeight * scale);
+    const base = {
+      naturalWidth: preview.naturalWidth,
+      naturalHeight: preview.naturalHeight,
+      displayWidth,
+      displayHeight,
+      left: (viewRect.width - displayWidth) / 2,
+      top: (viewRect.height - displayHeight) / 2
+    };
+    this.clampViewport(base);
+    return base;
+  }
+
+  private getLegacyImageGeometry(): ImageGeometry | null {
     const { preview, viewer } = this.els;
     if (!preview.src || preview.naturalWidth <= 0 || preview.naturalHeight <= 0) return null;
     const viewRect = viewer.getBoundingClientRect();
@@ -157,8 +273,8 @@ export class PreprocPreviewRenderer {
   private placeLayer(layer: HTMLElement | SVGSVGElement | HTMLCanvasElement, g: ImageGeometry): void {
     layer.style.width = `${g.displayWidth}px`;
     layer.style.height = `${g.displayHeight}px`;
-    layer.style.left = `${g.left}px`;
-    layer.style.top = `${g.top}px`;
+    layer.style.left = this.els.content ? "0px" : `${g.left}px`;
+    layer.style.top = this.els.content ? "0px" : `${g.top}px`;
   }
 
   private renderSelectionMask(g: ImageGeometry): void {
@@ -240,9 +356,11 @@ export class PreprocPreviewRenderer {
       } else if (this.state.activeFilterRule === "median") {
         const guide = document.createElement("div");
         guide.className = "filter-guide-box";
-        const targetH = (this.state.filterStats.medianHeightPx * thresholds.medianHeightFraction) / Math.max(1, g.naturalHeight) * g.displayHeight;
+        const analysisHeight = this.state.analysisHeight || g.naturalHeight;
+        const analysisWidth = this.state.analysisWidth || g.naturalWidth;
+        const targetH = (this.state.filterStats.medianHeightPx * thresholds.medianHeightFraction) / Math.max(1, analysisHeight) * g.displayHeight;
         const h = Math.max(2, Math.min(rendered.height - 2, targetH));
-        const w = Math.max(2, Math.min(rendered.width - 2, (this.state.filterStats.medianHeightPx * 2) / Math.max(1, g.naturalWidth) * g.displayWidth));
+        const w = Math.max(2, Math.min(rendered.width - 2, (this.state.filterStats.medianHeightPx * 2) / Math.max(1, analysisWidth) * g.displayWidth));
         guide.style.height = `${h}px`;
         guide.style.width = `${w}px`;
         guide.style.left = `${Math.max(1, (rendered.width - w) / 2)}px`;
@@ -380,6 +498,21 @@ export class PreprocPreviewRenderer {
 
   private toRendered(box: RawBox, g: ImageGeometry): { left: number; top: number; width: number; height: number } {
     return this.normRectToDisplayRect({ nx: box.norm.x, ny: box.norm.y, nw: box.norm.w, nh: box.norm.h }, g);
+  }
+
+  private clampViewport(base: ImageGeometry): void {
+    if (this.viewport.zoom <= 1.0001) {
+      this.viewport.panX = 0;
+      this.viewport.panY = 0;
+      return;
+    }
+    const viewRect = this.els.viewer.getBoundingClientRect();
+    const scaledWidth = base.displayWidth * this.viewport.zoom;
+    const scaledHeight = base.displayHeight * this.viewport.zoom;
+    const minPanX = viewRect.width - base.left - scaledWidth;
+    const minPanY = viewRect.height - base.top - scaledHeight;
+    this.viewport.panX = clamp(this.viewport.panX, Math.min(0, minPanX), 0);
+    this.viewport.panY = clamp(this.viewport.panY, Math.min(0, minPanY), 0);
   }
 }
 

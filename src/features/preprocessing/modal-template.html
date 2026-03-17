@@ -7,6 +7,7 @@
       </div>
       <button id="preproc-close" class="window-btn" data-i18n-title="preproc.close"><i data-lucide="x" class="ui-icon"></i></button>
     </div>
+    <div class="preproc-canvas-note" data-i18n="preproc.canvasHint">Use the scroll wheel to zoom. Hold Space and drag to move around.</div>
     <div class="preproc-modal-body">
       <aside class="preproc-sidebar">
         <section class="preproc-section">
@@ -211,6 +212,26 @@
           </div>
 
           <div class="preproc-field">
+            <label><span data-i18n="preproc.boxPaddingWidth">Box Padding W</span> <span id="preproc-box-padding-width-val" class="val-badge"></span></label>
+            <div class="preproc-hint" id="preproc-rule-box-padding-width"></div>
+            <div class="control-row">
+              <input id="preproc-box-padding-width" type="range" min="-0.5" max="0.5" step="0.01" data-i18n-title="preproc.boxPaddingWidthTitle">
+              <input id="preproc-box-padding-width-num" type="number" min="-0.5" max="0.5" step="0.01" class="control-num">
+              <button id="preproc-box-padding-width-reset" class="control-reset" data-i18n-title="common.reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
+            </div>
+          </div>
+
+          <div class="preproc-field">
+            <label><span data-i18n="preproc.boxPaddingHeight">Box Padding H</span> <span id="preproc-box-padding-height-val" class="val-badge"></span></label>
+            <div class="preproc-hint" id="preproc-rule-box-padding-height"></div>
+            <div class="control-row">
+              <input id="preproc-box-padding-height" type="range" min="-0.5" max="0.5" step="0.01" data-i18n-title="preproc.boxPaddingHeightTitle">
+              <input id="preproc-box-padding-height-num" type="number" min="-0.5" max="0.5" step="0.01" class="control-num">
+              <button id="preproc-box-padding-height-reset" class="control-reset" data-i18n-title="common.reset"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
+            </div>
+          </div>
+
+          <div class="preproc-field">
             <label><span data-i18n="preproc.groupTol">Group Tol</span> <span id="preproc-group-val" class="val-badge"></span></label>
             <div class="control-row">
               <input id="preproc-group" type="range" min="0.1" max="1.2" step="0.01" data-i18n-title="preproc.groupTolTitle">
@@ -237,12 +258,16 @@
             <strong data-i18n="preproc.noImageTitle">Open the lab before you capture</strong>
             <p data-i18n="preproc.noImageHint">Tune detection and preprocessing settings now. Load or paste an image when you want to preview boxes and run detection.</p>
           </div>
-          <img id="preproc-preview" data-i18n-alt="preproc.previewAlt" alt="Preprocessed preview" />
-          <canvas id="preproc-selection-mask" class="preproc-selection-mask"></canvas>
-          <svg id="preproc-overlay-svg" class="preproc-overlay-svg"></svg>
-          <div id="preproc-overlay" class="preproc-overlay"></div>
-          <div id="preproc-manual-layer" class="preproc-manual-layer"></div>
-          <div id="preproc-draw-preview" class="preproc-draw-preview"></div>
+          <div id="preproc-canvas-stage" class="preproc-canvas-stage">
+            <div id="preproc-canvas-content" class="preproc-canvas-content">
+              <img id="preproc-preview" data-i18n-alt="preproc.previewAlt" alt="Preprocessed preview" draggable="false" />
+              <canvas id="preproc-selection-mask" class="preproc-selection-mask"></canvas>
+              <svg id="preproc-overlay-svg" class="preproc-overlay-svg"></svg>
+              <div id="preproc-overlay" class="preproc-overlay"></div>
+              <div id="preproc-manual-layer" class="preproc-manual-layer"></div>
+              <div id="preproc-draw-preview" class="preproc-draw-preview"></div>
+            </div>
+          </div>
         </div>
       </main>
     </div>

@@ -1,5 +1,5 @@
 import { applyPreprocessToDataUrl, normalizeImageDataUrl, scaleDataUrlMaxDimension } from "./image";
-import { filterBySize, manualToRaw, mergeCloseBoxes, sanitizeRect, selectionKeepRatio, sortByReadingOrder } from "./logic";
+import { adjustBoxPadding, filterBySize, manualToRaw, mergeCloseBoxes, sanitizeRect, selectionKeepRatio, sortByReadingOrder } from "./logic";
 import { PREPROCESS_MODAL_TEMPLATE } from "./modal-template";
 import { PreprocPreviewRenderer, type FilterRule, type FilterStats, type OverlayMode } from "./preview-renderer";
 import { checkTextProcessingHealth, detectRawBoxes } from "./text-processing-client";
@@ -55,22 +55,25 @@ const CONTROL_DEFAULTS: Record<string, number | string | boolean> = {
   "preproc-merge-v": 0.07,
   "preproc-merge-h": 0.37,
   "preproc-merge-w": 0.75,
+  "preproc-box-padding-width": 0,
+  "preproc-box-padding-height": 0,
   "preproc-group": 0.5
 };
 
 const RANGE_CONTROL_IDS = [
   "preproc-max-dim", "preproc-threshold", "preproc-contrast", "preproc-brightness", "preproc-dilation",
-  "preproc-min-width", "preproc-min-height", "preproc-median", "preproc-merge-v", "preproc-merge-h", "preproc-merge-w", "preproc-group"
+  "preproc-min-width", "preproc-min-height", "preproc-median", "preproc-merge-v", "preproc-merge-h", "preproc-merge-w", "preproc-box-padding-width", "preproc-box-padding-height", "preproc-group"
 ] as const;
 const PREPROCESS_IDS = ["preproc-threshold", "preproc-contrast", "preproc-brightness", "preproc-dilation", "preproc-invert", "preproc-max-dim"] as const;
 const FILTER_IDS = ["preproc-min-width", "preproc-min-height", "preproc-median"] as const;
-const MERGE_IDS = ["preproc-merge-v", "preproc-merge-h", "preproc-merge-w", "preproc-group", "preproc-direction"] as const;
+const MERGE_IDS = ["preproc-merge-v", "preproc-merge-h", "preproc-merge-w", "preproc-box-padding-width", "preproc-box-padding-height", "preproc-group", "preproc-direction"] as const;
 
 export class PreprocessModalController {
   private readonly root: HTMLElement;
   private readonly opts: ModalControllerOptions;
   private readonly backdrop: HTMLElement;
   private readonly viewer: HTMLDivElement;
+  private readonly content: HTMLDivElement;
   private readonly emptyState: HTMLDivElement;
   private readonly preview: HTMLImageElement;
   private readonly overlay: HTMLDivElement;
@@ -80,10 +83,13 @@ export class PreprocessModalController {
   private readonly drawPreview: HTMLDivElement;
   private readonly qualityViz: HTMLCanvasElement;
   private readonly previewRenderer: PreprocPreviewRenderer;
+  private readonly drawPreviewShade: HTMLDivElement;
   private readonly drawPreviewBox: HTMLDivElement;
 
   private originalDataUrl: string | null = null;
   private processedDataUrl: string | null = null;
+  private displayDataUrl: string | null = null;
+  private analysisImageSize: { width: number; height: number } | null = null;
 
   private rawBoxes: RawBox[] = [];
   private filterResults: FilteredBox[] = [];
@@ -106,6 +112,9 @@ export class PreprocessModalController {
   private redrawTimer: number | null = null;
 
   private draggingStart: { x: number; y: number } | null = null;
+  private spacePressed = false;
+  private panPointerId: number | null = null;
+  private panLastPoint: { x: number; y: number } | null = null;
 
   private filterStats = { widthRemoved: 0, heightRemoved: 0, medianRemoved: 0, medianHeightPx: 0 };
   private t(key: TranslationKey, params?: Record<string, string | number>): string {
@@ -119,6 +128,7 @@ export class PreprocessModalController {
     createIcons({ icons: APP_ICONS, attrs: { "stroke-width": 2 } });
     this.backdrop = this.mustQuery<HTMLElement>("[data-preproc-modal]");
     this.viewer = this.mustById<HTMLDivElement>("preproc-viewer");
+    this.content = this.mustById<HTMLDivElement>("preproc-canvas-content");
     this.emptyState = this.mustById<HTMLDivElement>("preproc-empty-state");
     this.preview = this.mustById<HTMLImageElement>("preproc-preview");
     this.overlay = this.mustById<HTMLDivElement>("preproc-overlay");
@@ -127,12 +137,15 @@ export class PreprocessModalController {
     this.manualLayer = this.mustById<HTMLDivElement>("preproc-manual-layer");
     this.drawPreview = this.mustById<HTMLDivElement>("preproc-draw-preview");
     this.qualityViz = this.mustById<HTMLCanvasElement>("preproc-quality-viz");
+    this.drawPreviewShade = document.createElement("div");
+    this.drawPreviewShade.className = "draw-preview-shade";
     this.drawPreviewBox = document.createElement("div");
     this.drawPreviewBox.className = "box-preview";
-    this.drawPreview.append(this.drawPreviewBox);
+    this.drawPreview.replaceChildren(this.drawPreviewShade, this.drawPreviewBox);
     this.previewRenderer = new PreprocPreviewRenderer(
       {
         viewer: this.viewer,
+        content: this.content,
         preview: this.preview,
         overlay: this.overlay,
         overlaySvg: this.overlaySvg,
@@ -191,6 +204,8 @@ export class PreprocessModalController {
     this.setValue("preproc-merge-v", cfg.preprocessing.merge.mergeVerticalRatio);
     this.setValue("preproc-merge-h", cfg.preprocessing.merge.mergeHorizontalRatio);
     this.setValue("preproc-merge-w", cfg.preprocessing.merge.mergeWidthRatioThreshold);
+    this.setValue("preproc-box-padding-width", cfg.preprocessing.boxPaddingWidthRatio);
+    this.setValue("preproc-box-padding-height", cfg.preprocessing.boxPaddingHeightRatio);
     this.setValue("preproc-group", cfg.preprocessing.sorting.groupTolerance);
     this.setValue("preproc-direction", cfg.preprocessing.sorting.direction);
 
@@ -233,10 +248,12 @@ export class PreprocessModalController {
     }
     this.previewRenderer.stopAutoSync();
     this.abortRunningWork();
+    this.endPan();
+    this.setSpacePressed(false);
     this.backdrop.hidden = true;
     this.backdrop.style.display = "none";
     this.backdrop.style.pointerEvents = "none";
-    this.drawPreview.innerHTML = "";
+    this.resetDrawPreview();
   }
 
   private bind(): void {
@@ -340,17 +357,42 @@ export class PreprocessModalController {
       this.recomputeLiveBoxes();
     });
 
+    this.viewer.addEventListener("wheel", (event) => {
+      if (!this.preview.src) return;
+      event.preventDefault();
+      this.previewRenderer.zoomAt(event.clientX, event.clientY, event.deltaY);
+    }, { passive: false });
+
     this.viewer.addEventListener("pointerdown", (event) => {
+      if (!this.spacePressed || event.button !== 0) return;
+      if (!this.pointerToNormalized(event.clientX, event.clientY)) return;
+      this.panPointerId = event.pointerId;
+      this.panLastPoint = { x: event.clientX, y: event.clientY };
+      this.viewer.dataset.panActive = "true";
+      event.preventDefault();
+    });
+
+    this.viewer.addEventListener("pointerdown", (event) => {
+      if (this.spacePressed || this.panPointerId !== null) return;
       if (this.toolMode === "none") return;
       if (event.button !== 0) return;
       const point = this.pointerToNormalized(event.clientX, event.clientY);
       if (!point) return;
       this.draggingStart = point;
+      this.updateDrawPreviewClass();
+      this.drawPreview.dataset.active = "true";
       this.drawPreviewBox.hidden = true;
       event.preventDefault();
     });
 
     window.addEventListener("pointermove", (event) => {
+      if (this.panPointerId === event.pointerId && this.panLastPoint) {
+        const dx = event.clientX - this.panLastPoint.x;
+        const dy = event.clientY - this.panLastPoint.y;
+        this.panLastPoint = { x: event.clientX, y: event.clientY };
+        this.previewRenderer.panBy(dx, dy);
+        return;
+      }
       if (!this.draggingStart) return;
       const point = this.pointerToNormalized(event.clientX, event.clientY);
       if (!point) return;
@@ -363,9 +405,13 @@ export class PreprocessModalController {
     });
 
     window.addEventListener("pointerup", (event) => {
+      if (this.panPointerId === event.pointerId) {
+        this.endPan();
+        return;
+      }
       if (!this.draggingStart) return;
       const point = this.pointerToNormalized(event.clientX, event.clientY);
-      this.drawPreviewBox.hidden = true;
+      this.resetDrawPreview();
       if (!point) {
         this.draggingStart = null;
         return;
@@ -386,14 +432,40 @@ export class PreprocessModalController {
     window.addEventListener("resize", () => {
       this.renderOverlay();
     });
+
+    window.addEventListener("keydown", (event) => {
+      if (event.code !== "Space") return;
+      if (!this.isOpen() || this.isEditableTarget(event.target)) return;
+      this.setSpacePressed(true);
+      event.preventDefault();
+    });
+
+    window.addEventListener("keyup", (event) => {
+      if (event.code !== "Space") return;
+      this.setSpacePressed(false);
+      this.endPan();
+    });
   }
 
   private setTool(mode: ToolMode): void {
     this.toolMode = mode;
+    this.updateDrawPreviewClass();
     this.mustById<HTMLButtonElement>("preproc-tool-none").classList.toggle("active-pin", mode === "none");
     this.mustById<HTMLButtonElement>("preproc-tool-add").classList.toggle("active-pin", mode === "add");
     this.mustById<HTMLButtonElement>("preproc-tool-sub").classList.toggle("active-pin", mode === "sub");
     this.mustById<HTMLButtonElement>("preproc-tool-manual").classList.toggle("active-pin", mode === "manual");
+    this.viewer.dataset.drawTool = mode;
+  }
+
+  private updateDrawPreviewClass(): void {
+    this.drawPreview.classList.toggle("tool-add", this.toolMode === "add");
+    this.drawPreview.classList.toggle("tool-sub", this.toolMode === "sub");
+    this.drawPreview.classList.toggle("tool-manual", this.toolMode === "manual");
+  }
+
+  private resetDrawPreview(): void {
+    this.drawPreview.dataset.active = "false";
+    this.drawPreviewBox.hidden = true;
   }
 
   private schedulePreprocessAndDetect(): void {
@@ -434,10 +506,13 @@ export class PreprocessModalController {
       if (lane && this.opts.isLaneCurrent && !this.opts.isLaneCurrent(lane.token)) return;
       if (this.detectAbortController?.signal.aborted) return;
 
+      this.displayDataUrl = processed;
       this.processedDataUrl = await scaleDataUrlMaxDimension(processed, this.getNum("preproc-max-dim", 1080));
+      this.analysisImageSize = await this.readImageSize(this.processedDataUrl);
       this.viewer.dataset.empty = "false";
+      this.viewer.dataset.panReady = this.spacePressed ? "true" : "false";
       this.emptyState.hidden = true;
-      this.preview.src = this.processedDataUrl;
+      this.preview.src = this.displayDataUrl;
       await this.preview.decode();
       // Phase 1 render: show image immediately; boxes update after detect.
       this.rawBoxes = [];
@@ -499,8 +574,8 @@ export class PreprocessModalController {
   }
 
   private recomputeLiveBoxes(): void {
-    const g = this.getImageGeometry();
-    if (!g) {
+    const imageSize = this.analysisImageSize;
+    if (!imageSize || !this.preview.src || this.preview.naturalWidth <= 0 || this.preview.naturalHeight <= 0) {
       this.filterResults = [];
       this.finalBoxes = [];
       this.mergedGroups = [];
@@ -508,32 +583,41 @@ export class PreprocessModalController {
       return;
     }
 
-    const selectedBoxes = this.rawBoxes.filter((box) => selectionKeepRatio(box, g.naturalWidth, g.naturalHeight, this.selectionBaseState, this.selectionOps) > 0.1);
-    this.filterResults = filterBySize(selectedBoxes, g.naturalWidth, g.naturalHeight, {
+    const selectedBoxes = this.rawBoxes.filter((box) => selectionKeepRatio(box, imageSize.width, imageSize.height, this.selectionBaseState, this.selectionOps) > 0.1);
+    this.filterResults = filterBySize(selectedBoxes, imageSize.width, imageSize.height, {
       minWidthRatio: this.getNum("preproc-min-width", 0),
       minHeightRatio: this.getNum("preproc-min-height", 0),
       medianHeightFraction: this.getNum("preproc-median", 0.45)
     });
 
     const keptBoxes = this.filterResults.filter((f) => f.keep).map((f) => f.box);
-    const manualRaw = this.manualBoxes.map((m) => manualToRaw(m, g.naturalWidth, g.naturalHeight));
-
-    const ordered = sortByReadingOrder([...keptBoxes, ...manualRaw], {
+    const manualRaw = this.manualBoxes.map((m) => manualToRaw(m, imageSize.width, imageSize.height));
+    const sorting = {
       direction: this.mustById<HTMLSelectElement>("preproc-direction").value as AppConfig["preprocessing"]["sorting"]["direction"],
       groupTolerance: this.getNum("preproc-group", 0.5)
-    });
+    };
+    const orderedDetected = sortByReadingOrder(keptBoxes, sorting);
 
-    this.mergedGroups = mergeCloseBoxes(ordered, {
+    this.mergedGroups = mergeCloseBoxes(orderedDetected, {
       mergeVerticalRatio: this.getNum("preproc-merge-v", 0.07),
       mergeHorizontalRatio: this.getNum("preproc-merge-h", 0.37),
       mergeWidthRatioThreshold: this.getNum("preproc-merge-w", 0.75)
-    }, g.naturalWidth, g.naturalHeight);
+    }, imageSize.width, imageSize.height).map((group) => ({
+      rect: adjustBoxPadding(group.rect, imageSize.width, imageSize.height, {
+        boxPaddingWidthRatio: this.getNum("preproc-box-padding-width", 0),
+        boxPaddingHeightRatio: this.getNum("preproc-box-padding-height", 0)
+      }),
+      members: group.members
+    }));
 
-    const finalRaw = this.mergedGroups.length ? this.mergedGroups.map((m) => m.rect) : ordered;
-    this.finalBoxes = sortByReadingOrder(finalRaw, {
-      direction: this.mustById<HTMLSelectElement>("preproc-direction").value as AppConfig["preprocessing"]["sorting"]["direction"],
-      groupTolerance: this.getNum("preproc-group", 0.5)
-    }).map((b) => ({ id: b.id, nx: b.norm.x, ny: b.norm.y, nw: b.norm.w, nh: b.norm.h }));
+    const paddedDetected = this.mergedGroups.length
+      ? this.mergedGroups.map((m) => m.rect)
+      : orderedDetected.map((box) => adjustBoxPadding(box, imageSize.width, imageSize.height, {
+        boxPaddingWidthRatio: this.getNum("preproc-box-padding-width", 0),
+        boxPaddingHeightRatio: this.getNum("preproc-box-padding-height", 0)
+      }));
+    const finalRaw = sortByReadingOrder([...paddedDetected, ...manualRaw], sorting);
+    this.finalBoxes = finalRaw.map((b) => ({ id: b.id, nx: b.norm.x, ny: b.norm.y, nw: b.norm.w, nh: b.norm.h }));
 
     this.computeFilterStats();
     this.renderLabels();
@@ -562,6 +646,8 @@ export class PreprocessModalController {
     this.previewRenderer.setState({
       overlayMode: this.overlayMode,
       activeFilterRule: this.activeFilterRule,
+      analysisWidth: this.analysisImageSize?.width ?? 0,
+      analysisHeight: this.analysisImageSize?.height ?? 0,
       selectionBaseState: this.selectionBaseState,
       selectionOps: this.selectionOps,
       manualBoxes: this.manualBoxes,
@@ -842,6 +928,8 @@ export class PreprocessModalController {
   private resetPreviewState(): void {
     this.originalDataUrl = null;
     this.processedDataUrl = null;
+    this.displayDataUrl = null;
+    this.analysisImageSize = null;
     this.rawBoxes = [];
     this.filterResults = [];
     this.mergedGroups = [];
@@ -849,6 +937,8 @@ export class PreprocessModalController {
     this.overlayMode = "committed";
     this.activeFilterRule = null;
     this.viewer.dataset.empty = "true";
+    this.viewer.dataset.panReady = "false";
+    this.viewer.dataset.panActive = "false";
     this.preview.removeAttribute("src");
     this.preview.alt = "";
     this.emptyState.hidden = false;
@@ -958,6 +1048,8 @@ export class PreprocessModalController {
     this.setText("preproc-merge-v-val", this.getNum("preproc-merge-v", 0.07).toFixed(2));
     this.setText("preproc-merge-h-val", this.getNum("preproc-merge-h", 0.37).toFixed(2));
     this.setText("preproc-merge-w-val", this.getNum("preproc-merge-w", 0.75).toFixed(2));
+    this.setText("preproc-box-padding-width-val", this.getNum("preproc-box-padding-width", 0).toFixed(2));
+    this.setText("preproc-box-padding-height-val", this.getNum("preproc-box-padding-height", 0).toFixed(2));
     this.setText("preproc-group-val", this.getNum("preproc-group", 0.5).toFixed(2));
 
     this.setText("preproc-rule-min-width", this.t("preproc.rule.minWidth", { percent: (this.getNum("preproc-min-width", 0) * 100).toFixed(1) }));
@@ -965,6 +1057,12 @@ export class PreprocessModalController {
     this.setText("preproc-rule-median", this.t("preproc.rule.median", {
       percent: (this.getNum("preproc-median", 0.45) * 100).toFixed(0),
       medianPx: this.filterStats.medianHeightPx
+    }));
+    this.setText("preproc-rule-box-padding-width", this.t("preproc.rule.boxPaddingWidth", {
+      percent: (this.getNum("preproc-box-padding-width", 0) * 100).toFixed(0)
+    }));
+    this.setText("preproc-rule-box-padding-height", this.t("preproc.rule.boxPaddingHeight", {
+      percent: (this.getNum("preproc-box-padding-height", 0) * 100).toFixed(0)
     }));
     this.setText("preproc-stat-min-width", this.t("preproc.stat.minWidth", { count: this.filterStats.widthRemoved }));
     this.setText("preproc-stat-min-height", this.t("preproc.stat.minHeight", { count: this.filterStats.heightRemoved }));
@@ -995,6 +1093,8 @@ export class PreprocessModalController {
     cfg.preprocessing.merge.mergeVerticalRatio = this.getNum("preproc-merge-v", 0.07);
     cfg.preprocessing.merge.mergeHorizontalRatio = this.getNum("preproc-merge-h", 0.37);
     cfg.preprocessing.merge.mergeWidthRatioThreshold = this.getNum("preproc-merge-w", 0.75);
+    cfg.preprocessing.boxPaddingWidthRatio = this.getNum("preproc-box-padding-width", 0);
+    cfg.preprocessing.boxPaddingHeightRatio = this.getNum("preproc-box-padding-height", 0);
 
     cfg.preprocessing.sorting.direction = this.mustById<HTMLSelectElement>("preproc-direction").value as AppConfig["preprocessing"]["sorting"]["direction"];
     cfg.preprocessing.sorting.groupTolerance = this.getNum("preproc-group", 0.5);
@@ -1050,6 +1150,34 @@ export class PreprocessModalController {
 
   private pointerToNormalized(clientX: number, clientY: number): { x: number; y: number } | null {
     return this.previewRenderer.pointerToNormalized(clientX, clientY);
+  }
+
+  private async readImageSize(dataUrl: string): Promise<{ width: number; height: number }> {
+    const image = new Image();
+    image.src = dataUrl;
+    await image.decode();
+    return { width: image.naturalWidth, height: image.naturalHeight };
+  }
+
+  private isOpen(): boolean {
+    return !this.backdrop.hidden;
+  }
+
+  private isEditableTarget(target: EventTarget | null): boolean {
+    const el = target instanceof HTMLElement ? target : null;
+    return Boolean(el && el.closest("input, textarea, select, [contenteditable='true']"));
+  }
+
+  private setSpacePressed(next: boolean): void {
+    this.spacePressed = next;
+    this.viewer.dataset.panReady = next && this.preview.src ? "true" : "false";
+    if (!next) this.viewer.dataset.panActive = "false";
+  }
+
+  private endPan(): void {
+    this.panPointerId = null;
+    this.panLastPoint = null;
+    this.viewer.dataset.panActive = "false";
   }
 
   private getDetectionMode(): AppConfig["textProcessing"]["detectionMode"] {

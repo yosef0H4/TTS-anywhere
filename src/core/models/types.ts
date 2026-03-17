@@ -194,6 +194,8 @@ export interface PreprocessingConfig {
   brightness: number;
   dilation: number;
   invert: boolean;
+  boxPaddingWidthRatio: number;
+  boxPaddingHeightRatio: number;
   detectionFilter: {
     minWidthRatio: number;
     minHeightRatio: number;

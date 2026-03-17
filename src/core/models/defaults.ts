@@ -157,6 +157,8 @@ export const DEFAULT_CONFIG: AppConfig = {
     brightness: 0,
     dilation: 0,
     invert: false,
+    boxPaddingWidthRatio: 0,
+    boxPaddingHeightRatio: 0,
     detectionFilter: {
       minWidthRatio: 0,
       minHeightRatio: 0,

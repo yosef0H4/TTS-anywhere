@@ -28,6 +28,11 @@ export interface SortingSettings {
   groupTolerance: number;
 }
 
+export interface BoxAdjustmentSettings {
+  boxPaddingWidthRatio: number;
+  boxPaddingHeightRatio: number;
+}
+
 export interface DrawRect {
   id: string;
   nx: number;
