@@ -78,46 +78,38 @@ function buildSignature(formats: ClipboardSnapshot["formats"]): string {
   return hash.digest("hex");
 }
 
+function buildUnicodeClipboardBuffer(text: string): Buffer {
+  return Buffer.from(`${text}\u0000`, "utf16le");
+}
+
 export async function snapshotClipboard(): Promise<ClipboardSnapshot> {
   return withOpenClipboard(() => {
     const advertisedFormats: number[] = [];
     const skippedFormats: ClipboardSnapshot["skippedFormats"] = [];
-    const formats: ClipboardSnapshot["formats"] = [];
 
     let format = 0;
     for (;;) {
       format = EnumClipboardFormats(format);
       if (!format) break;
       advertisedFormats.push(format);
-
-      const handle = GetClipboardData(format);
-      if (!handle) {
-        skippedFormats.push({ format, reason: "GetClipboardData returned null" });
-        continue;
-      }
-
-      const size = GlobalSize(handle);
-      if (!size) {
-        skippedFormats.push({ format, reason: "GlobalSize returned 0" });
-        continue;
-      }
-
-      const ptr = GlobalLock(handle);
-      if (!ptr) {
-        skippedFormats.push({ format, reason: "GlobalLock failed" });
-        continue;
-      }
-
-      try {
-        const data = Buffer.alloc(size);
-        RtlMoveMemory(data, ptr, size);
-        formats.push({ format, size, data });
-      } finally {
-        GlobalUnlock(handle);
-      }
     }
 
     const plainText = readUnicodeTextUnlocked();
+    const formats: ClipboardSnapshot["formats"] = [];
+
+    // GetClipboardData does not guarantee a movable global-memory payload for
+    // every advertised clipboard format. Restrict the snapshot to Unicode text,
+    // which is the only payload we need to safely restore around Ctrl+C capture.
+    if (IsClipboardFormatAvailable(CF_UNICODETEXT)) {
+      const textData = buildUnicodeClipboardBuffer(plainText);
+      formats.push({ format: CF_UNICODETEXT, size: textData.length, data: textData });
+    }
+
+    for (const entry of advertisedFormats) {
+      if (entry === CF_UNICODETEXT) continue;
+      skippedFormats.push({ format: entry, reason: "Skipped unsupported format for safe restore" });
+    }
+
     return {
       advertisedFormats,
       skippedFormats,
@@ -133,9 +125,19 @@ export async function restoreClipboard(snapshot: ClipboardSnapshot): Promise<Cli
   return withOpenClipboard(() => {
     const failedFormats: number[] = [];
     let restoredCount = 0;
+    if (snapshot.formats.length === 0) {
+      if (snapshot.advertisedFormats.length === 0) {
+        EmptyClipboard();
+      }
+      return { restoredCount, failedFormats };
+    }
     EmptyClipboard();
 
     for (const entry of snapshot.formats) {
+      if (entry.format !== CF_UNICODETEXT) {
+        failedFormats.push(entry.format);
+        continue;
+      }
       const allocSize = Math.max(1, entry.size);
       const mem = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, allocSize);
       if (!mem) {

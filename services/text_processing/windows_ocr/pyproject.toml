@@ -1,0 +1,33 @@
+[project]
+name = "windows-ocr-text-processing"
+version = "0.1.0"
+description = "Windows.Media.Ocr OpenAI-compatible OCR adapter"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "fastapi>=0.116.1",
+  "uvicorn[standard]>=0.35.0",
+  "pydantic>=2.11.0",
+  "pillow>=11.3.0",
+  "winrt-Windows.Foundation==3.2.1; platform_system == 'Windows'",
+  "winrt-Windows.Foundation.Collections==3.2.1; platform_system == 'Windows'",
+  "winrt-Windows.Globalization==3.2.1; platform_system == 'Windows'",
+  "winrt-Windows.Graphics.Imaging==3.2.1; platform_system == 'Windows'",
+  "winrt-Windows.Media.Ocr==3.2.1; platform_system == 'Windows'",
+  "winrt-Windows.Storage==3.2.1; platform_system == 'Windows'",
+  "winrt-Windows.Storage.Streams==3.2.1; platform_system == 'Windows'",
+  "winrt-Windows.System==3.2.1; platform_system == 'Windows'",
+]
+
+[project.scripts]
+windows-ocr-text-processing = "windows_ocr_text_processing.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.4.0",
+  "httpx>=0.28.0",
+]

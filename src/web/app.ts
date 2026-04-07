@@ -221,6 +221,7 @@ export class WebApp {
   private userTypingIdleTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingFullDocumentReplace = false;
   private playbackStartInFlight = false;
+  private playbackStartPromise: Promise<void> | null = null;
   private readonly playbackMetrics: PlaybackMetrics = {
     sessionStarts: 0,
     playChunkRequests: 0,
@@ -2826,9 +2827,19 @@ export class WebApp {
     };
 
     volSlider.addEventListener("input", () => updateVol(Number(volSlider.value)));
-    volInput.addEventListener("input", () => updateVol(Number(volInput.value)));
+    volInput.addEventListener("change", () => updateVol(Number(volInput.value)));
     speedSlider.addEventListener("input", () => updateSpeed(Number(speedSlider.value)));
-    speedInput.addEventListener("input", () => updateSpeed(Number(speedInput.value)));
+    speedInput.addEventListener("input", () => {
+      const raw = speedInput.value.trim();
+      if (!raw || raw.endsWith(".")) return;
+      const next = Number(raw);
+      if (!Number.isFinite(next)) return;
+      this.audio.playbackRate = next;
+      this.config.ui.playbackRate = next;
+      speedSlider.value = String(next);
+      this.store.save(this.config);
+    });
+    speedInput.addEventListener("change", () => updateSpeed(Number(speedInput.value)));
 
     this.must<HTMLButtonElement>("btn-play").addEventListener("click", async () => {
       if (this.audio.paused) {
@@ -3102,11 +3113,8 @@ export class WebApp {
     if (this.playbackStartInFlight) return;
     if (this.chunkPlaybackMode || !this.audio.paused) return;
     if (this.maxPlayableChunkIndex() < 0) return;
-    this.playbackStartInFlight = true;
     void this.startOrResumePlayback().catch((error) => {
       this.setStatus(this.withApiBaseUrlHint(this.t("status.playbackFailed", { error: String(error) }), "tts", this.config.tts.baseUrl));
-    }).finally(() => {
-      this.playbackStartInFlight = false;
     });
   }
 
@@ -3328,6 +3336,21 @@ export class WebApp {
   }
 
   private async startOrResumePlayback(): Promise<void> {
+    if (this.playbackStartPromise) {
+      return this.playbackStartPromise;
+    }
+    this.playbackStartInFlight = true;
+    const startPromise = this.startOrResumePlaybackInternal().finally(() => {
+      if (this.playbackStartPromise === startPromise) {
+        this.playbackStartPromise = null;
+        this.playbackStartInFlight = false;
+      }
+    });
+    this.playbackStartPromise = startPromise;
+    return startPromise;
+  }
+
+  private async startOrResumePlaybackInternal(): Promise<void> {
     const text = this.getPlaybackText().trim();
     if (!text) {
       this.setStatus(this.t("status.enterTextFirst"));
@@ -3408,6 +3431,8 @@ export class WebApp {
       if (session !== this.chunkPlaybackSession) return;
       this.audio.src = audioUrl;
       this.audio.currentTime = 0;
+      this.audio.volume = Math.max(0, Math.min(1, this.config.ui.volume / 100));
+      this.audio.playbackRate = this.config.ui.playbackRate;
       chunk.status = "playing";
       this.speakingChunkId = chunk.id;
       this.speakingRevision = chunk.revision;
