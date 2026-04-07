@@ -3493,6 +3493,8 @@ export class WebApp {
   private abortPlaybackAndSynthesis(): void {
     this.chunkPlaybackSession += 1;
     this.chunkPlaybackMode = false;
+    this.playbackStartPromise = null;
+    this.playbackStartInFlight = false;
     this.speakingChunkId = null;
     this.speakingRevision = null;
     this.audio.pause();
