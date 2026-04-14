@@ -1,7 +1,7 @@
 {
   "name": "tts-anywhere",
   "productName": "TTS Anywhere",
-  "version": "0.0.4-alpha",
+  "version": "0.0.5-alpha",
   "private": true,
   "description": "Dual-mode Electron/Web screen OCR and TTS app",
   "type": "module",
