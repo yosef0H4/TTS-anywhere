@@ -4,6 +4,15 @@ import type { AppConfig, BaseUiTheme, GeminiSdkLlmSettings, GeminiSdkTtsSettings
 
 export const SETTINGS_KEY = "tts-anywhere:settings";
 export const LEGACY_SETTINGS_KEYS = ["tts-snipper:settings"] as const;
+export const MIN_PLAYBACK_RATE = 0.2;
+export const MAX_PLAYBACK_RATE = 2;
+
+export function sanitizePlaybackRate(value: unknown, fallback = DEFAULT_CONFIG.ui.playbackRate): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.min(MAX_PLAYBACK_RATE, Math.max(MIN_PLAYBACK_RATE, value));
+}
 
 export class SettingsStore {
   load(): AppConfig {
@@ -22,6 +31,7 @@ export class SettingsStore {
         ui: {
           ...DEFAULT_CONFIG.ui,
           ...parsed.ui,
+          playbackRate: sanitizePlaybackRate(parsed.ui?.playbackRate, DEFAULT_CONFIG.ui.playbackRate),
           theme: this.readUiTheme(parsed.ui?.theme, DEFAULT_CONFIG.ui.theme),
           darkMode: this.readBoolean(parsed.ui?.darkMode, DEFAULT_CONFIG.ui.darkMode),
           language: parsed.ui?.language === "ar" || parsed.ui?.language === "en" ? parsed.ui.language : resolveUiLanguage(),
@@ -63,7 +73,14 @@ export class SettingsStore {
   }
 
   save(next: AppConfig): void {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+    const sanitized: AppConfig = {
+      ...next,
+      ui: {
+        ...next.ui,
+        playbackRate: sanitizePlaybackRate(next.ui.playbackRate, DEFAULT_CONFIG.ui.playbackRate)
+      }
+    };
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(sanitized));
     for (const legacyKey of LEGACY_SETTINGS_KEYS) {
       localStorage.removeItem(legacyKey);
     }

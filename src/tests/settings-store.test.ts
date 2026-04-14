@@ -188,6 +188,31 @@ describe("settings store", () => {
     expect(restored.ui.darkMode).toBe(true);
   });
 
+  it("clamps saved playback speed to the supported minimum", () => {
+    const invalid = {
+      ...DEFAULT_CONFIG,
+      ui: {
+        ...DEFAULT_CONFIG.ui,
+        playbackRate: 0
+      }
+    };
+
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(invalid));
+    const restored = new SettingsStore().load();
+
+    expect(restored.ui.playbackRate).toBe(0.2);
+  });
+
+  it("sanitizes playback speed before persisting settings", () => {
+    const store = new SettingsStore();
+    const cfg = store.load();
+    cfg.ui.playbackRate = 0;
+    store.save(cfg);
+
+    expect(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}").ui?.playbackRate).toBe(0.2);
+    expect(store.load().ui.playbackRate).toBe(0.2);
+  });
+
   it("fills missing full screen capture hotkey from defaults", () => {
     const legacy = {
       ...DEFAULT_CONFIG,

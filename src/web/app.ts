@@ -31,7 +31,14 @@ import {
 } from "../core/playback/chunking";
 import { canResumePlayback } from "../core/playback/session";
 import { AppPipeline } from "../core/pipeline/app-pipeline";
-import { LEGACY_SETTINGS_KEYS, SettingsStore, SETTINGS_KEY } from "../core/services/settings-store";
+import {
+  LEGACY_SETTINGS_KEYS,
+  MAX_PLAYBACK_RATE,
+  MIN_PLAYBACK_RATE,
+  sanitizePlaybackRate,
+  SettingsStore,
+  SETTINGS_KEY
+} from "../core/services/settings-store";
 import type { ManagedServiceId, ManagedServiceStatus, ManagedServicesStatus, UiTheme } from "../core/services/platform";
 import { WorkspaceResizer } from "../ui/workspace-resizer";
 import { cleanTextForTts, findChunkIndexByTime } from "../core/utils/chunking";
@@ -1996,14 +2003,12 @@ export class WebApp {
     this.must<HTMLInputElement>("log-file-enabled").checked = this.config.logging.enableFileLogging;
     this.must<HTMLInputElement>("vol-slider").value = String(this.config.ui.volume);
     this.must<HTMLInputElement>("vol-input").value = String(this.config.ui.volume);
-    this.must<HTMLInputElement>("speed-slider").value = String(this.config.ui.playbackRate);
-    this.must<HTMLInputElement>("speed-input").value = String(this.config.ui.playbackRate);
     this.must<HTMLDivElement>("settings-last-import").textContent = this.config.system.lastImportAt
       ? this.t("settings.lastImport", { timestamp: this.config.system.lastImportAt })
       : this.t("settings.noImportYet");
 
     this.audio.volume = Math.max(0, Math.min(1, this.config.ui.volume / 100));
-    this.audio.playbackRate = this.config.ui.playbackRate;
+    this.applyPlaybackRateValue(this.config.ui.playbackRate, false);
 
     this.applyUiState();
     this.applyLanguage();
@@ -2193,6 +2198,7 @@ export class WebApp {
         ui: {
           ...DEFAULT_CONFIG.ui,
           ...parsed.ui,
+          playbackRate: sanitizePlaybackRate(parsed.ui?.playbackRate, DEFAULT_CONFIG.ui.playbackRate),
           language: parsed.ui?.language === "ar" || parsed.ui?.language === "en" ? parsed.ui.language : DEFAULT_CONFIG.ui.language,
           panels: mergedPanels
         },
@@ -2813,17 +2819,17 @@ export class WebApp {
     const volInput = this.must<HTMLInputElement>("vol-input");
     const speedSlider = this.must<HTMLInputElement>("speed-slider");
     const speedInput = this.must<HTMLInputElement>("speed-input");
+    speedSlider.min = String(MIN_PLAYBACK_RATE);
+    speedSlider.max = String(MAX_PLAYBACK_RATE);
+    speedInput.min = String(MIN_PLAYBACK_RATE);
+    speedInput.max = String(MAX_PLAYBACK_RATE);
 
     const updateVol = (val: number) => {
       this.applyVolumeValue(val);
     };
 
     const updateSpeed = (val: number) => {
-      this.audio.playbackRate = val;
-      this.config.ui.playbackRate = val;
-      speedSlider.value = String(val);
-      speedInput.value = String(val);
-      this.store.save(this.config);
+      this.applyPlaybackRateValue(val);
     };
 
     volSlider.addEventListener("input", () => updateVol(Number(volSlider.value)));
@@ -2834,10 +2840,7 @@ export class WebApp {
       if (!raw || raw.endsWith(".")) return;
       const next = Number(raw);
       if (!Number.isFinite(next)) return;
-      this.audio.playbackRate = next;
-      this.config.ui.playbackRate = next;
-      speedSlider.value = String(next);
-      this.store.save(this.config);
+      this.applyPlaybackRateValue(next);
     });
     speedInput.addEventListener("change", () => updateSpeed(Number(speedInput.value)));
 
@@ -2901,6 +2904,19 @@ export class WebApp {
     volSlider.value = String(next);
     volInput.value = String(next);
     this.store.save(this.config);
+  }
+
+  private applyPlaybackRateValue(val: number, persist = true): void {
+    const next = sanitizePlaybackRate(val, DEFAULT_CONFIG.ui.playbackRate);
+    const speedSlider = this.must<HTMLInputElement>("speed-slider");
+    const speedInput = this.must<HTMLInputElement>("speed-input");
+    this.audio.playbackRate = next;
+    this.config.ui.playbackRate = next;
+    speedSlider.value = String(next);
+    speedInput.value = String(next);
+    if (persist) {
+      this.store.save(this.config);
+    }
   }
 
   private adjustVolumeBy(delta: number): void {
@@ -3432,7 +3448,7 @@ export class WebApp {
       this.audio.src = audioUrl;
       this.audio.currentTime = 0;
       this.audio.volume = Math.max(0, Math.min(1, this.config.ui.volume / 100));
-      this.audio.playbackRate = this.config.ui.playbackRate;
+      this.audio.playbackRate = sanitizePlaybackRate(this.config.ui.playbackRate, DEFAULT_CONFIG.ui.playbackRate);
       chunk.status = "playing";
       this.speakingChunkId = chunk.id;
       this.speakingRevision = chunk.revision;
