@@ -119,6 +119,27 @@ function sleepMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function waitForExtraModifiersToRelease(specModifiers: number, options: SendHotkeyOptions): Promise<number> {
+  const timeoutMs = Math.max(0, Math.floor(options.modifierReleaseSettleTimeoutMs ?? 250));
+  const pollMs = Math.max(1, Math.floor(options.modifierReleaseSettlePollMs ?? 8));
+  let currentMask = activeModifierMask();
+
+  if (timeoutMs === 0 || (currentMask & ~specModifiers) === 0) {
+    return currentMask;
+  }
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    await sleepMs(pollMs);
+    currentMask = activeModifierMask();
+    if ((currentMask & ~specModifiers) === 0) {
+      return currentMask;
+    }
+  }
+
+  return currentMask;
+}
+
 export async function sendHotkey(input: string, options: SendHotkeyOptions = {}): Promise<void> {
   if (process.platform !== "win32") throw new Error("sendHotkey is Windows-only");
 
@@ -127,7 +148,7 @@ export async function sendHotkey(input: string, options: SendHotkeyOptions = {})
   const events: KeyboardInput[] = [];
   const blind = options.blind ?? false;
 
-  const currentlyDownMods = activeModifierMask();
+  const currentlyDownMods = blind ? activeModifierMask() : await waitForExtraModifiersToRelease(spec.modifiers, options);
   const modsToTemporarilyRelease = blind ? 0 : (currentlyDownMods & ~spec.modifiers);
 
   if ((modsToTemporarilyRelease & MOD_WIN) !== 0) {

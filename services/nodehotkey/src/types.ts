@@ -48,6 +48,8 @@ export type SendSpec = {
 export type SendHotkeyOptions = {
   pressDurationMs?: number;
   blind?: boolean;
+  modifierReleaseSettleTimeoutMs?: number;
+  modifierReleaseSettlePollMs?: number;
 };
 
 export type ClipboardWaitMode = "text_or_files" | "any";
