@@ -8,6 +8,7 @@ export interface PlatformBridge {
     captureKind: "selection" | "fullscreen" | "window";
     resultMode: "editor" | "clipboard";
     hotkey?: ConfigurableHotkeyKey;
+    automation?: { kind: "auto_reader"; runId: number; phase: "initial" | "replay" };
   }) => void): void;
   onCopiedTextForPlayback(handler: (text: string) => void): void;
   onClipboardWatcherItem(handler: (payload: { kind: "text"; text: string } | { kind: "image"; dataUrl: string }) => void): void;
@@ -115,6 +116,7 @@ export interface ElectronApi {
     captureKind: "selection" | "fullscreen" | "window";
     resultMode: "editor" | "clipboard";
     hotkey?: ConfigurableHotkeyKey;
+    automation?: { kind: "auto_reader"; runId: number; phase: "initial" | "replay" };
   }) => void) => void;
   onCopiedTextForPlayback: (handler: (text: string) => void) => void;
   onClipboardWatcherItem: (handler: (payload: { kind: "text"; text: string } | { kind: "image"; dataUrl: string }) => void) => void;
@@ -149,6 +151,11 @@ export interface ElectronApi {
   clearCopyHotkey: () => Promise<string>;
   cancelCopyHotkeyEdit: () => Promise<string>;
   getCopyHotkey: () => Promise<string>;
+  beginAutoReaderHotkeyEdit: () => Promise<string>;
+  applyAutoReaderHotkey: (hotkey: string) => Promise<string>;
+  clearAutoReaderHotkey: () => Promise<string>;
+  cancelAutoReaderHotkeyEdit: () => Promise<string>;
+  getAutoReaderHotkey: () => Promise<string>;
   beginClipboardWatcherHotkeyEdit: () => Promise<string>;
   applyClipboardWatcherHotkey: (hotkey: string) => Promise<string>;
   clearClipboardWatcherHotkey: () => Promise<string>;
@@ -193,8 +200,23 @@ export interface ElectronApi {
   getCaptureDrawRectangle: () => Promise<boolean>;
   setOverlayTheme: (theme: UiTheme) => Promise<void>;
   getOverlayTheme: () => Promise<UiTheme>;
+  setAutoReaderSettings: (settings: {
+    advanceHotkey: string;
+    advanceDelayMs: number;
+    noTextRetryCount: number;
+  }) => Promise<{
+    advanceHotkey: string;
+    advanceDelayMs: number;
+    noTextRetryCount: number;
+  }>;
   getClipboardWatcherEnabled: () => Promise<boolean>;
   setClipboardWatcherEnabled: (enabled: boolean) => Promise<boolean>;
+  reportAutoReaderPageResult: (result: {
+    runId: number;
+    outcome: "completed" | "failed" | "cancelled";
+    text?: string;
+    message?: string;
+  }) => Promise<void>;
   launchManagedService: (serviceId: ManagedServiceId) => Promise<ManagedServiceStatus>;
   stopManagedService: (serviceId: ManagedServiceId) => Promise<ManagedServiceStatus>;
   openRuntimeServicesFolder: () => Promise<string>;

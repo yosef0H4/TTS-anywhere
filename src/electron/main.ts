@@ -9,6 +9,8 @@ import {
   disposeFrozenCapture,
   getForegroundWindowBounds,
   HotkeySession,
+  parseSendSpec,
+  sendHotkey,
   type FrozenCaptureHandle
 } from "nodehotkey";
 import fs from "node:fs";
@@ -81,6 +83,19 @@ interface ManagedOcrServiceUrls {
 }
 
 type ManagedServiceId = "paddle" | "edge";
+type AutoReaderState = "idle" | "processing" | "advancing";
+type AutoReaderCapturePhase = "initial" | "replay";
+type AutoReaderPageResult = {
+  runId: number;
+  outcome: "completed" | "failed" | "cancelled";
+  text?: string;
+  message?: string;
+};
+type CaptureAutomationPayload = {
+  kind: "auto_reader";
+  runId: number;
+  phase: AutoReaderCapturePhase;
+};
 
 interface ManagedServiceStatus {
   state: "stopped" | "starting" | "running" | "failed";
@@ -138,6 +153,7 @@ let ocrClipboardHotkeySession: HotkeySession | null = null;
 let fullCaptureHotkeySession: HotkeySession | null = null;
 let activeWindowCaptureHotkeySession: HotkeySession | null = null;
 let copyHotkeySession: HotkeySession | null = null;
+let autoReaderHotkeySession: HotkeySession | null = null;
 let clipboardWatcherHotkeySession: HotkeySession | null = null;
 let abortHotkeySession: HotkeySession | null = null;
 let playbackToggleHotkeySession: HotkeySession | null = null;
@@ -151,6 +167,10 @@ let activeOcrClipboardHotkey = "ctrl+shift+alt+c";
 let activeFullCaptureHotkey = "ctrl+shift+alt+a";
 let activeActiveWindowCaptureHotkey = "ctrl+shift+alt+w";
 let activeCopyHotkey = "ctrl+shift+alt+x";
+let activeAutoReaderHotkey = "ctrl+shift+alt+r";
+let autoReaderAdvanceHotkey = "space";
+let autoReaderAdvanceDelayMs = 900;
+let autoReaderNoTextRetryCount = 5;
 let activeClipboardWatcherHotkey = "ctrl+shift+alt+v";
 let activeAbortHotkey = "ctrl+shift+alt+z";
 let activePlaybackToggleHotkey = "ctrl+shift+alt+space";
@@ -164,6 +184,7 @@ let ocrClipboardHotkeyBeforeEdit: string | null = null;
 let fullCaptureHotkeyBeforeEdit: string | null = null;
 let activeWindowCaptureHotkeyBeforeEdit: string | null = null;
 let copyHotkeyBeforeEdit: string | null = null;
+let autoReaderHotkeyBeforeEdit: string | null = null;
 let clipboardWatcherHotkeyBeforeEdit: string | null = null;
 let abortHotkeyBeforeEdit: string | null = null;
 let playbackToggleHotkeyBeforeEdit: string | null = null;
@@ -180,12 +201,19 @@ let selectionActive = false;
 let selectionStart: { x: number; y: number } | null = null;
 let selectionResultMode: "editor" | "clipboard" = "editor";
 let selectionSession: HotkeySession | null = null;
+let selectionHotkey: ElectronHotkeyKey | undefined = undefined;
+let selectionAutomation: CaptureAutomationPayload | null = null;
 let lastCursor: { x: number; y: number } | null = null;
 let lastRect: { left: number; top: number; right: number; bottom: number } | null = null;
 let lastSavedCaptureRect: { left: number; top: number; width: number; height: number } | null = null;
 let frozenCaptureSession: Promise<FrozenCaptureHandle> | null = null;
 let flashOverlayTimer: NodeJS.Timeout | null = null;
 let copyPlayInFlight = false;
+let autoReaderState: AutoReaderState = "idle";
+let autoReaderRunCounter = 0;
+let autoReaderActiveRunId: number | null = null;
+let autoReaderLastTextSignature: string | null = null;
+let autoReaderNoTextStreak = 0;
 let clipboardWatcherEnabled = false;
 let clipboardWatcherPollTimer: NodeJS.Timeout | null = null;
 let clipboardWatcherPollInFlight = false;
@@ -248,6 +276,10 @@ interface NativePrefs {
   fullCaptureHotkey?: string;
   activeWindowCaptureHotkey?: string;
   copyPlayHotkey?: string;
+  autoReaderHotkey?: string;
+  autoReaderAdvanceHotkey?: string;
+  autoReaderAdvanceDelayMs?: number;
+  autoReaderNoTextRetryCount?: number;
   clipboardWatcherEnabled?: boolean;
   clipboardWatcherHotkey?: string;
   captureDrawRectangle?: boolean;
@@ -1284,6 +1316,7 @@ function emitCapturedImage(
     captureKind: "selection" | "fullscreen" | "window";
     hotkey?: ElectronHotkeyKey;
     resultMode?: "editor" | "clipboard";
+    automation?: CaptureAutomationPayload;
     bounds?: Record<string, unknown>;
     frozen?: FrozenCaptureHandle | null;
     crop?: Record<string, unknown>;
@@ -1298,6 +1331,7 @@ function emitCapturedImage(
     captureKind: details.captureKind,
     hotkey: details.hotkey,
     resultMode: details.resultMode,
+    automation: details.automation,
     bounds: details.bounds,
     crop: details.crop,
     frozenAgeMs: details.frozen ? Date.now() - details.frozen.capturedAt : undefined,
@@ -1311,6 +1345,7 @@ function emitCapturedImage(
       captureKind: details.captureKind,
       hotkey: details.hotkey,
       resultMode: details.resultMode,
+      automation: details.automation,
       bounds: details.bounds,
       crop: details.crop,
       blankRatio: audit.blankRatio,
@@ -1327,7 +1362,8 @@ function emitCapturedImage(
     dataUrl,
     captureKind: details.captureKind,
     resultMode: details.resultMode ?? "editor",
-    hotkey: details.hotkey
+    hotkey: details.hotkey,
+    automation: details.automation
   });
 }
 
@@ -1382,6 +1418,8 @@ function disposeNativeResources(): void {
   activeWindowCaptureHotkeySession = null;
   copyHotkeySession?.stop();
   copyHotkeySession = null;
+  autoReaderHotkeySession?.stop();
+  autoReaderHotkeySession = null;
   abortHotkeySession?.stop();
   abortHotkeySession = null;
   playbackToggleHotkeySession?.stop();
@@ -1396,6 +1434,7 @@ function disposeNativeResources(): void {
   volumeDownHotkeySession = null;
   replayCaptureHotkeySession?.stop();
   replayCaptureHotkeySession = null;
+  resetAutoReaderRun();
   if (flashOverlayTimer) {
     clearTimeout(flashOverlayTimer);
     flashOverlayTimer = null;
@@ -1648,17 +1687,21 @@ function beginFrozenCaptureSession(): void {
 function startSelection(
   point: { x: number; y: number },
   resultMode: "editor" | "clipboard",
-  session: HotkeySession | null
+  session: HotkeySession | null,
+  hotkey: ElectronHotkeyKey,
+  automation: CaptureAutomationPayload | null = null
 ): void {
   selectionStart = { x: point.x, y: point.y };
   selectionResultMode = resultMode;
   selectionSession = session;
+  selectionHotkey = hotkey;
+  selectionAutomation = automation;
   lastCursor = { x: point.x, y: point.y };
   lastRect = null;
   selectionActive = true;
   beginFrozenCaptureSession();
   if (drawSelectionRectangle) overlay?.hide();
-  diag("capture.start", { x: point.x, y: point.y, hotkey: session?.getHotkey(), resultMode });
+  diag("capture.start", { x: point.x, y: point.y, hotkey: session?.getHotkey(), resultMode, sourceHotkey: hotkey, automation });
 }
 
 async function finalizeSelection(point: { x: number; y: number }): Promise<void> {
@@ -1667,6 +1710,8 @@ async function finalizeSelection(point: { x: number; y: number }): Promise<void>
     selectionStart = null;
     selectionResultMode = "editor";
     selectionSession = null;
+    selectionHotkey = undefined;
+    selectionAutomation = null;
     lastCursor = null;
     lastRect = null;
     if (drawSelectionRectangle) overlay?.hide();
@@ -1687,8 +1732,12 @@ async function finalizeSelection(point: { x: number; y: number }): Promise<void>
   selectionActive = false;
   selectionStart = null;
   const resultMode = selectionResultMode;
+  const sourceHotkey = selectionHotkey;
+  const automation = selectionAutomation;
   selectionResultMode = "editor";
   selectionSession = null;
+  selectionHotkey = undefined;
+  selectionAutomation = null;
   lastCursor = null;
   lastRect = null;
   if (drawSelectionRectangle) overlay?.hide();
@@ -1719,7 +1768,8 @@ async function finalizeSelection(point: { x: number; y: number }): Promise<void>
     emitCapturedImage(pngBuffer, {
       captureKind: "selection",
       resultMode,
-      hotkey: resultMode === "clipboard" ? "ocrClipboard" : "capture",
+      ...(sourceHotkey ? { hotkey: sourceHotkey } : {}),
+      ...(automation ? { automation } : {}),
       bounds: {
         left: frozen.bounds.left,
         top: frozen.bounds.top,
@@ -1740,11 +1790,20 @@ async function finalizeSelection(point: { x: number; y: number }): Promise<void>
       height: payload.height,
       captureKind: "selection",
       resultMode,
+      sourceHotkey,
+      automation,
       frozenAgeMs: Date.now() - frozen.capturedAt
     });
   } catch (error) {
     frozenCaptureSession = null;
-    emitHotkeyFeedback(resultMode === "clipboard" ? "ocrClipboard" : "capture", "error", String(error));
+    if (sourceHotkey) {
+      emitHotkeyFeedback(sourceHotkey, "error", String(error));
+    }
+    if (sourceHotkey === "autoReader") {
+      autoReaderState = "idle";
+      autoReaderActiveRunId = null;
+      autoReaderLastTextSignature = null;
+    }
     diag("capture.error", { error: String(error) });
   } finally {
     if (frozen) {
@@ -1757,17 +1816,20 @@ async function finalizeSelection(point: { x: number; y: number }): Promise<void>
   }
 }
 
-async function replayLastCaptureRect(): Promise<void> {
+async function captureSavedRect(options: {
+  sourceEvent: string;
+  hotkey?: ElectronHotkeyKey;
+  automation?: CaptureAutomationPayload;
+  emitFeedbackHotkey?: ElectronHotkeyKey;
+  successEvent: string;
+  errorEvent: string;
+}): Promise<void> {
   const rect = lastSavedCaptureRect;
   if (!rect) {
-    emitHotkeyFeedback("replayCapture", "error", "No previous capture selection available");
-    diag("capture.replay.missing-rect");
-    return;
+    throw new Error("No previous capture selection available");
   }
   if (rect.width < 1 || rect.height < 1) {
-    emitHotkeyFeedback("replayCapture", "error", "Previous capture selection is invalid");
-    diag("capture.replay.invalid-rect", rect);
-    return;
+    throw new Error("Previous capture selection is invalid");
   }
 
   let frozen: FrozenCaptureHandle | null = null;
@@ -1789,7 +1851,8 @@ async function replayLastCaptureRect(): Promise<void> {
 
     emitCapturedImage(pngBuffer, {
       captureKind: "selection",
-      hotkey: "replayCapture",
+      ...(options.hotkey ? { hotkey: options.hotkey } : {}),
+      ...(options.automation ? { automation: options.automation } : {}),
       bounds: {
         left: frozen.bounds.left,
         top: frozen.bounds.top,
@@ -1803,10 +1866,12 @@ async function replayLastCaptureRect(): Promise<void> {
         width: rect.width,
         height: rect.height
       },
-      sourceEvent: "capture.replay.sent"
+      sourceEvent: options.sourceEvent
     });
-    emitHotkeyFeedback("replayCapture", "success");
-    diag("capture.replay.sent", {
+    if (options.emitFeedbackHotkey) {
+      emitHotkeyFeedback(options.emitFeedbackHotkey, "success");
+    }
+    diag(options.successEvent, {
       left: rect.left,
       top: rect.top,
       width: rect.width,
@@ -1814,11 +1879,14 @@ async function replayLastCaptureRect(): Promise<void> {
       frozenAgeMs: Date.now() - frozen.capturedAt
     });
   } catch (error) {
-    emitHotkeyFeedback("replayCapture", "error", String(error));
-    diag("capture.replay.error", {
+    if (options.emitFeedbackHotkey) {
+      emitHotkeyFeedback(options.emitFeedbackHotkey, "error", String(error));
+    }
+    diag(options.errorEvent, {
       error: String(error),
       rect
     });
+    throw error;
   } finally {
     if (frozen) {
       try {
@@ -1827,6 +1895,20 @@ async function replayLastCaptureRect(): Promise<void> {
         // best effort
       }
     }
+  }
+}
+
+async function replayLastCaptureRect(): Promise<void> {
+  try {
+    await captureSavedRect({
+      sourceEvent: "capture.replay.sent",
+      hotkey: "replayCapture",
+      emitFeedbackHotkey: "replayCapture",
+      successEvent: "capture.replay.sent",
+      errorEvent: "capture.replay.error"
+    });
+  } catch {
+    // feedback/logging already handled by captureSavedRect
   }
 }
 
@@ -1982,6 +2064,165 @@ function readStoredHotkey(value: string | undefined, fallback: string): string {
   return typeof value === "string" ? value : fallback;
 }
 
+function normalizeAutoReaderText(value: string | undefined): string {
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function isValidAutoReaderDelay(value: number | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 60_000;
+}
+
+function isValidAutoReaderNoTextRetryCount(value: number | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 20;
+}
+
+function resetAutoReaderRun(): void {
+  autoReaderState = "idle";
+  autoReaderActiveRunId = null;
+  autoReaderLastTextSignature = null;
+  autoReaderNoTextStreak = 0;
+  selectionAutomation = null;
+}
+
+function stopAutoReader(message?: string, phase: ElectronHotkeyFeedbackPhase = "success"): void {
+  if (autoReaderActiveRunId !== null || autoReaderState !== "idle") {
+    diag("auto.reader.stop", { runId: autoReaderActiveRunId, state: autoReaderState, message, phase });
+  }
+  if (selectionAutomation?.kind === "auto_reader") {
+    selectionActive = false;
+    selectionStart = null;
+    selectionSession = null;
+    selectionHotkey = undefined;
+    selectionAutomation = null;
+    lastCursor = null;
+    lastRect = null;
+    if (drawSelectionRectangle) {
+      overlay?.hide();
+    }
+  }
+  resetAutoReaderRun();
+  emitHotkeyFeedback("autoReader", phase, message ?? "Automatic reader stopped.");
+  mainWindow?.webContents.send("abort-requested");
+}
+
+async function beginAutoReaderRun(): Promise<void> {
+  if (selectionActive) {
+    emitHotkeyFeedback("autoReader", "error", "Finish the active selection first.");
+    return;
+  }
+  if (!lastSavedCaptureRect) {
+    emitHotkeyFeedback("autoReader", "error", "Select an area first with Capture or Replay Capture.");
+    diag("auto.reader.start.missing-rect");
+    return;
+  }
+  if (lastSavedCaptureRect.width < 1 || lastSavedCaptureRect.height < 1) {
+    emitHotkeyFeedback("autoReader", "error", "The saved capture area is invalid. Capture an area again first.");
+    diag("auto.reader.start.invalid-rect", lastSavedCaptureRect);
+    return;
+  }
+  autoReaderRunCounter += 1;
+  const runId = autoReaderRunCounter;
+  autoReaderActiveRunId = runId;
+  autoReaderState = "processing";
+  autoReaderLastTextSignature = null;
+  autoReaderNoTextStreak = 0;
+  try {
+    await captureSavedRect({
+      sourceEvent: "auto.reader.capture.initial.sent",
+      hotkey: "autoReader",
+      automation: { kind: "auto_reader", runId, phase: "initial" },
+      successEvent: "auto.reader.capture.initial.sent",
+      errorEvent: "auto.reader.capture.initial.error"
+    });
+    if (autoReaderActiveRunId === runId) {
+      emitHotkeyFeedback("autoReader", "success", "Automatic reader started.");
+      diag("auto.reader.started", { runId, phase: "initial" });
+    }
+  } catch (error) {
+    if (autoReaderActiveRunId === runId) {
+      stopAutoReader(`Automatic reader could not use the saved capture area: ${String(error)}`, "error");
+    }
+  }
+}
+
+async function advanceAutoReader(runId: number): Promise<void> {
+  if (autoReaderActiveRunId !== runId || autoReaderState !== "processing") {
+    return;
+  }
+
+  autoReaderState = "advancing";
+  try {
+    await sendHotkey(autoReaderAdvanceHotkey, { mode: "scancode", pressDurationMs: 24 });
+  } catch (error) {
+    stopAutoReader(`Automatic reader could not send "${autoReaderAdvanceHotkey}": ${String(error)}`, "error");
+    return;
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, autoReaderAdvanceDelayMs));
+  if (autoReaderActiveRunId !== runId || autoReaderState !== "advancing") {
+    return;
+  }
+
+  try {
+    await captureSavedRect({
+      sourceEvent: "auto.reader.capture.replay.sent",
+      hotkey: "autoReader",
+      automation: { kind: "auto_reader", runId, phase: "replay" },
+      successEvent: "auto.reader.capture.replay.sent",
+      errorEvent: "auto.reader.capture.replay.error"
+    });
+    if (autoReaderActiveRunId === runId) {
+      autoReaderState = "processing";
+    }
+  } catch (error) {
+    stopAutoReader(`Automatic reader could not capture the next page: ${String(error)}`, "error");
+  }
+}
+
+function handleAutoReaderPageResult(result: AutoReaderPageResult): void {
+  if (result.runId !== autoReaderActiveRunId) {
+    diag("auto.reader.result.stale", { result, activeRunId: autoReaderActiveRunId });
+    return;
+  }
+
+  if (result.outcome === "cancelled") {
+    stopAutoReader(result.message ?? "Automatic reader cancelled.");
+    return;
+  }
+
+  if (result.outcome === "failed") {
+    stopAutoReader(result.message ?? "Automatic reader stopped due to an OCR or playback error.", "error");
+    return;
+  }
+
+  const textSignature = normalizeAutoReaderText(result.text);
+  if (!textSignature) {
+    autoReaderNoTextStreak += 1;
+    if (autoReaderNoTextStreak >= autoReaderNoTextRetryCount) {
+      stopAutoReader(`Automatic reader stopped after ${autoReaderNoTextRetryCount} consecutive page turns without finding text.`, "error");
+      return;
+    }
+    diag("auto.reader.result.empty", {
+      runId: result.runId,
+      emptyCount: autoReaderNoTextStreak,
+      noTextRetryCount: autoReaderNoTextRetryCount
+    });
+    void advanceAutoReader(result.runId);
+    return;
+  }
+  autoReaderNoTextStreak = 0;
+  if (autoReaderLastTextSignature && textSignature === autoReaderLastTextSignature) {
+    stopAutoReader("Automatic reader stopped because the next page matched the previous page.", "error");
+    return;
+  }
+
+  autoReaderLastTextSignature = textSignature;
+  void advanceAutoReader(result.runId);
+}
+
 function emitHotkeyFeedback(hotkey: ElectronHotkeyKey, phase: ElectronHotkeyFeedbackPhase, message?: string): void {
   mainWindow?.webContents.send("hotkey-feedback", { hotkey, phase, message });
   diag("hotkey.feedback", { hotkey, phase, message });
@@ -1994,6 +2235,7 @@ function getAllActiveHotkeys(): Array<{ name: string; hotkey: string }> {
     { name: "full screen capture", hotkey: activeFullCaptureHotkey },
     { name: "active window capture", hotkey: activeActiveWindowCaptureHotkey },
     { name: "copy & play", hotkey: activeCopyHotkey },
+    { name: "automatic reader", hotkey: activeAutoReaderHotkey },
     { name: "clipboard watch toggle", hotkey: activeClipboardWatcherHotkey },
     { name: "abort", hotkey: activeAbortHotkey },
     { name: "play/pause", hotkey: activePlaybackToggleHotkey },
@@ -2148,6 +2390,14 @@ if (!hasSingleInstanceLock) {
     activeFullCaptureHotkey = readStoredHotkey(nativePrefs.fullCaptureHotkey, activeFullCaptureHotkey);
     activeActiveWindowCaptureHotkey = readStoredHotkey(nativePrefs.activeWindowCaptureHotkey, activeActiveWindowCaptureHotkey);
     activeCopyHotkey = readStoredHotkey(nativePrefs.copyPlayHotkey, activeCopyHotkey);
+    activeAutoReaderHotkey = readStoredHotkey(nativePrefs.autoReaderHotkey, activeAutoReaderHotkey);
+    autoReaderAdvanceHotkey = readStoredHotkey(nativePrefs.autoReaderAdvanceHotkey, autoReaderAdvanceHotkey);
+    autoReaderAdvanceDelayMs = isValidAutoReaderDelay(nativePrefs.autoReaderAdvanceDelayMs)
+      ? nativePrefs.autoReaderAdvanceDelayMs
+      : autoReaderAdvanceDelayMs;
+    autoReaderNoTextRetryCount = isValidAutoReaderNoTextRetryCount(nativePrefs.autoReaderNoTextRetryCount)
+      ? nativePrefs.autoReaderNoTextRetryCount
+      : autoReaderNoTextRetryCount;
     activeClipboardWatcherHotkey = readStoredHotkey(nativePrefs.clipboardWatcherHotkey, activeClipboardWatcherHotkey);
     clipboardWatcherEnabled = nativePrefs.clipboardWatcherEnabled ?? clipboardWatcherEnabled;
     activeAbortHotkey = readStoredHotkey(nativePrefs.abortHotkey, activeAbortHotkey);
@@ -2167,6 +2417,10 @@ if (!hasSingleInstanceLock) {
       activeFullCaptureHotkey,
       activeActiveWindowCaptureHotkey,
       activeCopyHotkey,
+      activeAutoReaderHotkey,
+      autoReaderAdvanceHotkey,
+      autoReaderAdvanceDelayMs,
+      autoReaderNoTextRetryCount,
       activeClipboardWatcherHotkey,
       clipboardWatcherEnabled,
       activeAbortHotkey,
@@ -2195,7 +2449,7 @@ if (!hasSingleInstanceLock) {
       events: {
         onHotkeyRegistered: (label) => diag("capture.hotkey.registered", { label }),
         onHotkeySwitched: (label) => diag("capture.hotkey.switched", { label }),
-        onTriggerDown: (point) => startSelection(point, "editor", captureHotkeySession),
+        onTriggerDown: (point) => startSelection(point, "editor", captureHotkeySession, "capture"),
         onTriggerUp: (point) => {
           void finalizeSelection(point);
         }
@@ -2208,7 +2462,7 @@ if (!hasSingleInstanceLock) {
       events: {
         onHotkeyRegistered: (label) => diag("capture.ocr-clipboard.hotkey.registered", { label }),
         onHotkeySwitched: (label) => diag("capture.ocr-clipboard.hotkey.switched", { label }),
-        onTriggerDown: (point) => startSelection(point, "clipboard", ocrClipboardHotkeySession),
+        onTriggerDown: (point) => startSelection(point, "clipboard", ocrClipboardHotkeySession, "ocrClipboard"),
         onTriggerUp: (point) => {
           void finalizeSelection(point);
         }
@@ -2251,6 +2505,22 @@ if (!hasSingleInstanceLock) {
       }
     });
     diag("app.copy-session.create.end");
+    diag("app.auto-reader-session.create.begin", { hotkey: activeAutoReaderHotkey });
+    autoReaderHotkeySession = new HotkeySession({
+      initialHotkey: activeAutoReaderHotkey,
+      events: {
+        onHotkeyRegistered: (label) => diag("auto.reader.hotkey.registered", { label }),
+        onHotkeySwitched: (label) => diag("auto.reader.hotkey.switched", { label }),
+        onTriggerUp: () => {
+          if (autoReaderState === "idle") {
+            void beginAutoReaderRun();
+            return;
+          }
+          stopAutoReader("Automatic reader stopped.");
+        }
+      }
+    });
+    diag("app.auto-reader-session.create.end");
     diag("app.clipboard-watch-session.create.begin", { hotkey: activeClipboardWatcherHotkey, enabled: clipboardWatcherEnabled });
     clipboardWatcherHotkeySession = new HotkeySession({
       initialHotkey: activeClipboardWatcherHotkey,
@@ -2353,6 +2623,9 @@ if (!hasSingleInstanceLock) {
     diag("app.copy-session.start.begin");
     copyHotkeySession.start();
     diag("app.copy-session.start.end");
+    diag("app.auto-reader-session.start.begin");
+    autoReaderHotkeySession.start();
+    diag("app.auto-reader-session.start.end");
     diag("app.clipboard-watch-session.start.begin");
     clipboardWatcherHotkeySession.start();
     diag("app.clipboard-watch-session.start.end");
@@ -2642,6 +2915,54 @@ ipcMain.handle("copy:cancel-hotkey-edit", () => {
 
 ipcMain.handle("copy:get-hotkey", () => {
   return getEditableHotkey(copyHotkeySession, activeCopyHotkey, (value) => { activeCopyHotkey = value; });
+});
+
+ipcMain.handle("auto-reader:begin-hotkey-edit", () => {
+  return beginEditableHotkey(
+    autoReaderHotkeySession,
+    activeAutoReaderHotkey,
+    (value) => { autoReaderHotkeyBeforeEdit = value; },
+    "auto.reader.hotkey.edit.begin"
+  );
+});
+
+ipcMain.handle("auto-reader:apply-hotkey", (_event, hotkey: string) => {
+  return applyEditableHotkey(
+    autoReaderHotkeySession,
+    hotkey,
+    "automatic reader",
+    (value) => ({ autoReaderHotkey: value }),
+    (value) => { activeAutoReaderHotkey = value; },
+    (value) => { autoReaderHotkeyBeforeEdit = value; },
+    "auto.reader.hotkey.edit.applied",
+    activeAutoReaderHotkey
+  );
+});
+
+ipcMain.handle("auto-reader:clear-hotkey", () => {
+  return clearEditableHotkey(
+    autoReaderHotkeySession,
+    (value) => ({ autoReaderHotkey: value }),
+    (value) => { activeAutoReaderHotkey = value; },
+    (value) => { autoReaderHotkeyBeforeEdit = value; },
+    "auto.reader.hotkey.edit.cleared",
+    activeAutoReaderHotkey
+  );
+});
+
+ipcMain.handle("auto-reader:cancel-hotkey-edit", () => {
+  return cancelEditableHotkey(
+    autoReaderHotkeySession,
+    autoReaderHotkeyBeforeEdit,
+    (value) => { activeAutoReaderHotkey = value; },
+    (value) => { autoReaderHotkeyBeforeEdit = value; },
+    "auto.reader.hotkey.edit.cancelled",
+    activeAutoReaderHotkey
+  );
+});
+
+ipcMain.handle("auto-reader:get-hotkey", () => {
+  return getEditableHotkey(autoReaderHotkeySession, activeAutoReaderHotkey, (value) => { activeAutoReaderHotkey = value; });
 });
 
 ipcMain.handle("clipboard-watcher:begin-hotkey-edit", () => {
@@ -3060,6 +3381,36 @@ ipcMain.handle("window:set-always-on-top", (_event, enabled: boolean) => setAlwa
 ipcMain.handle("clipboard-watcher:get-enabled", () => clipboardWatcherEnabled);
 ipcMain.handle("clipboard-watcher:set-enabled", (_event, enabled: boolean) => {
   return setClipboardWatcherEnabledState(enabled, { source: "ipc" });
+});
+ipcMain.handle("auto-reader:set-settings", (_event, settings: { advanceHotkey: string; advanceDelayMs: number; noTextRetryCount: number }) => {
+  const normalizedHotkey = String(settings?.advanceHotkey ?? "").trim().toLowerCase();
+  if (!normalizedHotkey) {
+    throw new Error("Automatic reader advance hotkey is required");
+  }
+  parseSendSpec(normalizedHotkey);
+  if (!isValidAutoReaderDelay(settings?.advanceDelayMs)) {
+    throw new Error("Automatic reader delay must be between 0 and 60000 milliseconds");
+  }
+  if (!isValidAutoReaderNoTextRetryCount(settings?.noTextRetryCount)) {
+    throw new Error("Automatic reader no-text retry count must be between 0 and 20");
+  }
+  autoReaderAdvanceHotkey = normalizedHotkey;
+  autoReaderAdvanceDelayMs = settings.advanceDelayMs;
+  autoReaderNoTextRetryCount = settings.noTextRetryCount;
+  saveNativePrefs({
+    autoReaderAdvanceHotkey,
+    autoReaderAdvanceDelayMs,
+    autoReaderNoTextRetryCount
+  });
+  diag("auto.reader.settings.changed", { autoReaderAdvanceHotkey, autoReaderAdvanceDelayMs, autoReaderNoTextRetryCount });
+  return {
+    advanceHotkey: autoReaderAdvanceHotkey,
+    advanceDelayMs: autoReaderAdvanceDelayMs,
+    noTextRetryCount: autoReaderNoTextRetryCount
+  };
+});
+ipcMain.handle("auto-reader:page-result", (_event, result: AutoReaderPageResult) => {
+  handleAutoReaderPageResult(result);
 });
 ipcMain.handle("stack:get-services-status", () => managedServicesStatusSnapshot());
 ipcMain.handle("stack:launch-service", async (_event, serviceId: ManagedServiceId) => launchManagedService(serviceId));

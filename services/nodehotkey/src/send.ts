@@ -1,5 +1,5 @@
 import { MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, TOKEN_TO_MOD, keyTokenToVk } from "./hotkey-parser.js";
-import type { SendHotkeyOptions, SendSpec } from "./types.js";
+import type { SendHotkeyOptions, SendMode, SendSpec } from "./types.js";
 import {
   GetLastError,
   GetAsyncKeyState,
@@ -7,6 +7,9 @@ import {
   INPUT_SIZE,
   KEYEVENTF_EXTENDEDKEY,
   KEYEVENTF_KEYUP,
+  KEYEVENTF_SCANCODE,
+  MAPVK_VK_TO_VSC_EX,
+  MapVirtualKeyW,
   SendInput,
   VK_CONTROL,
   VK_RWIN,
@@ -28,6 +31,12 @@ type KeyboardInput = {
   };
 };
 
+type KeyDescriptor = {
+  vk: number;
+  scanCode: number;
+  extended: boolean;
+};
+
 function isExtendedVk(vk: number): boolean {
   return (
     vk === 0x25 || // left
@@ -43,15 +52,40 @@ function isExtendedVk(vk: number): boolean {
   );
 }
 
-function keyEvent(vk: number, keyUp: boolean): KeyboardInput {
+function getKeyDescriptor(vk: number): KeyDescriptor {
+  const mapped = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC_EX);
+  return {
+    vk,
+    scanCode: mapped ? (mapped & 0xff) : 0,
+    extended: isExtendedVk(vk) || (mapped & 0xff00) !== 0
+  };
+}
+
+function keyEvent(descriptor: KeyDescriptor, keyUp: boolean, mode: SendMode): KeyboardInput {
   let flags = keyUp ? KEYEVENTF_KEYUP : 0;
-  if (isExtendedVk(vk)) flags |= KEYEVENTF_EXTENDEDKEY;
+  if (mode === "scancode" && descriptor.scanCode !== 0) {
+    flags |= KEYEVENTF_SCANCODE;
+    if (descriptor.extended) flags |= KEYEVENTF_EXTENDEDKEY;
+    return {
+      type: INPUT_KEYBOARD,
+      _pad: 0,
+      _unionPad: 0,
+      ki: {
+        wVk: 0,
+        wScan: descriptor.scanCode,
+        dwFlags: flags,
+        time: 0,
+        dwExtraInfo: 0
+      }
+    };
+  }
+  if (descriptor.extended) flags |= KEYEVENTF_EXTENDEDKEY;
   return {
     type: INPUT_KEYBOARD,
     _pad: 0,
     _unionPad: 0,
     ki: {
-      wVk: vk,
+      wVk: descriptor.vk,
       wScan: 0,
       dwFlags: flags,
       time: 0,
@@ -147,20 +181,21 @@ export async function sendHotkey(input: string, options: SendHotkeyOptions = {})
   const downModifiers = modifierVks(spec.modifiers);
   const events: KeyboardInput[] = [];
   const blind = options.blind ?? false;
+  const mode = options.mode ?? "vk";
 
   const currentlyDownMods = blind ? activeModifierMask() : await waitForExtraModifiersToRelease(spec.modifiers, options);
   const modsToTemporarilyRelease = blind ? 0 : (currentlyDownMods & ~spec.modifiers);
 
   if ((modsToTemporarilyRelease & MOD_WIN) !== 0) {
-    if (isVkDown(VK_LWIN)) events.push(keyEvent(VK_LWIN, true));
-    if (isVkDown(VK_RWIN)) events.push(keyEvent(VK_RWIN, true));
+    if (isVkDown(VK_LWIN)) events.push(keyEvent(getKeyDescriptor(VK_LWIN), true, mode));
+    if (isVkDown(VK_RWIN)) events.push(keyEvent(getKeyDescriptor(VK_RWIN), true, mode));
   }
-  if ((modsToTemporarilyRelease & MOD_ALT) !== 0) events.push(keyEvent(VK_MENU, true));
-  if ((modsToTemporarilyRelease & MOD_SHIFT) !== 0) events.push(keyEvent(VK_SHIFT, true));
-  if ((modsToTemporarilyRelease & MOD_CONTROL) !== 0) events.push(keyEvent(VK_CONTROL, true));
+  if ((modsToTemporarilyRelease & MOD_ALT) !== 0) events.push(keyEvent(getKeyDescriptor(VK_MENU), true, mode));
+  if ((modsToTemporarilyRelease & MOD_SHIFT) !== 0) events.push(keyEvent(getKeyDescriptor(VK_SHIFT), true, mode));
+  if ((modsToTemporarilyRelease & MOD_CONTROL) !== 0) events.push(keyEvent(getKeyDescriptor(VK_CONTROL), true, mode));
 
-  for (const vk of downModifiers) events.push(keyEvent(vk, false));
-  events.push(keyEvent(spec.vk, false));
+  for (const vk of downModifiers) events.push(keyEvent(getKeyDescriptor(vk), false, mode));
+  events.push(keyEvent(getKeyDescriptor(spec.vk), false, mode));
 
   const pressDurationMs = Math.max(0, Math.floor(options.pressDurationMs ?? 0));
   if (pressDurationMs > 0) {
@@ -172,15 +207,15 @@ export async function sendHotkey(input: string, options: SendHotkeyOptions = {})
     events.length = 0;
   }
 
-  events.push(keyEvent(spec.vk, true));
+  events.push(keyEvent(getKeyDescriptor(spec.vk), true, mode));
   for (let i = downModifiers.length - 1; i >= 0; i -= 1) {
-    events.push(keyEvent(downModifiers[i] as number, true));
+    events.push(keyEvent(getKeyDescriptor(downModifiers[i] as number), true, mode));
   }
-  if ((modsToTemporarilyRelease & MOD_CONTROL) !== 0) events.push(keyEvent(VK_CONTROL, false));
-  if ((modsToTemporarilyRelease & MOD_SHIFT) !== 0) events.push(keyEvent(VK_SHIFT, false));
-  if ((modsToTemporarilyRelease & MOD_ALT) !== 0) events.push(keyEvent(VK_MENU, false));
+  if ((modsToTemporarilyRelease & MOD_CONTROL) !== 0) events.push(keyEvent(getKeyDescriptor(VK_CONTROL), false, mode));
+  if ((modsToTemporarilyRelease & MOD_SHIFT) !== 0) events.push(keyEvent(getKeyDescriptor(VK_SHIFT), false, mode));
+  if ((modsToTemporarilyRelease & MOD_ALT) !== 0) events.push(keyEvent(getKeyDescriptor(VK_MENU), false, mode));
   if ((modsToTemporarilyRelease & MOD_WIN) !== 0) {
-    events.push(keyEvent(VK_LWIN, false));
+    events.push(keyEvent(getKeyDescriptor(VK_LWIN), false, mode));
   }
 
   const inserted = SendInput(events.length, events, INPUT_SIZE);

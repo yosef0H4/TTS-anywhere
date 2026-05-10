@@ -148,6 +148,7 @@ export class SettingsStore {
         fullCapture: { ...defaults.byHotkey.fullCapture, ...value.byHotkey?.fullCapture },
         activeWindowCapture: { ...defaults.byHotkey.activeWindowCapture, ...value.byHotkey?.activeWindowCapture },
         copyPlay: { ...defaults.byHotkey.copyPlay, ...value.byHotkey?.copyPlay },
+        autoReader: { ...defaults.byHotkey.autoReader, ...value.byHotkey?.autoReader },
         clipboardWatcher: { ...defaults.byHotkey.clipboardWatcher, ...value.byHotkey?.clipboardWatcher },
         abort: { ...defaults.byHotkey.abort, ...value.byHotkey?.abort },
         playPause: { ...defaults.byHotkey.playPause, ...value.byHotkey?.playPause },

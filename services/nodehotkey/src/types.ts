@@ -45,11 +45,14 @@ export type SendSpec = {
   vk: number;
 };
 
+export type SendMode = "vk" | "scancode";
+
 export type SendHotkeyOptions = {
   pressDurationMs?: number;
   blind?: boolean;
   modifierReleaseSettleTimeoutMs?: number;
   modifierReleaseSettlePollMs?: number;
+  mode?: SendMode;
 };
 
 export type ClipboardWaitMode = "text_or_files" | "any";

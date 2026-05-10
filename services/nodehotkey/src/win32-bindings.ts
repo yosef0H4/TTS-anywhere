@@ -26,11 +26,13 @@ export const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4;
 export const INPUT_KEYBOARD = 1;
 export const KEYEVENTF_EXTENDEDKEY = 0x0001;
 export const KEYEVENTF_KEYUP = 0x0002;
+export const KEYEVENTF_SCANCODE = 0x0008;
 export const GMEM_MOVEABLE = 0x0002;
 export const GMEM_ZEROINIT = 0x0040;
 export const CF_UNICODETEXT = 13;
 export const CF_HDROP = 15;
 export const LLKHF_INJECTED = 0x00000010;
+export const MAPVK_VK_TO_VSC_EX = 0x04;
 
 export const VK_CONTROL = 0x11;
 export const VK_SHIFT = 0x10;
@@ -120,6 +122,10 @@ export const CallNextHookEx = user32.func(
 ) as (hook: unknown, nCode: number, wParam: number, info: KbdLlHookStruct) => number;
 
 export const GetAsyncKeyState = user32.func("short __stdcall GetAsyncKeyState(int vKey)") as (vKey: number) => number;
+export const MapVirtualKeyW = user32.func("uint32 __stdcall MapVirtualKeyW(uint32 uCode, uint32 uMapType)") as (
+  code: number,
+  mapType: number
+) => number;
 
 export const GetCursorPos = user32.func("bool __stdcall GetCursorPos(_Out_ POINT *lpPoint)") as (pt: Point) => boolean;
 export const GetModuleHandleW = kernel32.func("void * __stdcall GetModuleHandleW(const char16_t *lpModuleName)") as (

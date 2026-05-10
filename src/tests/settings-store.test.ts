@@ -52,6 +52,10 @@ describe("settings store", () => {
     cfg.ui.darkMode = true;
     cfg.system.clipboardWatcherEnabled = true;
     cfg.system.clipboardWatcherHotkey = "ctrl+shift+alt+b";
+    cfg.system.autoReaderHotkey = "ctrl+shift+alt+r";
+    cfg.system.autoReaderAdvanceHotkey = "ctrl+pagedown";
+    cfg.system.autoReaderAdvanceDelayMs = 1350;
+    cfg.system.autoReaderNoTextRetryCount = 6;
     cfg.system.abortHotkey = "ctrl+shift+alt+z";
     cfg.system.playPauseHotkey = "ctrl+shift+alt+space";
     cfg.system.replayCaptureHotkey = "ctrl+shift+alt+d";
@@ -76,6 +80,10 @@ describe("settings store", () => {
     expect(store.load().ui.darkMode).toBe(true);
     expect(store.load().system.clipboardWatcherEnabled).toBe(true);
     expect(store.load().system.clipboardWatcherHotkey).toBe("ctrl+shift+alt+b");
+    expect(store.load().system.autoReaderHotkey).toBe("ctrl+shift+alt+r");
+    expect(store.load().system.autoReaderAdvanceHotkey).toBe("ctrl+pagedown");
+    expect(store.load().system.autoReaderAdvanceDelayMs).toBe(1350);
+    expect(store.load().system.autoReaderNoTextRetryCount).toBe(6);
     expect(store.load().system.abortHotkey).toBe("ctrl+shift+alt+z");
     expect(store.load().system.playPauseHotkey).toBe("ctrl+shift+alt+space");
     expect(store.load().system.replayCaptureHotkey).toBe("ctrl+shift+alt+d");
@@ -283,6 +291,28 @@ describe("settings store", () => {
     expect(restored.system.clipboardWatcherEnabled).toBe(DEFAULT_CONFIG.system.clipboardWatcherEnabled);
     expect(restored.system.clipboardWatcherHotkey).toBe(DEFAULT_CONFIG.system.clipboardWatcherHotkey);
     expect(restored.system.feedbackSounds.byHotkey.clipboardWatcher).toEqual(DEFAULT_CONFIG.system.feedbackSounds.byHotkey.clipboardWatcher);
+  });
+
+  it("fills missing automatic reader settings from defaults", () => {
+    const legacy = {
+      ...DEFAULT_CONFIG,
+      system: {
+        ...DEFAULT_CONFIG.system
+      }
+    };
+    delete (legacy.system as Partial<typeof legacy.system>).autoReaderHotkey;
+    delete (legacy.system as Partial<typeof legacy.system>).autoReaderAdvanceHotkey;
+    delete (legacy.system as Partial<typeof legacy.system>).autoReaderAdvanceDelayMs;
+    delete (legacy.system as Partial<typeof legacy.system>).autoReaderNoTextRetryCount;
+
+    localStorage.setItem(LEGACY_SETTINGS_KEYS[0], JSON.stringify(legacy));
+    const restored = new SettingsStore().load();
+
+    expect(restored.system.autoReaderHotkey).toBe(DEFAULT_CONFIG.system.autoReaderHotkey);
+    expect(restored.system.autoReaderAdvanceHotkey).toBe(DEFAULT_CONFIG.system.autoReaderAdvanceHotkey);
+    expect(restored.system.autoReaderAdvanceDelayMs).toBe(DEFAULT_CONFIG.system.autoReaderAdvanceDelayMs);
+    expect(restored.system.autoReaderNoTextRetryCount).toBe(DEFAULT_CONFIG.system.autoReaderNoTextRetryCount);
+    expect(restored.system.feedbackSounds.byHotkey.autoReader).toEqual(DEFAULT_CONFIG.system.feedbackSounds.byHotkey.autoReader);
   });
 
   it("preserves cleared hotkeys instead of restoring defaults", () => {

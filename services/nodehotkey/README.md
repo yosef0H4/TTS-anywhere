@@ -54,9 +54,10 @@ import { sendHotkey } from "nodehotkey";
 await sendHotkey("ctrl+c");
 await sendHotkey("enter");
 await sendHotkey("win+shift+s");
+await sendHotkey("space", { mode: "scancode", pressDurationMs: 24 });
 ```
 
-`sendHotkey` sends key press/release to the currently focused window.
+`sendHotkey` sends key press/release to the currently focused window. Use `mode: "scancode"` for apps and games that ignore virtual-key-only `SendInput`.
 
 ## Clipboard management
 
@@ -80,4 +81,4 @@ Clipboard restore is best-effort for all available formats.
 
 ## Supported hotkey syntax
 - Modifiers: `ctrl`, `shift`, `alt`, `win`
-- Keys: `a-z`, `0-9`, `f1-f24`, `tab`, `space`, `enter`, `esc`, arrows
+- Keys: `a-z`, `0-9`, `f1-f24`, `tab`, `space`, `enter`, `esc`, arrows, `home`, `end`, `insert`, `delete`, `pageup`, `pagedown`

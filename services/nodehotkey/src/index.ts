@@ -3,6 +3,7 @@ export type {
   HotkeySessionEvents,
   HotkeySessionOptions,
   SendSpec,
+  SendMode,
   SendHotkeyOptions,
   MonitorBounds,
   FrozenCaptureHandle,

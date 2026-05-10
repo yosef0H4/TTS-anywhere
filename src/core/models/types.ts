@@ -8,6 +8,7 @@ export type ConfigurableHotkeyKey =
   | "fullCapture"
   | "activeWindowCapture"
   | "copyPlay"
+  | "autoReader"
   | "clipboardWatcher"
   | "abort"
   | "playPause"
@@ -166,6 +167,10 @@ export interface SystemConfig {
   fullCaptureHotkey: string;
   activeWindowCaptureHotkey: string;
   copyPlayHotkey: string;
+  autoReaderHotkey: string;
+  autoReaderAdvanceHotkey: string;
+  autoReaderAdvanceDelayMs: number;
+  autoReaderNoTextRetryCount: number;
   clipboardWatcherEnabled: boolean;
   clipboardWatcherHotkey: string;
   abortHotkey: string;

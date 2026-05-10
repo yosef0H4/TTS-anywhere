@@ -79,6 +79,7 @@ interface HotkeyBindingConfig {
     | "fullCaptureHotkey"
     | "activeWindowCaptureHotkey"
     | "copyPlayHotkey"
+    | "autoReaderHotkey"
     | "clipboardWatcherHotkey"
     | "abortHotkey"
     | "playPauseHotkey"
@@ -103,7 +104,18 @@ type CaptureContext = {
   source: "hotkey" | "clipboard" | "upload" | "paste" | "drop" | "clipboard_watch";
   captureKind?: "selection" | "fullscreen" | "window";
   resultMode?: "editor" | "clipboard";
+  automation?: { kind: "auto_reader"; runId: number; phase: "initial" | "replay" };
 };
+
+interface AutoReaderBufferedPage {
+  text: string;
+  imageDataUrl: string;
+  regions: DrawRect[];
+  detectedRawBoxes: RawBox[];
+  filterResults: FilteredBox[];
+  mergedGroups: MergeGroup[];
+  filterStats: { widthRemoved: number; heightRemoved: number; medianRemoved: number; medianHeightPx: number };
+}
 
 const rendererBootAt = performance.now();
 const ELECTRON_ONLY_ERROR = "Available in Electron only.";
@@ -168,6 +180,7 @@ export class WebApp {
     fullCapture: false,
     activeWindowCapture: false,
     copyPlay: false,
+    autoReader: false,
     clipboardWatcher: false,
     abort: false,
     playPause: false,
@@ -183,6 +196,7 @@ export class WebApp {
     fullCapture: null,
     activeWindowCapture: null,
     copyPlay: null,
+    autoReader: null,
     clipboardWatcher: null,
     abort: null,
     playPause: null,
@@ -198,6 +212,7 @@ export class WebApp {
     fullCapture: null,
     activeWindowCapture: null,
     copyPlay: null,
+    autoReader: null,
     clipboardWatcher: null,
     abort: null,
     playPause: null,
@@ -218,6 +233,9 @@ export class WebApp {
   private currentFilterStats = { widthRemoved: 0, heightRemoved: 0, medianRemoved: 0, medianHeightPx: 0 };
   private activeRunId = 0;
   private activeRunAbortController: AbortController | null = null;
+  private autoReaderSessionRunId: number | null = null;
+  private activeAutoReaderPage: AutoReaderBufferedPage | null = null;
+  private prefetchedAutoReaderPage: AutoReaderBufferedPage | null = null;
   private modalAbortController: AbortController | null = null;
   private runInProgress = false;
   private readonly requestPreemptor = new RequestPreemptor<RequestLane>();
@@ -452,6 +470,20 @@ export class WebApp {
           clear: api?.clearCopyHotkey,
           cancelEdit: api?.cancelCopyHotkeyEdit
         };
+      case "autoReader":
+        return {
+          systemKey: "autoReaderHotkey",
+          inputId: "auto-reader-hotkey",
+          statusId: "auto-reader-hotkey-recording-status",
+          recordButtonId: "btn-auto-reader-hotkey-record",
+          clearButtonId: "btn-auto-reader-hotkey-clear",
+          applyButtonId: "btn-auto-reader-hotkey-apply",
+          cancelButtonId: "btn-auto-reader-hotkey-cancel",
+          beginEdit: api?.beginAutoReaderHotkeyEdit,
+          apply: api?.applyAutoReaderHotkey,
+          clear: api?.clearAutoReaderHotkey,
+          cancelEdit: api?.cancelAutoReaderHotkeyEdit
+        };
       case "clipboardWatcher":
         return {
           systemKey: "clipboardWatcherHotkey",
@@ -619,6 +651,7 @@ export class WebApp {
     void this.refreshManagedServicesStatus();
     void this.syncClipboardWatcherStateFromElectron();
     void this.syncAllElectronHotkeysFromSettings();
+    void this.applyAutoReaderSettings();
     void this.syncElectronCaptureRectangleSetting();
     this.logBootstrapStep("electron.settings.sync.started");
     this.installE2eHooks();
@@ -1561,6 +1594,14 @@ export class WebApp {
       this.store.save(this.config);
       void this.applyClipboardWatcherEnabledSetting();
     });
+    this.must<HTMLInputElement>("auto-reader-advance-hotkey").addEventListener("change", () => {
+      this.syncConfigFromInputs();
+      void this.applyAutoReaderSettings();
+    });
+    this.must<HTMLInputElement>("auto-reader-advance-delay-ms").addEventListener("change", () => {
+      this.syncConfigFromInputs();
+      void this.applyAutoReaderSettings();
+    });
     this.must<HTMLSelectElement>("detector-mode").addEventListener("change", () => this.syncConfigFromInputs());
     this.must<HTMLButtonElement>("detector-health").addEventListener("click", async () => {
       await this.checkDetectorHealth();
@@ -1612,6 +1653,7 @@ export class WebApp {
       this.store.save(this.config);
       this.updateTimelineFromRawText();
       void this.syncAllElectronHotkeysFromSettings();
+      void this.applyAutoReaderSettings();
       void this.syncElectronOverlayTheme();
       void this.applyClipboardWatcherEnabledSetting();
       void this.syncElectronCaptureRectangleSetting();
@@ -1677,6 +1719,18 @@ export class WebApp {
     });
     this.must<HTMLButtonElement>("btn-copy-hotkey-cancel").addEventListener("click", () => {
       void this.cancelHotkeyRecording("copyPlay");
+    });
+    this.must<HTMLButtonElement>("btn-auto-reader-hotkey-record").addEventListener("click", () => {
+      void this.beginHotkeyRecording("autoReader");
+    });
+    this.must<HTMLButtonElement>("btn-auto-reader-hotkey-clear").addEventListener("click", () => {
+      void this.clearHotkey("autoReader");
+    });
+    this.must<HTMLButtonElement>("btn-auto-reader-hotkey-apply").addEventListener("click", () => {
+      void this.applyRecordedHotkey("autoReader");
+    });
+    this.must<HTMLButtonElement>("btn-auto-reader-hotkey-cancel").addEventListener("click", () => {
+      void this.cancelHotkeyRecording("autoReader");
     });
     this.must<HTMLButtonElement>("btn-clipboard-watcher-hotkey-record").addEventListener("click", () => {
       void this.beginHotkeyRecording("clipboardWatcher");
@@ -1841,6 +1895,16 @@ export class WebApp {
       ? (punctuationMode as AppConfig["reading"]["punctuationPauseMode"])
       : "low";
     this.config.system.diagnosticsEnabled = this.must<HTMLInputElement>("diagnostics-enabled").checked;
+    this.config.system.autoReaderAdvanceHotkey = this.must<HTMLInputElement>("auto-reader-advance-hotkey").value.trim().toLowerCase()
+      || DEFAULT_CONFIG.system.autoReaderAdvanceHotkey;
+    this.config.system.autoReaderAdvanceDelayMs = Math.max(
+      0,
+      Math.min(60000, Math.floor(Number(this.must<HTMLInputElement>("auto-reader-advance-delay-ms").value) || DEFAULT_CONFIG.system.autoReaderAdvanceDelayMs))
+    );
+    this.config.system.autoReaderNoTextRetryCount = Math.max(
+      0,
+      Math.min(20, Math.floor(Number(this.must<HTMLInputElement>("auto-reader-no-text-retry-count").value) || DEFAULT_CONFIG.system.autoReaderNoTextRetryCount))
+    );
     this.config.system.clipboardWatcherEnabled = this.must<HTMLInputElement>("clipboard-watcher-enabled").checked;
     this.config.system.captureDrawRectangle = this.must<HTMLInputElement>("capture-draw-rectangle").checked;
     this.syncFeedbackSoundsFromInputs();
@@ -2023,6 +2087,9 @@ export class WebApp {
     this.must<HTMLInputElement>("session-audio-byte-limit").value = String(this.config.reading.sessionAudioByteLimit);
     this.must<HTMLSelectElement>("punctuation-pause").value = this.config.reading.punctuationPauseMode;
     this.must<HTMLInputElement>("diagnostics-enabled").checked = this.config.system.diagnosticsEnabled;
+    this.must<HTMLInputElement>("auto-reader-advance-hotkey").value = this.config.system.autoReaderAdvanceHotkey;
+    this.must<HTMLInputElement>("auto-reader-advance-delay-ms").value = String(this.config.system.autoReaderAdvanceDelayMs);
+    this.must<HTMLInputElement>("auto-reader-no-text-retry-count").value = String(this.config.system.autoReaderNoTextRetryCount);
     this.must<HTMLInputElement>("clipboard-watcher-enabled").checked = this.config.system.clipboardWatcherEnabled;
     this.must<HTMLInputElement>("capture-draw-rectangle").checked = this.config.system.captureDrawRectangle;
     this.renderHotkeyInputs();
@@ -2344,6 +2411,13 @@ export class WebApp {
   }
 
   private async abortAllWork(reason: "user" | "superseded"): Promise<void> {
+    if (this.autoReaderSessionRunId !== null) {
+      await this.reportAutoReaderPageResult({
+        runId: this.autoReaderSessionRunId,
+        outcome: "cancelled",
+        message: reason === "user" ? "Automatic reader cancelled." : "Automatic reader was interrupted by newer work."
+      });
+    }
     this.requestPreemptor.preemptAll();
     this.cancelVisionControllers();
     this.preprocessModal?.abortRunningWork();
@@ -2361,7 +2435,18 @@ export class WebApp {
     this.updateBreakButtonState();
   }
 
-  private async abortVisionWork(reason: "new_image" | "superseded"): Promise<void> {
+  private async abortVisionWork(
+    reason: "new_image" | "superseded",
+    options: { preserveAutoReaderSession?: boolean; preservePlayback?: boolean } = {}
+  ): Promise<void> {
+    const { preserveAutoReaderSession = false, preservePlayback = false } = options;
+    if (!preserveAutoReaderSession && this.autoReaderSessionRunId !== null) {
+      await this.reportAutoReaderPageResult({
+        runId: this.autoReaderSessionRunId,
+        outcome: "cancelled",
+        message: "Automatic reader was interrupted by a newer image."
+      });
+    }
     this.requestPreemptor.preemptLane("ocr");
     this.requestPreemptor.preemptLane("detect_main");
     this.requestPreemptor.preemptLane("detect_modal");
@@ -2374,7 +2459,9 @@ export class WebApp {
     this.ocrStreamSession += 1;
     this.activeRunId += 1;
     this.runInProgress = false;
-    this.abortPlaybackAndSynthesis();
+    if (!preservePlayback) {
+      this.abortPlaybackAndSynthesis();
+    }
     loggers.pipeline.info("Vision work preempted", { reason });
     this.updateBreakButtonState();
   }
@@ -2463,7 +2550,7 @@ export class WebApp {
       await this.runPipeline(await this.fileToDataUrl(file), { source: "drop" });
     });
 
-    window.electronAPI?.onCapturedImage(async ({ dataUrl, captureKind, resultMode, hotkey }) => {
+    window.electronAPI?.onCapturedImage(async ({ dataUrl, captureKind, resultMode, hotkey, automation }) => {
       loggers.capture.info("Hotkey capture image received");
       const hotkeyKey: ConfigurableHotkeyKey = hotkey ?? (captureKind === "fullscreen"
         ? "fullCapture"
@@ -2472,11 +2559,13 @@ export class WebApp {
           : resultMode === "clipboard"
             ? "ocrClipboard"
             : "capture");
-      if (this.shouldUseHotkeyFeedbackFallback(hotkeyKey)) {
+      if (automation?.kind !== "auto_reader" && this.shouldUseHotkeyFeedbackFallback(hotkeyKey)) {
         void this.playConfiguredHotkeyFeedback(hotkeyKey);
       }
-      await this.abortVisionWork("new_image");
-      await this.runPipeline(dataUrl, { source: "hotkey", captureKind, resultMode });
+      await this.abortVisionWork("new_image", automation?.kind === "auto_reader"
+        ? { preserveAutoReaderSession: true, preservePlayback: true }
+        : undefined);
+      await this.runPipeline(dataUrl, { source: "hotkey", captureKind, resultMode, automation });
     });
 
     window.electronAPI?.onCopiedTextForPlayback(async (text: string) => {
@@ -2502,6 +2591,13 @@ export class WebApp {
     });
     window.electronAPI?.onAbortRequested(() => {
       void this.playConfiguredHotkeyFeedback("abort");
+      if (this.autoReaderSessionRunId !== null) {
+        void this.reportAutoReaderPageResult({
+          runId: this.autoReaderSessionRunId,
+          outcome: "cancelled",
+          message: "Automatic reader cancelled."
+        });
+      }
       void this.abortAllWork("user");
     });
     window.electronAPI?.onPlaybackHotkey((action) => {
@@ -2630,7 +2726,7 @@ export class WebApp {
   }
 
   private getConfigurableHotkeyKeys(): ConfigurableHotkeyKey[] {
-    return ["capture", "ocrClipboard", "fullCapture", "activeWindowCapture", "copyPlay", "clipboardWatcher", "abort", "playPause", "nextChunk", "previousChunk", "volumeUp", "volumeDown", "replayCapture"];
+    return ["capture", "ocrClipboard", "fullCapture", "activeWindowCapture", "copyPlay", "autoReader", "clipboardWatcher", "abort", "playPause", "nextChunk", "previousChunk", "volumeUp", "volumeDown", "replayCapture"];
   }
 
   private renderHotkeyButtonState(): void {
@@ -2694,6 +2790,116 @@ export class WebApp {
     } catch (error) {
       this.setStatus(this.t("status.applyRectangleSettingFailed", { error: String(error) }));
     }
+  }
+
+  private async applyAutoReaderSettings(): Promise<void> {
+    if (!window.electronAPI?.setAutoReaderSettings) return;
+    try {
+      const applied = await window.electronAPI.setAutoReaderSettings({
+        advanceHotkey: this.config.system.autoReaderAdvanceHotkey,
+        advanceDelayMs: this.config.system.autoReaderAdvanceDelayMs,
+        noTextRetryCount: this.config.system.autoReaderNoTextRetryCount
+      });
+      this.config.system.autoReaderAdvanceHotkey = applied.advanceHotkey;
+      this.config.system.autoReaderAdvanceDelayMs = applied.advanceDelayMs;
+      this.config.system.autoReaderNoTextRetryCount = applied.noTextRetryCount;
+      this.must<HTMLInputElement>("auto-reader-advance-hotkey").value = applied.advanceHotkey;
+      this.must<HTMLInputElement>("auto-reader-advance-delay-ms").value = String(applied.advanceDelayMs);
+      this.must<HTMLInputElement>("auto-reader-no-text-retry-count").value = String(applied.noTextRetryCount);
+      this.store.save(this.config);
+    } catch (error) {
+      this.setStatus(this.t("status.applyAutoReaderSettingsFailed", { error: String(error) }));
+    }
+  }
+
+  private clearAutoReaderSession(): void {
+    this.autoReaderSessionRunId = null;
+    this.activeAutoReaderPage = null;
+    this.prefetchedAutoReaderPage = null;
+  }
+
+  private async reportAutoReaderPageResult(result: {
+    runId: number;
+    outcome: "completed" | "failed" | "cancelled";
+    text?: string;
+    message?: string;
+  }, options: { clearSession?: boolean } = {}): Promise<void> {
+    const { clearSession = result.outcome !== "completed" } = options;
+    if (this.autoReaderSessionRunId !== result.runId) return;
+    if (clearSession) {
+      this.clearAutoReaderSession();
+    }
+    if (!window.electronAPI?.reportAutoReaderPageResult) return;
+    await window.electronAPI.reportAutoReaderPageResult(result);
+  }
+
+  private snapshotAutoReaderBufferedPage(text: string, imageDataUrl: string, regions: DrawRect[]): AutoReaderBufferedPage {
+    return {
+      text,
+      imageDataUrl,
+      regions: structuredClone(regions),
+      detectedRawBoxes: structuredClone(this.currentDetectedRawBoxes),
+      filterResults: structuredClone(this.currentFilterResults),
+      mergedGroups: structuredClone(this.currentMergedGroups),
+      filterStats: { ...this.currentFilterStats }
+    };
+  }
+
+  private restoreAutoReaderBufferedPage(page: AutoReaderBufferedPage): void {
+    this.lastOriginalImageDataUrl = page.imageDataUrl;
+    this.currentOcrImageDataUrl = page.imageDataUrl;
+    this.currentOcrRegions = structuredClone(page.regions);
+    this.currentDetectedRawBoxes = structuredClone(page.detectedRawBoxes);
+    this.currentFilterResults = structuredClone(page.filterResults);
+    this.currentMergedGroups = structuredClone(page.mergedGroups);
+    this.currentFilterStats = { ...page.filterStats };
+    this.setPreviewImage(page.imageDataUrl);
+    this.setRawTextValuePreservingScroll(page.text);
+    this.renderMainPreviewOverlay();
+  }
+
+  private async startAutoReaderPage(page: AutoReaderBufferedPage, runId: number): Promise<void> {
+    if (this.autoReaderSessionRunId !== runId) return;
+    this.activeAutoReaderPage = page;
+    this.prefetchedAutoReaderPage = null;
+    this.restoreAutoReaderBufferedPage(page);
+    this.updateTimelineFromRawText();
+    this.resetPlaybackForTextChange();
+    await this.startOrResumePlayback();
+    if (this.autoReaderSessionRunId !== runId || this.activeAutoReaderPage !== page) return;
+    await this.reportAutoReaderPageResult({
+      runId,
+      outcome: "completed",
+      text: page.text
+    }, { clearSession: false });
+  }
+
+  private promotePrefetchedAutoReaderPage(): void {
+    const runId = this.autoReaderSessionRunId;
+    const nextPage = this.prefetchedAutoReaderPage;
+    if (runId === null || !nextPage) return;
+    this.activeAutoReaderPage = null;
+    this.prefetchedAutoReaderPage = null;
+    void this.startAutoReaderPage(nextPage, runId).catch((error) => {
+      loggers.pipeline.error("Automatic reader page promotion failed", { error: String(error), runId });
+      void this.reportAutoReaderPageResult({
+        runId,
+        outcome: "failed",
+        message: String(error)
+      });
+    });
+  }
+
+  private queueOrStartAutoReaderPage(page: AutoReaderBufferedPage, runId: number): Promise<void> {
+    if (this.autoReaderSessionRunId !== runId) {
+      return Promise.resolve();
+    }
+    if (this.activeAutoReaderPage) {
+      this.prefetchedAutoReaderPage = page;
+      this.restoreAutoReaderBufferedPage(this.activeAutoReaderPage);
+      return Promise.resolve();
+    }
+    return this.startAutoReaderPage(page, runId);
   }
 
   private applyClipboardWatcherEnabledLocally(
@@ -2766,6 +2972,7 @@ export class WebApp {
       case "fullCapture": return "system.fullCaptureHotkey";
       case "activeWindowCapture": return "system.activeWindowCaptureHotkey";
       case "copyPlay": return "system.copyPlayHotkey";
+      case "autoReader": return "system.autoReaderHotkey";
       case "clipboardWatcher": return "system.clipboardWatcherHotkey";
       case "abort": return "system.abortHotkey";
       case "playPause": return "system.playPauseHotkey";
@@ -2977,6 +3184,16 @@ export class WebApp {
         this.chunkPlaybackMode = false;
         this.audio.src = "";
         this.audio.currentTime = 0;
+        if (this.autoReaderSessionRunId !== null) {
+          this.activeAutoReaderPage = null;
+          if (this.prefetchedAutoReaderPage) {
+            this.promotePrefetchedAutoReaderPage();
+            return;
+          }
+          this.setStatus(this.t("status.runningPipeline"));
+          this.renderPlayState();
+          return;
+        }
         this.setStatus(this.t("playback.ready"));
         this.renderPlayState();
         return;
@@ -3081,13 +3298,21 @@ export class WebApp {
 
   private async runPipeline(dataUrl: string, captureContext: CaptureContext): Promise<void> {
     const { runId, signal } = this.startRun();
+    const autoReaderRunId = captureContext.automation?.kind === "auto_reader" ? captureContext.automation.runId : null;
+    if (autoReaderRunId !== null) {
+      this.autoReaderSessionRunId = autoReaderRunId;
+    }
     this.setStatus(this.t("status.runningPipeline"));
     const done = loggers.pipeline.time("pipeline.run");
     try {
       this.lastOriginalImageDataUrl = await normalizeImageDataUrl(dataUrl);
       this.throwIfStale(runId);
+      const activeAutoReaderPage = autoReaderRunId !== null ? this.activeAutoReaderPage : null;
       const ocrInput = await this.buildOcrInput(this.lastOriginalImageDataUrl, signal, runId, (imageDataUrl) => {
         if (runId !== this.activeRunId) return;
+        if (autoReaderRunId !== null && activeAutoReaderPage) {
+          return;
+        }
         // Show image immediately; detected boxes will be layered when detect finishes.
         this.currentDetectedRawBoxes = [];
         this.currentFilterResults = [];
@@ -3097,12 +3322,16 @@ export class WebApp {
         this.renderMainPreviewOverlay();
       }, captureContext);
       this.throwIfStale(runId);
-      this.currentOcrImageDataUrl = ocrInput.imageDataUrl;
-      this.currentOcrRegions = ocrInput.regions;
-      this.setPreviewImage(ocrInput.imageDataUrl);
-      this.renderMainPreviewOverlay();
+      if (autoReaderRunId !== null && activeAutoReaderPage) {
+        this.restoreAutoReaderBufferedPage(activeAutoReaderPage);
+      } else {
+        this.currentOcrImageDataUrl = ocrInput.imageDataUrl;
+        this.currentOcrRegions = ocrInput.regions;
+        this.setPreviewImage(ocrInput.imageDataUrl);
+        this.renderMainPreviewOverlay();
+      }
       const resultMode = captureContext.resultMode === "clipboard" ? "clipboard" : "editor";
-      const streamingEnabled = resultMode === "editor" && this.config.llm.ocrStreamingEnabled;
+      const streamingEnabled = autoReaderRunId === null && resultMode === "editor" && this.config.llm.ocrStreamingEnabled;
       let result: { text: string };
       if (streamingEnabled) {
         result = await this.runStreamingOcr(ocrInput.imageDataUrl, ocrInput.regions, signal);
@@ -3111,6 +3340,16 @@ export class WebApp {
       }
       this.throwIfStale(runId);
       if (!result.text.trim()) {
+        if (autoReaderRunId !== null) {
+          done();
+          loggers.pipeline.info("Automatic reader page produced no text", { runId, phase: captureContext.automation?.phase });
+          await this.reportAutoReaderPageResult({
+            runId: autoReaderRunId,
+            outcome: "completed",
+            text: ""
+          });
+          return;
+        }
         throw new Error("OCR produced empty text");
       }
       done();
@@ -3119,18 +3358,37 @@ export class WebApp {
         await this.copyTextToClipboard(this.normalizeTextForClipboard(result.text));
         this.setStatus(this.t("status.ocrCopiedToClipboard"));
       } else if (!streamingEnabled) {
-        this.must<HTMLTextAreaElement>("raw-text").value = result.text;
-        this.updateTimelineFromRawText();
-        this.resetPlaybackForTextChange();
-        await this.startOrResumePlayback();
+        if (autoReaderRunId !== null) {
+          const page = this.snapshotAutoReaderBufferedPage(result.text, ocrInput.imageDataUrl, ocrInput.regions);
+          await this.queueOrStartAutoReaderPage(page, autoReaderRunId);
+        } else {
+          this.must<HTMLTextAreaElement>("raw-text").value = result.text;
+          this.updateTimelineFromRawText();
+          this.resetPlaybackForTextChange();
+          await this.startOrResumePlayback();
+        }
       }
     } catch (error) {
       if (this.isAbortError(error)) {
         loggers.pipeline.info("Pipeline cancelled", { runId });
+        if (autoReaderRunId !== null) {
+          await this.reportAutoReaderPageResult({
+            runId: autoReaderRunId,
+            outcome: "cancelled",
+            message: "Automatic reader cancelled."
+          });
+        }
       } else {
         loggers.pipeline.error("Pipeline failed", { error: String(error) });
         if (captureContext.source === "hotkey") {
           await this.playConfiguredErrorFeedback();
+        }
+        if (autoReaderRunId !== null) {
+          await this.reportAutoReaderPageResult({
+            runId: autoReaderRunId,
+            outcome: "failed",
+            message: String(error)
+          });
         }
         this.setStatus(
           captureContext.resultMode === "clipboard"
@@ -3139,6 +3397,9 @@ export class WebApp {
         );
       }
     } finally {
+      if (autoReaderRunId === null) {
+        this.clearAutoReaderSession();
+      }
       this.finishRun(runId);
     }
   }

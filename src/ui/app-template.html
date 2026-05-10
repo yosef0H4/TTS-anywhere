@@ -360,6 +360,45 @@
               <div class="setting-footnote" id="copyPlay-sound-volume-value">0%</div>
             </div>
           </div>
+          <div class="setting-group">
+            <label data-i18n="system.autoReaderHotkey">Automatic Reader Hotkey</label>
+            <input type="text" id="auto-reader-hotkey" readonly>
+          </div>
+          <div class="settings-actions-grid">
+            <button type="button" id="btn-auto-reader-hotkey-record"><i data-lucide="keyboard" class="ui-icon"></i><span data-i18n="action.record">Record</span></button>
+            <button type="button" id="btn-auto-reader-hotkey-clear"><i data-lucide="eraser" class="ui-icon"></i><span data-i18n="action.clear">Clear</span></button>
+            <button type="button" id="btn-auto-reader-hotkey-apply"><i data-lucide="check" class="ui-icon"></i><span data-i18n="action.apply">Apply</span></button>
+            <button type="button" id="btn-auto-reader-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
+          </div>
+          <div class="setting-footnote" id="auto-reader-hotkey-recording-status"></div>
+          <div class="setting-grid">
+            <div class="setting-group">
+              <label for="auto-reader-advance-hotkey" data-i18n="system.autoReaderAdvanceHotkey">Page Turn Hotkey</label>
+              <input type="text" id="auto-reader-advance-hotkey" spellcheck="false">
+            </div>
+            <div class="setting-group">
+              <label for="auto-reader-advance-delay-ms" data-i18n="system.autoReaderAdvanceDelayMs">Page Turn Delay (ms)</label>
+              <input type="number" id="auto-reader-advance-delay-ms" min="0" max="60000" step="50">
+            </div>
+            <div class="setting-group">
+              <label for="auto-reader-no-text-retry-count" data-i18n="system.autoReaderNoTextRetryCount">No Text Retry Count</label>
+              <input type="number" id="auto-reader-no-text-retry-count" min="0" max="20" step="1">
+            </div>
+          </div>
+          <div class="setting-grid hotkey-sound-grid" data-hotkey-sound-controls="autoReader">
+            <div class="setting-group">
+              <label for="autoReader-sound-id" data-i18n="system.soundEffect">Sound Effect</label>
+              <div class="setting-inline">
+                <select id="autoReader-sound-id"></select>
+                <button type="button" class="refetch-btn hotkey-sound-preview-btn" id="btn-autoReader-sound-preview" data-i18n="action.preview">Preview</button>
+              </div>
+            </div>
+            <div class="setting-group">
+              <label for="autoReader-sound-volume" data-i18n="system.soundVolume">Sound Volume</label>
+              <input id="autoReader-sound-volume" type="range" min="0" max="100" step="1">
+              <div class="setting-footnote" id="autoReader-sound-volume-value">0%</div>
+            </div>
+          </div>
           <div class="setting-group setting-toggle-row">
             <label for="clipboard-watcher-enabled" data-i18n="system.clipboardWatcherEnabled">Clipboard Watch Enabled</label>
             <label class="setting-switch" for="clipboard-watcher-enabled">

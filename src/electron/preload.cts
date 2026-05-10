@@ -34,21 +34,36 @@ contextBridge.exposeInMainWorld("electronAPI", {
     captureKind: "selection" | "fullscreen" | "window";
     resultMode: "editor" | "clipboard";
     hotkey?: ElectronHotkeyKey;
+    automation?: { kind: "auto_reader"; runId: number; phase: "initial" | "replay" };
   }) => void) => {
     ipcRenderer.on("capture-image", (_event, payload: {
       dataUrl?: string;
       captureKind?: "selection" | "fullscreen" | "window";
       resultMode?: "editor" | "clipboard";
       hotkey?: ElectronHotkeyKey;
+      automation?: { kind?: "auto_reader"; runId?: number; phase?: "initial" | "replay" };
     }) => {
       if (!payload?.dataUrl) return;
       const captureKind = payload.captureKind === "fullscreen" || payload.captureKind === "window"
         ? payload.captureKind
         : "selection";
       const resultMode = payload.resultMode === "clipboard" ? "clipboard" : "editor";
-      handler(payload.hotkey
-        ? { dataUrl: payload.dataUrl, captureKind, resultMode, hotkey: payload.hotkey }
-        : { dataUrl: payload.dataUrl, captureKind, resultMode });
+      const automation = payload.automation?.kind === "auto_reader"
+        && typeof payload.automation.runId === "number"
+        && (payload.automation.phase === "initial" || payload.automation.phase === "replay")
+        ? {
+            kind: "auto_reader" as const,
+            runId: payload.automation.runId,
+            phase: payload.automation.phase
+          }
+        : undefined;
+      handler({
+        dataUrl: payload.dataUrl,
+        captureKind,
+        resultMode,
+        ...(payload.hotkey ? { hotkey: payload.hotkey } : {}),
+        ...(automation ? { automation } : {})
+      });
     });
   },
   onCopiedTextForPlayback: (handler: (text: string) => void) => {
@@ -182,6 +197,21 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getCopyHotkey: () => {
     return ipcRenderer.invoke("copy:get-hotkey") as Promise<string>;
   },
+  beginAutoReaderHotkeyEdit: () => {
+    return ipcRenderer.invoke("auto-reader:begin-hotkey-edit") as Promise<string>;
+  },
+  applyAutoReaderHotkey: (hotkey: string) => {
+    return ipcRenderer.invoke("auto-reader:apply-hotkey", hotkey) as Promise<string>;
+  },
+  clearAutoReaderHotkey: () => {
+    return ipcRenderer.invoke("auto-reader:clear-hotkey") as Promise<string>;
+  },
+  cancelAutoReaderHotkeyEdit: () => {
+    return ipcRenderer.invoke("auto-reader:cancel-hotkey-edit") as Promise<string>;
+  },
+  getAutoReaderHotkey: () => {
+    return ipcRenderer.invoke("auto-reader:get-hotkey") as Promise<string>;
+  },
   beginClipboardWatcherHotkeyEdit: () => {
     return ipcRenderer.invoke("clipboard-watcher:begin-hotkey-edit") as Promise<string>;
   },
@@ -314,11 +344,26 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getOverlayTheme: () => {
     return ipcRenderer.invoke("overlay-theme:get") as Promise<"zen" | "pink" | "dark-zen" | "dark-pink">;
   },
+  setAutoReaderSettings: (settings: { advanceHotkey: string; advanceDelayMs: number; noTextRetryCount: number }) => {
+    return ipcRenderer.invoke("auto-reader:set-settings", settings) as Promise<{
+      advanceHotkey: string;
+      advanceDelayMs: number;
+      noTextRetryCount: number;
+    }>;
+  },
   getClipboardWatcherEnabled: () => {
     return ipcRenderer.invoke("clipboard-watcher:get-enabled") as Promise<boolean>;
   },
   setClipboardWatcherEnabled: (enabled: boolean) => {
     return ipcRenderer.invoke("clipboard-watcher:set-enabled", enabled) as Promise<boolean>;
+  },
+  reportAutoReaderPageResult: (result: {
+    runId: number;
+    outcome: "completed" | "failed" | "cancelled";
+    text?: string;
+    message?: string;
+  }) => {
+    return ipcRenderer.invoke("auto-reader:page-result", result) as Promise<void>;
   },
   launchManagedService: (serviceId: "paddle" | "edge") => {
     return ipcRenderer.invoke("stack:launch-service", serviceId);
