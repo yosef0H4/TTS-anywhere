@@ -59,12 +59,7 @@ export class SettingsStore {
             ...DEFAULT_CONFIG.preprocessing.sorting,
             ...parsed.preprocessing?.sorting
           },
-          selection: {
-            ...DEFAULT_CONFIG.preprocessing.selection,
-            ...parsed.preprocessing?.selection,
-            ops: parsed.preprocessing?.selection?.ops ?? DEFAULT_CONFIG.preprocessing.selection.ops,
-            manualBoxes: parsed.preprocessing?.selection?.manualBoxes ?? DEFAULT_CONFIG.preprocessing.selection.manualBoxes
-          }
+          selection: { ...DEFAULT_CONFIG.preprocessing.selection }
         }
       };
     } catch {
@@ -78,6 +73,10 @@ export class SettingsStore {
       ui: {
         ...next.ui,
         playbackRate: sanitizePlaybackRate(next.ui.playbackRate, DEFAULT_CONFIG.ui.playbackRate)
+      },
+      preprocessing: {
+        ...next.preprocessing,
+        selection: { ...DEFAULT_CONFIG.preprocessing.selection }
       }
     };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(sanitized));
@@ -149,6 +148,7 @@ export class SettingsStore {
         fullCapture: { ...defaults.byHotkey.fullCapture, ...value.byHotkey?.fullCapture },
         activeWindowCapture: { ...defaults.byHotkey.activeWindowCapture, ...value.byHotkey?.activeWindowCapture },
         copyPlay: { ...defaults.byHotkey.copyPlay, ...value.byHotkey?.copyPlay },
+        clipboardWatcher: { ...defaults.byHotkey.clipboardWatcher, ...value.byHotkey?.clipboardWatcher },
         abort: { ...defaults.byHotkey.abort, ...value.byHotkey?.abort },
         playPause: { ...defaults.byHotkey.playPause, ...value.byHotkey?.playPause },
         nextChunk: { ...defaults.byHotkey.nextChunk, ...value.byHotkey?.nextChunk },

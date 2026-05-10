@@ -8,6 +8,7 @@ export type ConfigurableHotkeyKey =
   | "fullCapture"
   | "activeWindowCapture"
   | "copyPlay"
+  | "clipboardWatcher"
   | "abort"
   | "playPause"
   | "nextChunk"
@@ -165,6 +166,8 @@ export interface SystemConfig {
   fullCaptureHotkey: string;
   activeWindowCaptureHotkey: string;
   copyPlayHotkey: string;
+  clipboardWatcherEnabled: boolean;
+  clipboardWatcherHotkey: string;
   abortHotkey: string;
   playPauseHotkey: string;
   nextChunkHotkey: string;

@@ -79,6 +79,7 @@ interface HotkeyBindingConfig {
     | "fullCaptureHotkey"
     | "activeWindowCaptureHotkey"
     | "copyPlayHotkey"
+    | "clipboardWatcherHotkey"
     | "abortHotkey"
     | "playPauseHotkey"
     | "nextChunkHotkey"
@@ -99,7 +100,7 @@ interface HotkeyBindingConfig {
 }
 
 type CaptureContext = {
-  source: "hotkey" | "clipboard" | "upload" | "paste" | "drop";
+  source: "hotkey" | "clipboard" | "upload" | "paste" | "drop" | "clipboard_watch";
   captureKind?: "selection" | "fullscreen" | "window";
   resultMode?: "editor" | "clipboard";
 };
@@ -167,6 +168,7 @@ export class WebApp {
     fullCapture: false,
     activeWindowCapture: false,
     copyPlay: false,
+    clipboardWatcher: false,
     abort: false,
     playPause: false,
     nextChunk: false,
@@ -181,6 +183,7 @@ export class WebApp {
     fullCapture: null,
     activeWindowCapture: null,
     copyPlay: null,
+    clipboardWatcher: null,
     abort: null,
     playPause: null,
     nextChunk: null,
@@ -195,6 +198,7 @@ export class WebApp {
     fullCapture: null,
     activeWindowCapture: null,
     copyPlay: null,
+    clipboardWatcher: null,
     abort: null,
     playPause: null,
     nextChunk: null,
@@ -448,6 +452,20 @@ export class WebApp {
           clear: api?.clearCopyHotkey,
           cancelEdit: api?.cancelCopyHotkeyEdit
         };
+      case "clipboardWatcher":
+        return {
+          systemKey: "clipboardWatcherHotkey",
+          inputId: "clipboard-watcher-hotkey",
+          statusId: "clipboard-watcher-hotkey-recording-status",
+          recordButtonId: "btn-clipboard-watcher-hotkey-record",
+          clearButtonId: "btn-clipboard-watcher-hotkey-clear",
+          applyButtonId: "btn-clipboard-watcher-hotkey-apply",
+          cancelButtonId: "btn-clipboard-watcher-hotkey-cancel",
+          beginEdit: api?.beginClipboardWatcherHotkeyEdit,
+          apply: api?.applyClipboardWatcherHotkey,
+          clear: api?.clearClipboardWatcherHotkey,
+          cancelEdit: api?.cancelClipboardWatcherHotkeyEdit
+        };
       case "abort":
         return {
           systemKey: "abortHotkey",
@@ -599,6 +617,7 @@ export class WebApp {
     this.logBootstrapStep("config.rendered");
     void this.checkDetectorHealth(false);
     void this.refreshManagedServicesStatus();
+    void this.syncClipboardWatcherStateFromElectron();
     void this.syncAllElectronHotkeysFromSettings();
     void this.syncElectronCaptureRectangleSetting();
     this.logBootstrapStep("electron.settings.sync.started");
@@ -1537,6 +1556,11 @@ export class WebApp {
     });
 
     this.must<HTMLInputElement>("diagnostics-enabled").addEventListener("change", () => this.syncConfigFromInputs());
+    this.must<HTMLInputElement>("clipboard-watcher-enabled").addEventListener("change", () => {
+      this.config.system.clipboardWatcherEnabled = this.must<HTMLInputElement>("clipboard-watcher-enabled").checked;
+      this.store.save(this.config);
+      void this.applyClipboardWatcherEnabledSetting();
+    });
     this.must<HTMLSelectElement>("detector-mode").addEventListener("change", () => this.syncConfigFromInputs());
     this.must<HTMLButtonElement>("detector-health").addEventListener("click", async () => {
       await this.checkDetectorHealth();
@@ -1589,6 +1613,7 @@ export class WebApp {
       this.updateTimelineFromRawText();
       void this.syncAllElectronHotkeysFromSettings();
       void this.syncElectronOverlayTheme();
+      void this.applyClipboardWatcherEnabledSetting();
       void this.syncElectronCaptureRectangleSetting();
       this.setStatus(this.t("status.settingsReset"));
     });
@@ -1652,6 +1677,18 @@ export class WebApp {
     });
     this.must<HTMLButtonElement>("btn-copy-hotkey-cancel").addEventListener("click", () => {
       void this.cancelHotkeyRecording("copyPlay");
+    });
+    this.must<HTMLButtonElement>("btn-clipboard-watcher-hotkey-record").addEventListener("click", () => {
+      void this.beginHotkeyRecording("clipboardWatcher");
+    });
+    this.must<HTMLButtonElement>("btn-clipboard-watcher-hotkey-clear").addEventListener("click", () => {
+      void this.clearHotkey("clipboardWatcher");
+    });
+    this.must<HTMLButtonElement>("btn-clipboard-watcher-hotkey-apply").addEventListener("click", () => {
+      void this.applyRecordedHotkey("clipboardWatcher");
+    });
+    this.must<HTMLButtonElement>("btn-clipboard-watcher-hotkey-cancel").addEventListener("click", () => {
+      void this.cancelHotkeyRecording("clipboardWatcher");
     });
     this.must<HTMLButtonElement>("btn-abort-hotkey-record").addEventListener("click", () => {
       void this.beginHotkeyRecording("abort");
@@ -1804,6 +1841,7 @@ export class WebApp {
       ? (punctuationMode as AppConfig["reading"]["punctuationPauseMode"])
       : "low";
     this.config.system.diagnosticsEnabled = this.must<HTMLInputElement>("diagnostics-enabled").checked;
+    this.config.system.clipboardWatcherEnabled = this.must<HTMLInputElement>("clipboard-watcher-enabled").checked;
     this.config.system.captureDrawRectangle = this.must<HTMLInputElement>("capture-draw-rectangle").checked;
     this.syncFeedbackSoundsFromInputs();
     this.config.ui.showChunkDiagnostics = this.must<HTMLInputElement>("show-chunk-diagnostics").checked;
@@ -1985,6 +2023,7 @@ export class WebApp {
     this.must<HTMLInputElement>("session-audio-byte-limit").value = String(this.config.reading.sessionAudioByteLimit);
     this.must<HTMLSelectElement>("punctuation-pause").value = this.config.reading.punctuationPauseMode;
     this.must<HTMLInputElement>("diagnostics-enabled").checked = this.config.system.diagnosticsEnabled;
+    this.must<HTMLInputElement>("clipboard-watcher-enabled").checked = this.config.system.clipboardWatcherEnabled;
     this.must<HTMLInputElement>("capture-draw-rectangle").checked = this.config.system.captureDrawRectangle;
     this.renderHotkeyInputs();
     this.renderHotkeySoundControls();
@@ -2137,6 +2176,7 @@ export class WebApp {
   private shouldUseDetector(captureContext?: CaptureContext): boolean {
     const mode = this.config.textProcessing.detectionMode;
     if (mode === "off") return false;
+    if (captureContext?.source === "clipboard_watch") return mode === "all";
     if (mode === "all") return true;
     if (captureContext?.source !== "hotkey") return false;
     if (mode === "fullscreen_only") return captureContext.captureKind === "fullscreen";
@@ -2220,12 +2260,7 @@ export class WebApp {
             ...DEFAULT_CONFIG.preprocessing.sorting,
             ...parsed.preprocessing?.sorting
           },
-          selection: {
-            ...DEFAULT_CONFIG.preprocessing.selection,
-            ...parsed.preprocessing?.selection,
-            ops: parsed.preprocessing?.selection?.ops ?? DEFAULT_CONFIG.preprocessing.selection.ops,
-            manualBoxes: parsed.preprocessing?.selection?.manualBoxes ?? DEFAULT_CONFIG.preprocessing.selection.manualBoxes
-          }
+          selection: { ...DEFAULT_CONFIG.preprocessing.selection }
         }
       };
       Object.assign(this.config, merged);
@@ -2235,6 +2270,7 @@ export class WebApp {
       this.store.save(this.config);
       void this.syncAllElectronHotkeysFromSettings();
       void this.syncElectronOverlayTheme();
+      void this.applyClipboardWatcherEnabledSetting();
       void this.syncElectronCaptureRectangleSetting();
       this.setStatus(this.t("status.settingsImported"));
       loggers.settings.info("Settings imported");
@@ -2448,7 +2484,21 @@ export class WebApp {
         void this.playConfiguredHotkeyFeedback("copyPlay");
       }
       if (this.hasActiveWork()) await this.abortAllWork("superseded");
-      await this.playCopiedText(text);
+      await this.playIncomingText(text, "status.copiedTextPlaying");
+    });
+    window.electronAPI?.onClipboardWatcherItem(async (payload) => {
+      if (this.hasActiveWork()) await this.abortAllWork("superseded");
+      if (payload.kind === "text") {
+        await this.playIncomingText(payload.text, "status.clipboardWatcherTextPlaying");
+        return;
+      }
+      await this.runPipeline(payload.dataUrl, { source: "clipboard_watch" });
+    });
+    window.electronAPI?.onClipboardWatcherStateChanged((enabled) => {
+      this.applyClipboardWatcherEnabledLocally(
+        enabled,
+        enabled ? "status.clipboardWatcherEnabled" : "status.clipboardWatcherDisabled"
+      );
     });
     window.electronAPI?.onAbortRequested(() => {
       void this.playConfiguredHotkeyFeedback("abort");
@@ -2509,7 +2559,14 @@ export class WebApp {
         this.currentOcrRegions = result.finalBoxes;
         this.currentDetectedRawBoxes = result.rawBoxes;
         this.currentFilterResults = result.filterResults;
-        this.currentMergedGroups = result.mergedGroups;
+        this.currentMergedGroups = result.finalBoxes.map((box) => ({
+          rect: {
+            id: box.id,
+            norm: { x: box.nx, y: box.ny, w: box.nw, h: box.nh },
+            px: { x1: 0, y1: 0, x2: 0, y2: 0 }
+          },
+          members: []
+        }));
         this.currentFilterStats = result.filterStats;
         this.setPreviewImage(result.processedImageDataUrl);
         this.renderMainPreviewOverlay();
@@ -2533,7 +2590,10 @@ export class WebApp {
     });
   }
 
-  private async playCopiedText(text: string): Promise<void> {
+  private async playIncomingText(
+    text: string,
+    statusKey: "status.copiedTextPlaying" | "status.clipboardWatcherTextPlaying"
+  ): Promise<void> {
     const nextText = text.trim();
     if (!nextText) {
       this.setStatus(this.t("status.copyHotkeyNoText"));
@@ -2542,7 +2602,7 @@ export class WebApp {
     this.must<HTMLTextAreaElement>("raw-text").value = nextText;
     this.updateTimelineFromRawText();
     this.resetPlaybackForTextChange();
-    this.setStatus(this.t("status.copiedTextPlaying"));
+    this.setStatus(this.t(statusKey));
     try {
       await this.startOrResumePlayback();
     } catch (error) {
@@ -2570,7 +2630,7 @@ export class WebApp {
   }
 
   private getConfigurableHotkeyKeys(): ConfigurableHotkeyKey[] {
-    return ["capture", "ocrClipboard", "fullCapture", "activeWindowCapture", "copyPlay", "abort", "playPause", "nextChunk", "previousChunk", "volumeUp", "volumeDown", "replayCapture"];
+    return ["capture", "ocrClipboard", "fullCapture", "activeWindowCapture", "copyPlay", "clipboardWatcher", "abort", "playPause", "nextChunk", "previousChunk", "volumeUp", "volumeDown", "replayCapture"];
   }
 
   private renderHotkeyButtonState(): void {
@@ -2636,6 +2696,38 @@ export class WebApp {
     }
   }
 
+  private applyClipboardWatcherEnabledLocally(
+    enabled: boolean,
+    statusKey?: "status.clipboardWatcherEnabled" | "status.clipboardWatcherDisabled"
+  ): void {
+    this.config.system.clipboardWatcherEnabled = enabled;
+    this.must<HTMLInputElement>("clipboard-watcher-enabled").checked = enabled;
+    this.store.save(this.config);
+    if (statusKey) {
+      this.setStatus(this.t(statusKey));
+    }
+  }
+
+  private async syncClipboardWatcherStateFromElectron(): Promise<void> {
+    if (!window.electronAPI?.getClipboardWatcherEnabled) return;
+    try {
+      const enabled = await window.electronAPI.getClipboardWatcherEnabled();
+      this.applyClipboardWatcherEnabledLocally(enabled);
+    } catch (error) {
+      this.setStatus(this.t("status.syncClipboardWatcherFailed", { error: String(error) }));
+    }
+  }
+
+  private async applyClipboardWatcherEnabledSetting(): Promise<void> {
+    if (!window.electronAPI?.setClipboardWatcherEnabled) return;
+    try {
+      const enabled = await window.electronAPI.setClipboardWatcherEnabled(this.config.system.clipboardWatcherEnabled);
+      this.applyClipboardWatcherEnabledLocally(enabled);
+    } catch (error) {
+      this.setStatus(this.t("status.applyClipboardWatcherFailed", { error: String(error) }));
+    }
+  }
+
   private normalizeKeyboardHotkey(event: KeyboardEvent): string | null {
     const parts: string[] = [];
     if (event.ctrlKey) parts.push("ctrl");
@@ -2674,6 +2766,7 @@ export class WebApp {
       case "fullCapture": return "system.fullCaptureHotkey";
       case "activeWindowCapture": return "system.activeWindowCaptureHotkey";
       case "copyPlay": return "system.copyPlayHotkey";
+      case "clipboardWatcher": return "system.clipboardWatcherHotkey";
       case "abort": return "system.abortHotkey";
       case "playPause": return "system.playPauseHotkey";
       case "nextChunk": return "system.nextChunkHotkey";
@@ -3724,13 +3817,12 @@ export class WebApp {
 
   private renderMainPreviewOverlay(): void {
     if (!this.mainPreviewRenderer) return;
-    const pre = this.config.preprocessing;
     this.mainPreviewRenderer.setState({
       overlayMode: "committed",
       activeFilterRule: null,
-      selectionBaseState: pre.selection.baseState,
-      selectionOps: pre.selection.ops,
-      manualBoxes: pre.selection.manualBoxes,
+      selectionBaseState: DEFAULT_CONFIG.preprocessing.selection.baseState,
+      selectionOps: [],
+      manualBoxes: [],
       rawBoxes: this.currentDetectedRawBoxes,
       filterResults: this.currentFilterResults,
       mergedGroups: this.currentMergedGroups,

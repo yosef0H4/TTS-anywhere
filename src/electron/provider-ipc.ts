@@ -5,6 +5,7 @@ export type ElectronHotkeyKey =
   | "fullCapture"
   | "activeWindowCapture"
   | "copyPlay"
+  | "clipboardWatcher"
   | "abort"
   | "playPause"
   | "nextChunk"

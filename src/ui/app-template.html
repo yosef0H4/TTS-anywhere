@@ -360,6 +360,40 @@
               <div class="setting-footnote" id="copyPlay-sound-volume-value">0%</div>
             </div>
           </div>
+          <div class="setting-group setting-toggle-row">
+            <label for="clipboard-watcher-enabled" data-i18n="system.clipboardWatcherEnabled">Clipboard Watch Enabled</label>
+            <label class="setting-switch" for="clipboard-watcher-enabled">
+              <input id="clipboard-watcher-enabled" type="checkbox">
+              <span class="setting-switch-track" aria-hidden="true">
+                <span class="setting-switch-thumb"></span>
+              </span>
+            </label>
+          </div>
+          <div class="setting-group">
+            <label data-i18n="system.clipboardWatcherHotkey">Clipboard Watch Toggle Hotkey</label>
+            <input type="text" id="clipboard-watcher-hotkey" readonly>
+          </div>
+          <div class="settings-actions-grid">
+            <button type="button" id="btn-clipboard-watcher-hotkey-record"><i data-lucide="keyboard" class="ui-icon"></i><span data-i18n="action.record">Record</span></button>
+            <button type="button" id="btn-clipboard-watcher-hotkey-clear"><i data-lucide="eraser" class="ui-icon"></i><span data-i18n="action.clear">Clear</span></button>
+            <button type="button" id="btn-clipboard-watcher-hotkey-apply"><i data-lucide="check" class="ui-icon"></i><span data-i18n="action.apply">Apply</span></button>
+            <button type="button" id="btn-clipboard-watcher-hotkey-cancel"><i data-lucide="x" class="ui-icon"></i><span data-i18n="action.cancel">Cancel</span></button>
+          </div>
+          <div class="setting-footnote" id="clipboard-watcher-hotkey-recording-status"></div>
+          <div class="setting-grid hotkey-sound-grid" data-hotkey-sound-controls="clipboardWatcher">
+            <div class="setting-group">
+              <label for="clipboardWatcher-sound-id" data-i18n="system.soundEffect">Sound Effect</label>
+              <div class="setting-inline">
+                <select id="clipboardWatcher-sound-id"></select>
+                <button type="button" class="refetch-btn hotkey-sound-preview-btn" id="btn-clipboardWatcher-sound-preview" data-i18n="action.preview">Preview</button>
+              </div>
+            </div>
+            <div class="setting-group">
+              <label for="clipboardWatcher-sound-volume" data-i18n="system.soundVolume">Sound Volume</label>
+              <input id="clipboardWatcher-sound-volume" type="range" min="0" max="100" step="1">
+              <div class="setting-footnote" id="clipboardWatcher-sound-volume-value">0%</div>
+            </div>
+          </div>
           <div class="setting-group">
             <label data-i18n="system.abortHotkey">Abort Hotkey</label>
             <input type="text" id="abort-hotkey" readonly>

@@ -5,6 +5,7 @@ import { PreprocPreviewRenderer, type FilterRule, type FilterStats, type Overlay
 import { checkTextProcessingHealth, detectRawBoxes } from "./text-processing-client";
 import type { DrawRect, FilteredBox, RawBox, SelectionOp, ToolMode } from "./types";
 import type { AppConfig } from "../../core/models/types";
+import { DEFAULT_CONFIG } from "../../core/models/defaults";
 import { createIcons } from "lucide";
 import { APP_ICONS } from "../../ui/lucide-icons";
 import { applyTranslationsToElement, translate, type TranslationKey } from "../../web/i18n";
@@ -182,9 +183,9 @@ export class PreprocessModalController {
     const cfg = this.opts.getConfig();
     const source = this.opts.getCurrentImageDataUrl();
 
-    this.selectionBaseState = cfg.preprocessing.selection.baseState;
-    this.selectionOps = [...cfg.preprocessing.selection.ops];
-    this.manualBoxes = [...cfg.preprocessing.selection.manualBoxes];
+    this.selectionBaseState = DEFAULT_CONFIG.preprocessing.selection.baseState;
+    this.selectionOps = [];
+    this.manualBoxes = [];
     this.setTool("none");
 
     this.setValue("preproc-detect-mode", cfg.textProcessing.detectionMode);
@@ -1099,9 +1100,9 @@ export class PreprocessModalController {
     cfg.preprocessing.sorting.direction = this.mustById<HTMLSelectElement>("preproc-direction").value as AppConfig["preprocessing"]["sorting"]["direction"];
     cfg.preprocessing.sorting.groupTolerance = this.getNum("preproc-group", 0.5);
 
-    cfg.preprocessing.selection.baseState = this.selectionBaseState;
-    cfg.preprocessing.selection.ops = this.selectionOps;
-    cfg.preprocessing.selection.manualBoxes = this.manualBoxes;
+    cfg.preprocessing.selection.baseState = DEFAULT_CONFIG.preprocessing.selection.baseState;
+    cfg.preprocessing.selection.ops = [];
+    cfg.preprocessing.selection.manualBoxes = [];
 
     this.opts.saveConfig(cfg);
   }

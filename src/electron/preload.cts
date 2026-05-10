@@ -56,6 +56,24 @@ contextBridge.exposeInMainWorld("electronAPI", {
       if (payload?.text) handler(payload.text);
     });
   },
+  onClipboardWatcherItem: (handler: (payload: { kind: "text"; text: string } | { kind: "image"; dataUrl: string }) => void) => {
+    ipcRenderer.on("clipboard-watcher-item", (_event, payload: { kind?: "text" | "image"; text?: string; dataUrl?: string }) => {
+      if (payload?.kind === "text" && typeof payload.text === "string") {
+        handler({ kind: "text", text: payload.text });
+        return;
+      }
+      if (payload?.kind === "image" && typeof payload.dataUrl === "string") {
+        handler({ kind: "image", dataUrl: payload.dataUrl });
+      }
+    });
+  },
+  onClipboardWatcherStateChanged: (handler: (enabled: boolean) => void) => {
+    ipcRenderer.on("clipboard-watcher-state-changed", (_event, payload: { enabled?: boolean }) => {
+      if (typeof payload?.enabled === "boolean") {
+        handler(payload.enabled);
+      }
+    });
+  },
   onAbortRequested: (handler: () => void) => {
     ipcRenderer.on("abort-requested", () => {
       handler();
@@ -163,6 +181,21 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   getCopyHotkey: () => {
     return ipcRenderer.invoke("copy:get-hotkey") as Promise<string>;
+  },
+  beginClipboardWatcherHotkeyEdit: () => {
+    return ipcRenderer.invoke("clipboard-watcher:begin-hotkey-edit") as Promise<string>;
+  },
+  applyClipboardWatcherHotkey: (hotkey: string) => {
+    return ipcRenderer.invoke("clipboard-watcher:apply-hotkey", hotkey) as Promise<string>;
+  },
+  clearClipboardWatcherHotkey: () => {
+    return ipcRenderer.invoke("clipboard-watcher:clear-hotkey") as Promise<string>;
+  },
+  cancelClipboardWatcherHotkeyEdit: () => {
+    return ipcRenderer.invoke("clipboard-watcher:cancel-hotkey-edit") as Promise<string>;
+  },
+  getClipboardWatcherHotkey: () => {
+    return ipcRenderer.invoke("clipboard-watcher:get-hotkey") as Promise<string>;
   },
   beginAbortHotkeyEdit: () => {
     return ipcRenderer.invoke("abort:begin-hotkey-edit") as Promise<string>;
@@ -280,6 +313,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   getOverlayTheme: () => {
     return ipcRenderer.invoke("overlay-theme:get") as Promise<"zen" | "pink" | "dark-zen" | "dark-pink">;
+  },
+  getClipboardWatcherEnabled: () => {
+    return ipcRenderer.invoke("clipboard-watcher:get-enabled") as Promise<boolean>;
+  },
+  setClipboardWatcherEnabled: (enabled: boolean) => {
+    return ipcRenderer.invoke("clipboard-watcher:set-enabled", enabled) as Promise<boolean>;
   },
   launchManagedService: (serviceId: "paddle" | "edge") => {
     return ipcRenderer.invoke("stack:launch-service", serviceId);

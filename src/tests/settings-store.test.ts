@@ -50,6 +50,8 @@ describe("settings store", () => {
     cfg.ui.language = "ar";
     cfg.ui.theme = "pink";
     cfg.ui.darkMode = true;
+    cfg.system.clipboardWatcherEnabled = true;
+    cfg.system.clipboardWatcherHotkey = "ctrl+shift+alt+b";
     cfg.system.abortHotkey = "ctrl+shift+alt+z";
     cfg.system.playPauseHotkey = "ctrl+shift+alt+space";
     cfg.system.replayCaptureHotkey = "ctrl+shift+alt+d";
@@ -57,6 +59,8 @@ describe("settings store", () => {
     cfg.system.ocrClipboardHotkey = "ctrl+shift+alt+c";
     cfg.system.feedbackSounds.byHotkey.capture.soundId = "capture_full_chime";
     cfg.system.feedbackSounds.byHotkey.capture.volume = 64;
+    cfg.system.feedbackSounds.byHotkey.clipboardWatcher.soundId = "copy_play_confirm";
+    cfg.system.feedbackSounds.byHotkey.clipboardWatcher.volume = 33;
     cfg.system.feedbackSounds.globalError.soundId = "error_double_buzz";
     cfg.system.feedbackSounds.globalError.volume = 71;
     cfg.textProcessing.detectionMode = "fullscreen_and_window";
@@ -70,6 +74,8 @@ describe("settings store", () => {
     expect(store.load().ui.language).toBe("ar");
     expect(store.load().ui.theme).toBe("pink");
     expect(store.load().ui.darkMode).toBe(true);
+    expect(store.load().system.clipboardWatcherEnabled).toBe(true);
+    expect(store.load().system.clipboardWatcherHotkey).toBe("ctrl+shift+alt+b");
     expect(store.load().system.abortHotkey).toBe("ctrl+shift+alt+z");
     expect(store.load().system.playPauseHotkey).toBe("ctrl+shift+alt+space");
     expect(store.load().system.replayCaptureHotkey).toBe("ctrl+shift+alt+d");
@@ -77,6 +83,8 @@ describe("settings store", () => {
     expect(store.load().system.ocrClipboardHotkey).toBe("ctrl+shift+alt+c");
     expect(store.load().system.feedbackSounds.byHotkey.capture.soundId).toBe("capture_full_chime");
     expect(store.load().system.feedbackSounds.byHotkey.capture.volume).toBe(64);
+    expect(store.load().system.feedbackSounds.byHotkey.clipboardWatcher.soundId).toBe("copy_play_confirm");
+    expect(store.load().system.feedbackSounds.byHotkey.clipboardWatcher.volume).toBe(33);
     expect(store.load().system.feedbackSounds.globalError.soundId).toBe("error_double_buzz");
     expect(store.load().system.feedbackSounds.globalError.volume).toBe(71);
     expect(store.load().system.fullCaptureHotkey).toBe(DEFAULT_CONFIG.system.fullCaptureHotkey);
@@ -259,6 +267,24 @@ describe("settings store", () => {
     expect(restored.system.ocrClipboardHotkey).toBe(DEFAULT_CONFIG.system.ocrClipboardHotkey);
   });
 
+  it("fills missing clipboard watcher settings from defaults", () => {
+    const legacy = {
+      ...DEFAULT_CONFIG,
+      system: {
+        ...DEFAULT_CONFIG.system
+      }
+    };
+    delete (legacy.system as Partial<typeof legacy.system>).clipboardWatcherEnabled;
+    delete (legacy.system as Partial<typeof legacy.system>).clipboardWatcherHotkey;
+
+    localStorage.setItem(LEGACY_SETTINGS_KEYS[0], JSON.stringify(legacy));
+    const restored = new SettingsStore().load();
+
+    expect(restored.system.clipboardWatcherEnabled).toBe(DEFAULT_CONFIG.system.clipboardWatcherEnabled);
+    expect(restored.system.clipboardWatcherHotkey).toBe(DEFAULT_CONFIG.system.clipboardWatcherHotkey);
+    expect(restored.system.feedbackSounds.byHotkey.clipboardWatcher).toEqual(DEFAULT_CONFIG.system.feedbackSounds.byHotkey.clipboardWatcher);
+  });
+
   it("preserves cleared hotkeys instead of restoring defaults", () => {
     const cfg = {
       ...DEFAULT_CONFIG,
@@ -289,5 +315,24 @@ describe("settings store", () => {
     const restored = new SettingsStore().load();
 
     expect(restored.system.feedbackSounds).toEqual(DEFAULT_CONFIG.system.feedbackSounds);
+  });
+
+  it("drops persisted preprocessing selection state back to defaults", () => {
+    const saved = {
+      ...DEFAULT_CONFIG,
+      preprocessing: {
+        ...DEFAULT_CONFIG.preprocessing,
+        selection: {
+          baseState: false,
+          ops: [{ id: "op-1", op: "sub" as const, nx: 0.1, ny: 0.2, nw: 0.3, nh: 0.4 }],
+          manualBoxes: [{ id: "manual-1", nx: 0.2, ny: 0.3, nw: 0.2, nh: 0.1 }]
+        }
+      }
+    };
+
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(saved));
+    const restored = new SettingsStore().load();
+
+    expect(restored.preprocessing.selection).toEqual(DEFAULT_CONFIG.preprocessing.selection);
   });
 });

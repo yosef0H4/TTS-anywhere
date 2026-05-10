@@ -10,6 +10,8 @@ export interface PlatformBridge {
     hotkey?: ConfigurableHotkeyKey;
   }) => void): void;
   onCopiedTextForPlayback(handler: (text: string) => void): void;
+  onClipboardWatcherItem(handler: (payload: { kind: "text"; text: string } | { kind: "image"; dataUrl: string }) => void): void;
+  onClipboardWatcherStateChanged(handler: (enabled: boolean) => void): void;
   onAbortRequested(handler: () => void): void;
   onPlaybackHotkey(handler: (action: "toggle_play_pause" | "next_chunk" | "previous_chunk" | "volume_up" | "volume_down") => void): void;
   onHotkeyFeedback(handler: (event: HotkeyFeedbackEvent) => void): void;
@@ -115,6 +117,8 @@ export interface ElectronApi {
     hotkey?: ConfigurableHotkeyKey;
   }) => void) => void;
   onCopiedTextForPlayback: (handler: (text: string) => void) => void;
+  onClipboardWatcherItem: (handler: (payload: { kind: "text"; text: string } | { kind: "image"; dataUrl: string }) => void) => void;
+  onClipboardWatcherStateChanged: (handler: (enabled: boolean) => void) => void;
   onAbortRequested: (handler: () => void) => void;
   onPlaybackHotkey: (handler: (action: "toggle_play_pause" | "next_chunk" | "previous_chunk" | "volume_up" | "volume_down") => void) => void;
   onHotkeyFeedback: (handler: (event: HotkeyFeedbackEvent) => void) => void;
@@ -145,6 +149,11 @@ export interface ElectronApi {
   clearCopyHotkey: () => Promise<string>;
   cancelCopyHotkeyEdit: () => Promise<string>;
   getCopyHotkey: () => Promise<string>;
+  beginClipboardWatcherHotkeyEdit: () => Promise<string>;
+  applyClipboardWatcherHotkey: (hotkey: string) => Promise<string>;
+  clearClipboardWatcherHotkey: () => Promise<string>;
+  cancelClipboardWatcherHotkeyEdit: () => Promise<string>;
+  getClipboardWatcherHotkey: () => Promise<string>;
   beginAbortHotkeyEdit: () => Promise<string>;
   applyAbortHotkey: (hotkey: string) => Promise<string>;
   clearAbortHotkey: () => Promise<string>;
@@ -184,6 +193,8 @@ export interface ElectronApi {
   getCaptureDrawRectangle: () => Promise<boolean>;
   setOverlayTheme: (theme: UiTheme) => Promise<void>;
   getOverlayTheme: () => Promise<UiTheme>;
+  getClipboardWatcherEnabled: () => Promise<boolean>;
+  setClipboardWatcherEnabled: (enabled: boolean) => Promise<boolean>;
   launchManagedService: (serviceId: ManagedServiceId) => Promise<ManagedServiceStatus>;
   stopManagedService: (serviceId: ManagedServiceId) => Promise<ManagedServiceStatus>;
   openRuntimeServicesFolder: () => Promise<string>;

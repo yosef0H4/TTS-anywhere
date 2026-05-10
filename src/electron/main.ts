@@ -1,5 +1,6 @@
 import { app, BrowserWindow, clipboard, ipcMain, nativeImage, shell } from "electron";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   beginFrozenMonitorCaptureAtPoint,
   BorderOverlay,
@@ -124,6 +125,7 @@ const PADDLE_CPU_PACKAGE_NAME = "paddlepaddle";
 const PADDLE_CPU_PACKAGE_VERSION = "3.2.0";
 const PADDLE_WARM_START_TIMEOUT_MS = 120000;
 const PADDLE_COLD_START_TIMEOUT_MS = 10 * 60 * 1000;
+const CLIPBOARD_WATCH_POLL_MS = 500;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -136,6 +138,7 @@ let ocrClipboardHotkeySession: HotkeySession | null = null;
 let fullCaptureHotkeySession: HotkeySession | null = null;
 let activeWindowCaptureHotkeySession: HotkeySession | null = null;
 let copyHotkeySession: HotkeySession | null = null;
+let clipboardWatcherHotkeySession: HotkeySession | null = null;
 let abortHotkeySession: HotkeySession | null = null;
 let playbackToggleHotkeySession: HotkeySession | null = null;
 let playbackNextHotkeySession: HotkeySession | null = null;
@@ -148,6 +151,7 @@ let activeOcrClipboardHotkey = "ctrl+shift+alt+c";
 let activeFullCaptureHotkey = "ctrl+shift+alt+a";
 let activeActiveWindowCaptureHotkey = "ctrl+shift+alt+w";
 let activeCopyHotkey = "ctrl+shift+alt+x";
+let activeClipboardWatcherHotkey = "ctrl+shift+alt+v";
 let activeAbortHotkey = "ctrl+shift+alt+z";
 let activePlaybackToggleHotkey = "ctrl+shift+alt+space";
 let activePlaybackNextHotkey = "ctrl+shift+alt+right";
@@ -160,6 +164,7 @@ let ocrClipboardHotkeyBeforeEdit: string | null = null;
 let fullCaptureHotkeyBeforeEdit: string | null = null;
 let activeWindowCaptureHotkeyBeforeEdit: string | null = null;
 let copyHotkeyBeforeEdit: string | null = null;
+let clipboardWatcherHotkeyBeforeEdit: string | null = null;
 let abortHotkeyBeforeEdit: string | null = null;
 let playbackToggleHotkeyBeforeEdit: string | null = null;
 let playbackNextHotkeyBeforeEdit: string | null = null;
@@ -181,6 +186,11 @@ let lastSavedCaptureRect: { left: number; top: number; width: number; height: nu
 let frozenCaptureSession: Promise<FrozenCaptureHandle> | null = null;
 let flashOverlayTimer: NodeJS.Timeout | null = null;
 let copyPlayInFlight = false;
+let clipboardWatcherEnabled = false;
+let clipboardWatcherPollTimer: NodeJS.Timeout | null = null;
+let clipboardWatcherPollInFlight = false;
+let clipboardWatcherLastSignature: string | null = null;
+const clipboardWatcherSuppressedSignatures = new Set<string>();
 let appCloseInFlight = false;
 let shutdownWatchdog: NodeJS.Timeout | null = null;
 let managedServiceChildren: Partial<Record<ManagedServiceId, ManagedStackChild>> = {};
@@ -238,6 +248,8 @@ interface NativePrefs {
   fullCaptureHotkey?: string;
   activeWindowCaptureHotkey?: string;
   copyPlayHotkey?: string;
+  clipboardWatcherEnabled?: boolean;
+  clipboardWatcherHotkey?: string;
   captureDrawRectangle?: boolean;
   abortHotkey?: string;
   playPauseHotkey?: string;
@@ -888,6 +900,150 @@ function saveNativePrefs(next: NativePrefs): void {
 
 function savePinnedPref(value: boolean): void {
   saveNativePrefs({ alwaysOnTop: value });
+}
+
+type ClipboardWatcherSnapshot =
+  | { kind: "text"; signature: string; text: string }
+  | { kind: "image"; signature: string; dataUrl: string }
+  | { kind: "unsupported" | "none"; signature: string };
+
+function sha256Hex(value: Buffer | string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function clipboardWatcherTextSignature(text: string): string {
+  return `text:${sha256Hex(text)}`;
+}
+
+function suppressClipboardWatcherText(text: string): void {
+  const normalized = String(text ?? "").trim();
+  if (!normalized) return;
+  clipboardWatcherSuppressedSignatures.add(clipboardWatcherTextSignature(normalized));
+}
+
+function isLikelyImageClipboardFormat(formats: string[]): boolean {
+  return formats.some((format) => /image|png|bmp|dib|bitmap|jfif|jpeg|jpg|gif|tiff|webp/i.test(format));
+}
+
+function readClipboardWatcherSnapshot(): ClipboardWatcherSnapshot {
+  const formats = clipboard.availableFormats();
+  if (isLikelyImageClipboardFormat(formats)) {
+    const image = clipboard.readImage();
+    if (!image.isEmpty()) {
+      const pngBuffer = image.toPNG();
+      if (pngBuffer.byteLength > 0) {
+        return {
+          kind: "image",
+          signature: `image:${sha256Hex(pngBuffer)}`,
+          dataUrl: `data:image/png;base64,${pngBuffer.toString("base64")}`
+        };
+      }
+    }
+  }
+
+  const text = clipboard.readText().trim();
+  if (text) {
+    return { kind: "text", signature: clipboardWatcherTextSignature(text), text };
+  }
+
+  if (formats.length === 0) {
+    return { kind: "none", signature: "none" };
+  }
+
+  const normalizedFormats = formats.map(String).sort().join("|");
+  return { kind: "unsupported", signature: `unsupported:${sha256Hex(normalizedFormats)}` };
+}
+
+function emitClipboardWatcherItem(snapshot: Extract<ClipboardWatcherSnapshot, { kind: "text" | "image" }>): void {
+  if (snapshot.kind === "text") {
+    mainWindow?.webContents.send("clipboard-watcher-item", { kind: "text", text: snapshot.text });
+    diag("clipboard.watcher.text.sent", { length: snapshot.text.length });
+    return;
+  }
+  mainWindow?.webContents.send("clipboard-watcher-item", { kind: "image", dataUrl: snapshot.dataUrl });
+  diag("clipboard.watcher.image.sent", { dataUrlLength: snapshot.dataUrl.length });
+}
+
+function emitClipboardWatcherStateChanged(enabled: boolean): void {
+  mainWindow?.webContents.send("clipboard-watcher-state-changed", { enabled });
+  diag("clipboard.watcher.state.sent", { enabled });
+}
+
+function seedClipboardWatcherSignature(): void {
+  try {
+    clipboardWatcherLastSignature = readClipboardWatcherSnapshot().signature;
+  } catch (error) {
+    clipboardWatcherLastSignature = null;
+    diag("clipboard.watcher.seed.failed", { error: String(error) });
+  }
+}
+
+async function pollClipboardWatcher(): Promise<void> {
+  if (!clipboardWatcherEnabled || clipboardWatcherPollInFlight || copyPlayInFlight) {
+    return;
+  }
+  clipboardWatcherPollInFlight = true;
+  try {
+    const snapshot = readClipboardWatcherSnapshot();
+    if (snapshot.signature === clipboardWatcherLastSignature) {
+      return;
+    }
+    clipboardWatcherLastSignature = snapshot.signature;
+    if (clipboardWatcherSuppressedSignatures.delete(snapshot.signature)) {
+      diag("clipboard.watcher.signature.suppressed", { kind: snapshot.kind });
+      return;
+    }
+    if (snapshot.kind === "text" || snapshot.kind === "image") {
+      emitClipboardWatcherItem(snapshot);
+    }
+  } catch (error) {
+    diag("clipboard.watcher.poll.failed", { error: String(error) });
+  } finally {
+    clipboardWatcherPollInFlight = false;
+  }
+}
+
+function stopClipboardWatcher(): void {
+  if (clipboardWatcherPollTimer) {
+    clearInterval(clipboardWatcherPollTimer);
+    clipboardWatcherPollTimer = null;
+  }
+  clipboardWatcherPollInFlight = false;
+  clipboardWatcherLastSignature = null;
+  diag("clipboard.watcher.stopped");
+}
+
+function startClipboardWatcher(): void {
+  if (clipboardWatcherPollTimer) {
+    return;
+  }
+  seedClipboardWatcherSignature();
+  clipboardWatcherPollTimer = setInterval(() => {
+    void pollClipboardWatcher();
+  }, CLIPBOARD_WATCH_POLL_MS);
+  diag("clipboard.watcher.started", { pollMs: CLIPBOARD_WATCH_POLL_MS });
+}
+
+function setClipboardWatcherEnabledState(
+  enabled: boolean,
+  options?: { source?: "startup" | "ipc" | "hotkey"; emitState?: boolean; emitFeedback?: boolean }
+): boolean {
+  const next = Boolean(enabled);
+  clipboardWatcherEnabled = next;
+  saveNativePrefs({ clipboardWatcherEnabled: next });
+  if (next) {
+    startClipboardWatcher();
+  } else {
+    stopClipboardWatcher();
+  }
+  if (options?.emitFeedback) {
+    emitHotkeyFeedback("clipboardWatcher", "success");
+  }
+  if (options?.emitState !== false) {
+    emitClipboardWatcherStateChanged(next);
+  }
+  diag("clipboard.watcher.changed", { enabled: next, source: options?.source ?? "ipc" });
+  return next;
 }
 
 function getOverlayThemeColors(theme: UiTheme): { outerColor: string; innerColor: string } {
@@ -1838,6 +1994,7 @@ function getAllActiveHotkeys(): Array<{ name: string; hotkey: string }> {
     { name: "full screen capture", hotkey: activeFullCaptureHotkey },
     { name: "active window capture", hotkey: activeActiveWindowCaptureHotkey },
     { name: "copy & play", hotkey: activeCopyHotkey },
+    { name: "clipboard watch toggle", hotkey: activeClipboardWatcherHotkey },
     { name: "abort", hotkey: activeAbortHotkey },
     { name: "play/pause", hotkey: activePlaybackToggleHotkey },
     { name: "next chunk", hotkey: activePlaybackNextHotkey },
@@ -1991,6 +2148,8 @@ if (!hasSingleInstanceLock) {
     activeFullCaptureHotkey = readStoredHotkey(nativePrefs.fullCaptureHotkey, activeFullCaptureHotkey);
     activeActiveWindowCaptureHotkey = readStoredHotkey(nativePrefs.activeWindowCaptureHotkey, activeActiveWindowCaptureHotkey);
     activeCopyHotkey = readStoredHotkey(nativePrefs.copyPlayHotkey, activeCopyHotkey);
+    activeClipboardWatcherHotkey = readStoredHotkey(nativePrefs.clipboardWatcherHotkey, activeClipboardWatcherHotkey);
+    clipboardWatcherEnabled = nativePrefs.clipboardWatcherEnabled ?? clipboardWatcherEnabled;
     activeAbortHotkey = readStoredHotkey(nativePrefs.abortHotkey, activeAbortHotkey);
     activePlaybackToggleHotkey = readStoredHotkey(nativePrefs.playPauseHotkey, activePlaybackToggleHotkey);
     activePlaybackNextHotkey = readStoredHotkey(nativePrefs.nextChunkHotkey, activePlaybackNextHotkey);
@@ -2008,6 +2167,8 @@ if (!hasSingleInstanceLock) {
       activeFullCaptureHotkey,
       activeActiveWindowCaptureHotkey,
       activeCopyHotkey,
+      activeClipboardWatcherHotkey,
+      clipboardWatcherEnabled,
       activeAbortHotkey,
       activePlaybackToggleHotkey,
       activePlaybackNextHotkey,
@@ -2090,6 +2251,18 @@ if (!hasSingleInstanceLock) {
       }
     });
     diag("app.copy-session.create.end");
+    diag("app.clipboard-watch-session.create.begin", { hotkey: activeClipboardWatcherHotkey, enabled: clipboardWatcherEnabled });
+    clipboardWatcherHotkeySession = new HotkeySession({
+      initialHotkey: activeClipboardWatcherHotkey,
+      events: {
+        onHotkeyRegistered: (label) => diag("clipboard.watcher.hotkey.registered", { label }),
+        onHotkeySwitched: (label) => diag("clipboard.watcher.hotkey.switched", { label }),
+        onTriggerUp: () => {
+          setClipboardWatcherEnabledState(!clipboardWatcherEnabled, { source: "hotkey", emitFeedback: true });
+        }
+      }
+    });
+    diag("app.clipboard-watch-session.create.end");
     diag("app.replay-capture-session.create.begin", { hotkey: activeReplayCaptureHotkey });
     replayCaptureHotkeySession = new HotkeySession({
       initialHotkey: activeReplayCaptureHotkey,
@@ -2180,6 +2353,9 @@ if (!hasSingleInstanceLock) {
     diag("app.copy-session.start.begin");
     copyHotkeySession.start();
     diag("app.copy-session.start.end");
+    diag("app.clipboard-watch-session.start.begin");
+    clipboardWatcherHotkeySession.start();
+    diag("app.clipboard-watch-session.start.end");
     diag("app.replay-capture-session.start.begin");
     replayCaptureHotkeySession.start();
     diag("app.replay-capture-session.start.end");
@@ -2204,6 +2380,9 @@ if (!hasSingleInstanceLock) {
     diag("app.selection-ticker.start.begin");
     startSelectionTicker();
     diag("app.selection-ticker.start.end");
+    if (clipboardWatcherEnabled) {
+      setClipboardWatcherEnabledState(true, { source: "startup", emitState: false });
+    }
 
     app.on("activate", () => {
       if (appCloseInFlight) {
@@ -2463,6 +2642,56 @@ ipcMain.handle("copy:cancel-hotkey-edit", () => {
 
 ipcMain.handle("copy:get-hotkey", () => {
   return getEditableHotkey(copyHotkeySession, activeCopyHotkey, (value) => { activeCopyHotkey = value; });
+});
+
+ipcMain.handle("clipboard-watcher:begin-hotkey-edit", () => {
+  return beginEditableHotkey(
+    clipboardWatcherHotkeySession,
+    activeClipboardWatcherHotkey,
+    (value) => { clipboardWatcherHotkeyBeforeEdit = value; },
+    "clipboard.watcher.hotkey.edit.begin"
+  );
+});
+
+ipcMain.handle("clipboard-watcher:apply-hotkey", (_event, hotkey: string) => {
+  return applyEditableHotkey(
+    clipboardWatcherHotkeySession,
+    hotkey,
+    "clipboard watch toggle",
+    (value) => ({ clipboardWatcherHotkey: value }),
+    (value) => { activeClipboardWatcherHotkey = value; },
+    (value) => { clipboardWatcherHotkeyBeforeEdit = value; },
+    "clipboard.watcher.hotkey.edit.applied",
+    activeClipboardWatcherHotkey
+  );
+});
+
+ipcMain.handle("clipboard-watcher:clear-hotkey", () => {
+  return clearEditableHotkey(
+    clipboardWatcherHotkeySession,
+    (value) => ({ clipboardWatcherHotkey: value }),
+    (value) => { activeClipboardWatcherHotkey = value; },
+    (value) => { clipboardWatcherHotkeyBeforeEdit = value; },
+    "clipboard.watcher.hotkey.edit.cleared",
+    activeClipboardWatcherHotkey
+  );
+});
+
+ipcMain.handle("clipboard-watcher:cancel-hotkey-edit", () => {
+  return cancelEditableHotkey(
+    clipboardWatcherHotkeySession,
+    clipboardWatcherHotkeyBeforeEdit,
+    (value) => { activeClipboardWatcherHotkey = value; },
+    (value) => { clipboardWatcherHotkeyBeforeEdit = value; },
+    "clipboard.watcher.hotkey.edit.cancelled",
+    activeClipboardWatcherHotkey
+  );
+});
+
+ipcMain.handle("clipboard-watcher:get-hotkey", () => {
+  return getEditableHotkey(clipboardWatcherHotkeySession, activeClipboardWatcherHotkey, (value) => {
+    activeClipboardWatcherHotkey = value;
+  });
 });
 
 ipcMain.handle("abort:begin-hotkey-edit", () => {
@@ -2822,10 +3051,16 @@ ipcMain.handle("overlay-theme:set", (_event, theme: unknown) => {
 
 ipcMain.handle("overlay-theme:get", () => activeTheme);
 ipcMain.handle("clipboard:write-text", (_event, text: string) => {
-  clipboard.writeText(String(text ?? ""));
+  const normalized = String(text ?? "");
+  clipboard.writeText(normalized);
+  suppressClipboardWatcherText(normalized);
 });
 ipcMain.handle("window:get-always-on-top", () => isPinned);
 ipcMain.handle("window:set-always-on-top", (_event, enabled: boolean) => setAlwaysOnTopState(enabled));
+ipcMain.handle("clipboard-watcher:get-enabled", () => clipboardWatcherEnabled);
+ipcMain.handle("clipboard-watcher:set-enabled", (_event, enabled: boolean) => {
+  return setClipboardWatcherEnabledState(enabled, { source: "ipc" });
+});
 ipcMain.handle("stack:get-services-status", () => managedServicesStatusSnapshot());
 ipcMain.handle("stack:launch-service", async (_event, serviceId: ManagedServiceId) => launchManagedService(serviceId));
 ipcMain.handle("stack:stop-service", async (_event, serviceId: ManagedServiceId) => stopManagedService(serviceId));
