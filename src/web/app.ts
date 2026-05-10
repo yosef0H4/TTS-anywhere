@@ -2383,6 +2383,11 @@ export class WebApp {
     return text.includes("abort") || text.includes("cancel");
   }
 
+  private isEmptyOcrError(error: unknown): boolean {
+    const text = String((error as { message?: unknown })?.message ?? error).toLowerCase();
+    return text.includes("ocr produced empty text");
+  }
+
   private throwIfStale(runId: number): void {
     if (runId !== this.activeRunId || this.activeRunAbortController?.signal.aborted) {
       throw new Error("Cancelled");
@@ -3378,6 +3383,17 @@ export class WebApp {
             message: "Automatic reader cancelled."
           });
         }
+      } else if (autoReaderRunId !== null && this.isEmptyOcrError(error)) {
+        loggers.pipeline.info("Automatic reader page produced no text", {
+          runId,
+          phase: captureContext.automation?.phase,
+          error: String(error)
+        });
+        await this.reportAutoReaderPageResult({
+          runId: autoReaderRunId,
+          outcome: "completed",
+          text: ""
+        });
       } else {
         loggers.pipeline.error("Pipeline failed", { error: String(error) });
         if (captureContext.source === "hotkey") {
