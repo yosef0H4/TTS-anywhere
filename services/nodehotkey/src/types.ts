@@ -25,6 +25,15 @@ export type MonitorBounds = {
   height: number;
 };
 
+export type WindowHandle = unknown;
+
+export type WindowInfo = {
+  handle: WindowHandle;
+  bounds: MonitorBounds;
+  clientBounds: MonitorBounds;
+  minimized: boolean;
+};
+
 export type FrozenCaptureHandle = {
   id: number;
   bounds: MonitorBounds;

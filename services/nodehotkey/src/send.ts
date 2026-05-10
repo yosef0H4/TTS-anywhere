@@ -10,12 +10,17 @@ import {
   KEYEVENTF_SCANCODE,
   MAPVK_VK_TO_VSC_EX,
   MapVirtualKeyW,
+  PostMessageW,
   SendInput,
   VK_CONTROL,
   VK_RWIN,
   VK_LWIN,
   VK_MENU,
-  VK_SHIFT
+  VK_SHIFT,
+  WM_KEYDOWN,
+  WM_KEYUP,
+  WM_SYSKEYDOWN,
+  WM_SYSKEYUP
 } from "./win32-bindings.js";
 
 type KeyboardInput = {
@@ -153,6 +158,34 @@ function sleepMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function keyboardMessageFor(vk: number, keyUp: boolean, altContext: boolean): number {
+  const useSystemMessage = vk === VK_MENU || altContext;
+  if (useSystemMessage) {
+    return keyUp ? WM_SYSKEYUP : WM_SYSKEYDOWN;
+  }
+  return keyUp ? WM_KEYUP : WM_KEYDOWN;
+}
+
+function keyboardMessageLParam(descriptor: KeyDescriptor, keyUp: boolean, altContext: boolean): number {
+  let lParam = 1 | ((descriptor.scanCode & 0xff) << 16);
+  if (descriptor.extended) lParam |= 1 << 24;
+  if (altContext) lParam |= 1 << 29;
+  if (keyUp) lParam |= (1 << 30) | (1 << 31);
+  return lParam >>> 0;
+}
+
+function postKeyboardMessage(targetWindow: unknown, descriptor: KeyDescriptor, keyUp: boolean, altContext: boolean): void {
+  const ok = PostMessageW(
+    targetWindow,
+    keyboardMessageFor(descriptor.vk, keyUp, altContext),
+    descriptor.vk,
+    keyboardMessageLParam(descriptor, keyUp, altContext)
+  );
+  if (!ok) {
+    throw new Error(`PostMessageW failed (lastError=${GetLastError()})`);
+  }
+}
+
 async function waitForExtraModifiersToRelease(specModifiers: number, options: SendHotkeyOptions): Promise<number> {
   const timeoutMs = Math.max(0, Math.floor(options.modifierReleaseSettleTimeoutMs ?? 250));
   const pollMs = Math.max(1, Math.floor(options.modifierReleaseSettlePollMs ?? 8));
@@ -221,5 +254,31 @@ export async function sendHotkey(input: string, options: SendHotkeyOptions = {})
   const inserted = SendInput(events.length, events, INPUT_SIZE);
   if (inserted !== events.length) {
     throw new Error(`SendInput inserted ${inserted}/${events.length} events (lastError=${GetLastError()})`);
+  }
+}
+
+export async function sendHotkeyToWindow(targetWindow: unknown, input: string, options: SendHotkeyOptions = {}): Promise<void> {
+  if (process.platform !== "win32") throw new Error("sendHotkeyToWindow is Windows-only");
+  if (!targetWindow) throw new Error("Target window handle is required");
+
+  const spec = parseSendSpec(input);
+  const downModifiers = modifierVks(spec.modifiers);
+  const specDescriptor = getKeyDescriptor(spec.vk);
+
+  for (const vk of downModifiers) {
+    const descriptor = getKeyDescriptor(vk);
+    postKeyboardMessage(targetWindow, descriptor, false, false);
+  }
+  postKeyboardMessage(targetWindow, specDescriptor, false, (spec.modifiers & MOD_ALT) !== 0);
+
+  const pressDurationMs = Math.max(0, Math.floor(options.pressDurationMs ?? 0));
+  if (pressDurationMs > 0) {
+    await sleepMs(pressDurationMs);
+  }
+
+  postKeyboardMessage(targetWindow, specDescriptor, true, (spec.modifiers & MOD_ALT) !== 0);
+  for (let i = downModifiers.length - 1; i >= 0; i -= 1) {
+    const descriptor = getKeyDescriptor(downModifiers[i] as number);
+    postKeyboardMessage(targetWindow, descriptor, true, false);
   }
 }

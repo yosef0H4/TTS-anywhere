@@ -2,7 +2,18 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import type { CaptureCropRect, FrozenCaptureHandle, MonitorBounds } from "./types.js";
+import type { CaptureCropRect, FrozenCaptureHandle, MonitorBounds, WindowHandle, WindowInfo } from "./types.js";
+import {
+  ClientToScreen,
+  GetClientRect,
+  GetForegroundWindow,
+  GetLastError,
+  GetWindowRect,
+  IsIconic,
+  IsWindow,
+  ensureDpiAwareness,
+  type Rect
+} from "./win32-bindings.js";
 
 type NativeFrozenCaptureHandle = FrozenCaptureHandle;
 
@@ -81,4 +92,62 @@ export function getMonitorBoundsAtPoint(x: number, y: number): MonitorBounds {
 
 export function getForegroundWindowBounds(): MonitorBounds {
   return loadCaptureModule().getForegroundWindowBounds();
+}
+
+function rectToBounds(rect: Rect): MonitorBounds {
+  const width = rect.right - rect.left;
+  const height = rect.bottom - rect.top;
+  if (width <= 0 || height <= 0) {
+    throw new Error("Window has empty bounds");
+  }
+  return {
+    left: rect.left,
+    top: rect.top,
+    width,
+    height
+  };
+}
+
+function getClientBounds(handle: WindowHandle): MonitorBounds {
+  const clientRect: Rect = { left: 0, top: 0, right: 0, bottom: 0 };
+  if (!GetClientRect(handle, clientRect)) {
+    throw new Error(`GetClientRect failed (lastError=${GetLastError()})`);
+  }
+  const topLeft = { x: clientRect.left, y: clientRect.top };
+  const bottomRight = { x: clientRect.right, y: clientRect.bottom };
+  if (!ClientToScreen(handle, topLeft) || !ClientToScreen(handle, bottomRight)) {
+    throw new Error(`ClientToScreen failed (lastError=${GetLastError()})`);
+  }
+  return rectToBounds({
+    left: topLeft.x,
+    top: topLeft.y,
+    right: bottomRight.x,
+    bottom: bottomRight.y
+  });
+}
+
+export function getWindowInfo(handle: WindowHandle): WindowInfo {
+  ensureDpiAwareness();
+  if (!IsWindow(handle)) {
+    throw new Error("Window handle is invalid");
+  }
+  const rect: Rect = { left: 0, top: 0, right: 0, bottom: 0 };
+  if (!GetWindowRect(handle, rect)) {
+    throw new Error(`GetWindowRect failed (lastError=${GetLastError()})`);
+  }
+  return {
+    handle,
+    bounds: rectToBounds(rect),
+    clientBounds: getClientBounds(handle),
+    minimized: IsIconic(handle)
+  };
+}
+
+export function getForegroundWindowInfo(): WindowInfo {
+  ensureDpiAwareness();
+  const handle = GetForegroundWindow();
+  if (!handle) {
+    throw new Error("No foreground window found");
+  }
+  return getWindowInfo(handle);
 }

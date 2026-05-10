@@ -42,10 +42,12 @@ export const VK_RWIN = 0x5c;
 
 export type WinMsg = { message?: number; wParam?: number | bigint };
 export type Point = { x: number; y: number };
+export type Rect = { left: number; top: number; right: number; bottom: number };
 export type KbdLlHookStruct = { vkCode: number; scanCode: number; flags: number; time: number; dwExtraInfo: number };
 export type RegisteredCallback = ReturnType<typeof koffi.register>;
 
 const POINT = koffi.struct("POINT", { x: "long", y: "long" });
+const RECT = koffi.struct("RECT", { left: "long", top: "long", right: "long", bottom: "long" });
 const WNDCLASSEXW = koffi.struct("WNDCLASSEXW", {
   cbSize: "uint32",
   style: "uint32",
@@ -126,6 +128,24 @@ export const MapVirtualKeyW = user32.func("uint32 __stdcall MapVirtualKeyW(uint3
   code: number,
   mapType: number
 ) => number;
+export const GetForegroundWindow = user32.func("void * __stdcall GetForegroundWindow()") as () => unknown;
+export const GetWindowRect = user32.func("bool __stdcall GetWindowRect(void *hWnd, _Out_ RECT *lpRect)") as (
+  hWnd: unknown,
+  rect: Rect
+) => boolean;
+export const GetClientRect = user32.func("bool __stdcall GetClientRect(void *hWnd, _Out_ RECT *lpRect)") as (
+  hWnd: unknown,
+  rect: Rect
+) => boolean;
+export const ClientToScreen = user32.func("bool __stdcall ClientToScreen(void *hWnd, _Inout_ POINT *lpPoint)") as (
+  hWnd: unknown,
+  point: Point
+) => boolean;
+export const IsWindow = user32.func("bool __stdcall IsWindow(void *hWnd)") as (hWnd: unknown) => boolean;
+export const IsIconic = user32.func("bool __stdcall IsIconic(void *hWnd)") as (hWnd: unknown) => boolean;
+export const PostMessageW = user32.func(
+  "bool __stdcall PostMessageW(void *hWnd, uint32 Msg, uintptr wParam, intptr lParam)"
+) as (hWnd: unknown, msg: number, wParam: number | bigint, lParam: number | bigint) => boolean;
 
 export const GetCursorPos = user32.func("bool __stdcall GetCursorPos(_Out_ POINT *lpPoint)") as (pt: Point) => boolean;
 export const GetModuleHandleW = kernel32.func("void * __stdcall GetModuleHandleW(const char16_t *lpModuleName)") as (

@@ -8,10 +8,14 @@ import {
   cropFrozenCapture,
   disposeFrozenCapture,
   getForegroundWindowBounds,
+  getForegroundWindowInfo,
+  getWindowInfo,
   HotkeySession,
   parseSendSpec,
   sendHotkey,
-  type FrozenCaptureHandle
+  sendHotkeyToWindow,
+  type FrozenCaptureHandle,
+  type WindowHandle
 } from "nodehotkey";
 import fs from "node:fs";
 import net from "node:net";
@@ -85,6 +89,15 @@ interface ManagedOcrServiceUrls {
 type ManagedServiceId = "paddle" | "edge";
 type AutoReaderState = "idle" | "processing" | "advancing";
 type AutoReaderCapturePhase = "initial" | "replay";
+type AutoReaderTargetWindow = {
+  handle: WindowHandle;
+  region: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+};
 type AutoReaderPageResult = {
   runId: number;
   outcome: "completed" | "failed" | "cancelled";
@@ -214,6 +227,8 @@ let autoReaderRunCounter = 0;
 let autoReaderActiveRunId: number | null = null;
 let autoReaderLastTextSignature: string | null = null;
 let autoReaderNoTextStreak = 0;
+let autoReaderTargetWindow: AutoReaderTargetWindow | null = null;
+let lastSavedCaptureTargetWindow: AutoReaderTargetWindow | null = null;
 let clipboardWatcherEnabled = false;
 let clipboardWatcherPollTimer: NodeJS.Timeout | null = null;
 let clipboardWatcherPollInFlight = false;
@@ -1756,6 +1771,12 @@ async function finalizeSelection(point: { x: number; y: number }): Promise<void>
       width: payload.width,
       height: payload.height
     });
+    rememberLastCaptureTargetWindow({
+      left: payload.x,
+      top: payload.y,
+      width: payload.width,
+      height: payload.height
+    });
     const cropLeft = payload.x - frozen.bounds.left;
     const cropTop = payload.y - frozen.bounds.top;
     const pngBuffer = await cropFrozenCapture(frozen.id, {
@@ -1800,9 +1821,7 @@ async function finalizeSelection(point: { x: number; y: number }): Promise<void>
       emitHotkeyFeedback(sourceHotkey, "error", String(error));
     }
     if (sourceHotkey === "autoReader") {
-      autoReaderState = "idle";
-      autoReaderActiveRunId = null;
-      autoReaderLastTextSignature = null;
+      resetAutoReaderRun();
     }
     diag("capture.error", { error: String(error) });
   } finally {
@@ -1885,6 +1904,72 @@ async function captureSavedRect(options: {
     diag(options.errorEvent, {
       error: String(error),
       rect
+    });
+    throw error;
+  } finally {
+    if (frozen) {
+      try {
+        disposeFrozenCapture(frozen.id);
+      } catch {
+        // best effort
+      }
+    }
+  }
+}
+
+async function captureAutoReaderTargetRect(options: {
+  sourceEvent: string;
+  hotkey?: ElectronHotkeyKey;
+  automation: CaptureAutomationPayload;
+  successEvent: string;
+  errorEvent: string;
+}): Promise<void> {
+  let frozen: FrozenCaptureHandle | null = null;
+  try {
+    const { rect } = resolveAutoReaderTargetRect();
+    const anchorX = rect.left + Math.floor(rect.width / 2);
+    const anchorY = rect.top + Math.floor(rect.height / 2);
+    frozen = await beginFrozenMonitorCaptureAtPoint(anchorX, anchorY);
+    flashOverlayRect(toOverlayRect(rect));
+
+    const cropLeft = rect.left - frozen.bounds.left;
+    const cropTop = rect.top - frozen.bounds.top;
+    const pngBuffer = await cropFrozenCapture(frozen.id, {
+      x: cropLeft,
+      y: cropTop,
+      width: rect.width,
+      height: rect.height
+    });
+
+    emitCapturedImage(pngBuffer, {
+      captureKind: "selection",
+      ...(options.hotkey ? { hotkey: options.hotkey } : {}),
+      automation: options.automation,
+      bounds: {
+        left: frozen.bounds.left,
+        top: frozen.bounds.top,
+        width: frozen.bounds.width,
+        height: frozen.bounds.height
+      },
+      frozen,
+      crop: {
+        x: cropLeft,
+        y: cropTop,
+        width: rect.width,
+        height: rect.height
+      },
+      sourceEvent: options.sourceEvent
+    });
+    diag(options.successEvent, {
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+      frozenAgeMs: Date.now() - frozen.capturedAt
+    });
+  } catch (error) {
+    diag(options.errorEvent, {
+      error: String(error)
     });
     throw error;
   } finally {
@@ -2079,11 +2164,84 @@ function isValidAutoReaderNoTextRetryCount(value: number | undefined): value is 
   return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 20;
 }
 
+function rectRight(rect: { left: number; width: number }): number {
+  return rect.left + rect.width;
+}
+
+function rectBottom(rect: { top: number; height: number }): number {
+  return rect.top + rect.height;
+}
+
+function lockAutoReaderTargetWindow(selectionRect: { left: number; top: number; width: number; height: number }): AutoReaderTargetWindow {
+  const windowInfo = getForegroundWindowInfo();
+  if (windowInfo.minimized) {
+    throw new Error("The target window is minimized.");
+  }
+  if (
+    selectionRect.left < windowInfo.bounds.left ||
+    selectionRect.top < windowInfo.bounds.top ||
+    rectRight(selectionRect) > rectRight(windowInfo.bounds) ||
+    rectBottom(selectionRect) > rectBottom(windowInfo.bounds)
+  ) {
+    throw new Error("Start automatic reader with the target window active and the saved capture area visible inside it.");
+  }
+  return {
+    handle: windowInfo.handle,
+    region: {
+      x: selectionRect.left - windowInfo.bounds.left,
+      y: selectionRect.top - windowInfo.bounds.top,
+      width: selectionRect.width,
+      height: selectionRect.height
+    }
+  };
+}
+
+function resolveTargetRectForWindow(target: AutoReaderTargetWindow): { rect: { left: number; top: number; width: number; height: number } } {
+  const windowInfo = getWindowInfo(target.handle);
+  if (windowInfo.minimized) {
+    throw new Error("The target window is minimized.");
+  }
+  const rect = {
+    left: windowInfo.bounds.left + target.region.x,
+    top: windowInfo.bounds.top + target.region.y,
+    width: target.region.width,
+    height: target.region.height
+  };
+  if (
+    rect.left < windowInfo.bounds.left ||
+    rect.top < windowInfo.bounds.top ||
+    rectRight(rect) > rectRight(windowInfo.bounds) ||
+    rectBottom(rect) > rectBottom(windowInfo.bounds)
+  ) {
+    throw new Error("The saved capture area no longer fits inside the locked target window.");
+  }
+  return { rect };
+}
+
+function resolveAutoReaderTargetRect(): { rect: { left: number; top: number; width: number; height: number } } {
+  const target = autoReaderTargetWindow;
+  if (!target) {
+    throw new Error("Automatic reader target window is not locked.");
+  }
+  return resolveTargetRectForWindow(target);
+}
+
+function rememberLastCaptureTargetWindow(rect: { left: number; top: number; width: number; height: number }): void {
+  try {
+    lastSavedCaptureTargetWindow = lockAutoReaderTargetWindow(rect);
+    diag("capture.last-target-window.saved", rect);
+  } catch (error) {
+    lastSavedCaptureTargetWindow = null;
+    diag("capture.last-target-window.skipped", { error: String(error), rect });
+  }
+}
+
 function resetAutoReaderRun(): void {
   autoReaderState = "idle";
   autoReaderActiveRunId = null;
   autoReaderLastTextSignature = null;
   autoReaderNoTextStreak = 0;
+  autoReaderTargetWindow = null;
   selectionAutomation = null;
 }
 
@@ -2124,13 +2282,27 @@ async function beginAutoReaderRun(): Promise<void> {
     return;
   }
   autoReaderRunCounter += 1;
+  let targetWindow: AutoReaderTargetWindow;
+  try {
+    if (lastSavedCaptureTargetWindow) {
+      resolveTargetRectForWindow(lastSavedCaptureTargetWindow);
+      targetWindow = lastSavedCaptureTargetWindow;
+    } else {
+      targetWindow = lockAutoReaderTargetWindow(lastSavedCaptureRect);
+    }
+  } catch (error) {
+    emitHotkeyFeedback("autoReader", "error", String(error));
+    diag("auto.reader.start.invalid-target", { error: String(error), rect: lastSavedCaptureRect });
+    return;
+  }
   const runId = autoReaderRunCounter;
   autoReaderActiveRunId = runId;
   autoReaderState = "processing";
   autoReaderLastTextSignature = null;
   autoReaderNoTextStreak = 0;
+  autoReaderTargetWindow = targetWindow;
   try {
-    await captureSavedRect({
+    await captureAutoReaderTargetRect({
       sourceEvent: "auto.reader.capture.initial.sent",
       hotkey: "autoReader",
       automation: { kind: "auto_reader", runId, phase: "initial" },
@@ -2155,7 +2327,10 @@ async function advanceAutoReader(runId: number): Promise<void> {
 
   autoReaderState = "advancing";
   try {
-    await sendHotkey(autoReaderAdvanceHotkey, { mode: "scancode", pressDurationMs: 24 });
+    if (!autoReaderTargetWindow) {
+      throw new Error("Automatic reader target window is not locked.");
+    }
+    await sendHotkeyToWindow(autoReaderTargetWindow.handle, autoReaderAdvanceHotkey, { pressDurationMs: 24 });
   } catch (error) {
     stopAutoReader(`Automatic reader could not send "${autoReaderAdvanceHotkey}": ${String(error)}`, "error");
     return;
@@ -2167,7 +2342,7 @@ async function advanceAutoReader(runId: number): Promise<void> {
   }
 
   try {
-    await captureSavedRect({
+    await captureAutoReaderTargetRect({
       sourceEvent: "auto.reader.capture.replay.sent",
       hotkey: "autoReader",
       automation: { kind: "auto_reader", runId, phase: "replay" },
