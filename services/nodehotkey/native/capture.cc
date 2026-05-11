@@ -7,11 +7,21 @@
 #include <d3d11.h>
 #include <dxgi1_2.h>
 #include <dwmapi.h>
+#include <roapi.h>
+#include <windows.graphics.capture.interop.h>
+#include <windows.graphics.directx.direct3d11.interop.h>
+#include <winrt/base.h>
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Graphics.h>
+#include <winrt/Windows.Graphics.Capture.h>
+#include <winrt/Windows.Graphics.DirectX.h>
+#include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
 #include <wrl/client.h>
 
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -24,6 +34,10 @@
 #pragma comment(lib, "user32.lib")
 
 using Microsoft::WRL::ComPtr;
+
+namespace wgc = winrt::Windows::Graphics::Capture;
+namespace wgdx = winrt::Windows::Graphics::DirectX;
+namespace wgdx11 = winrt::Windows::Graphics::DirectX::Direct3D11;
 
 namespace {
 
@@ -54,6 +68,25 @@ class ComInitGuard {
 
  private:
   HRESULT hr_;
+};
+
+class RoInitGuard {
+ public:
+  RoInitGuard() : hr_(RoInitialize(RO_INIT_MULTITHREADED)) {}
+  ~RoInitGuard() {
+    if (SUCCEEDED(hr_)) RoUninitialize();
+  }
+
+  HRESULT hr() const { return hr_; }
+
+ private:
+  HRESULT hr_;
+};
+
+struct D3DContext {
+  ComPtr<ID3D11Device> device;
+  ComPtr<ID3D11DeviceContext> context;
+  wgdx11::IDirect3DDevice interop_device{ nullptr };
 };
 
 uint64_t CurrentUnixMs() {
@@ -121,6 +154,185 @@ OutputSelection FindOutputAtPoint(LONG x, LONG y) {
   throw std::runtime_error("No monitor found for point");
 }
 
+std::vector<uint8_t> ReadTextureBgra(
+  ID3D11Device* device,
+  ID3D11DeviceContext* context,
+  ID3D11Texture2D* source_texture,
+  uint32_t* out_width,
+  uint32_t* out_height
+) {
+  D3D11_TEXTURE2D_DESC desc{};
+  source_texture->GetDesc(&desc);
+
+  D3D11_TEXTURE2D_DESC staging_desc = desc;
+  staging_desc.BindFlags = 0;
+  staging_desc.MiscFlags = 0;
+  staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+  staging_desc.Usage = D3D11_USAGE_STAGING;
+
+  ComPtr<ID3D11Texture2D> staging_texture;
+  ThrowIfFailed(device->CreateTexture2D(&staging_desc, nullptr, &staging_texture), "CreateTexture2D failed");
+  context->CopyResource(staging_texture.Get(), source_texture);
+  context->Flush();
+
+  D3D11_MAPPED_SUBRESOURCE mapped{};
+  ThrowIfFailed(context->Map(staging_texture.Get(), 0, D3D11_MAP_READ, 0, &mapped), "Map failed");
+
+  const uint32_t width = desc.Width;
+  const uint32_t height = desc.Height;
+  std::vector<uint8_t> pixels(static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
+  for (uint32_t row = 0; row < height; ++row) {
+    const uint8_t* source_row = static_cast<const uint8_t*>(mapped.pData) + static_cast<size_t>(row) * mapped.RowPitch;
+    uint8_t* dest_row = pixels.data() + static_cast<size_t>(row) * static_cast<size_t>(width) * 4;
+    std::memcpy(dest_row, source_row, static_cast<size_t>(width) * 4);
+  }
+
+  context->Unmap(staging_texture.Get(), 0);
+  *out_width = width;
+  *out_height = height;
+  return pixels;
+}
+
+HWND ReadWindowHandleValue(const Napi::Value& value) {
+  if (value.IsExternal()) {
+    return static_cast<HWND>(value.As<Napi::External<void>>().Data());
+  }
+  if (value.IsBigInt()) {
+    bool lossless = false;
+    const uint64_t raw = value.As<Napi::BigInt>().Uint64Value(&lossless);
+    if (!lossless) throw std::runtime_error("Window handle bigint was truncated");
+    return reinterpret_cast<HWND>(static_cast<uintptr_t>(raw));
+  }
+  if (value.IsNumber()) {
+    const double raw = value.As<Napi::Number>().DoubleValue();
+    return reinterpret_cast<HWND>(static_cast<uintptr_t>(raw));
+  }
+  throw std::runtime_error("Window handle must be an external pointer or integer");
+}
+
+D3DContext CreateWgcD3DContext() {
+  D3DContext result{};
+  UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+  HRESULT hr = D3D11CreateDevice(
+    nullptr,
+    D3D_DRIVER_TYPE_HARDWARE,
+    nullptr,
+    flags,
+    nullptr,
+    0,
+    D3D11_SDK_VERSION,
+    &result.device,
+    nullptr,
+    &result.context
+  );
+  if (FAILED(hr)) {
+    ThrowIfFailed(
+      D3D11CreateDevice(
+        nullptr,
+        D3D_DRIVER_TYPE_WARP,
+        nullptr,
+        flags,
+        nullptr,
+        0,
+        D3D11_SDK_VERSION,
+        &result.device,
+        nullptr,
+        &result.context
+      ),
+      "D3D11CreateDevice failed"
+    );
+  }
+
+  ComPtr<IDXGIDevice> dxgi_device;
+  ThrowIfFailed(result.device.As(&dxgi_device), "Failed to query IDXGIDevice");
+
+  winrt::com_ptr<IInspectable> inspectable_device;
+  ThrowIfFailed(
+    CreateDirect3D11DeviceFromDXGIDevice(dxgi_device.Get(), inspectable_device.put()),
+    "CreateDirect3D11DeviceFromDXGIDevice failed"
+  );
+  result.interop_device = inspectable_device.as<wgdx11::IDirect3DDevice>();
+  return result;
+}
+
+wgc::GraphicsCaptureItem CreateCaptureItemForWindow(HWND hwnd) {
+  auto factory = winrt::get_activation_factory<wgc::GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
+  wgc::GraphicsCaptureItem item{ nullptr };
+  ThrowIfFailed(
+    factory->CreateForWindow(hwnd, winrt::guid_of<wgc::GraphicsCaptureItem>(), winrt::put_abi(item)),
+    "IGraphicsCaptureItemInterop::CreateForWindow failed"
+  );
+  return item;
+}
+
+std::vector<uint8_t> CaptureWindowBgra(HWND hwnd, uint32_t* out_width, uint32_t* out_height) {
+  if (!wgc::GraphicsCaptureSession::IsSupported()) {
+    throw std::runtime_error("Windows Graphics Capture is unavailable on this system");
+  }
+
+  D3DContext d3d = CreateWgcD3DContext();
+  wgc::GraphicsCaptureItem item = CreateCaptureItemForWindow(hwnd);
+  const auto item_size = item.Size();
+  if (item_size.Width < 1 || item_size.Height < 1) {
+    throw std::runtime_error("Target window has empty capture bounds");
+  }
+
+  auto frame_pool = wgc::Direct3D11CaptureFramePool::CreateFreeThreaded(
+    d3d.interop_device,
+    wgdx::DirectXPixelFormat::B8G8R8A8UIntNormalized,
+    1,
+    item_size
+  );
+  auto session = frame_pool.CreateCaptureSession(item);
+
+  HANDLE capture_event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  if (!capture_event) {
+    throw std::runtime_error("CreateEventW failed");
+  }
+
+  std::exception_ptr frame_error;
+  wgc::Direct3D11CaptureFrame frame{ nullptr };
+  auto token = frame_pool.FrameArrived([&](auto const& sender, auto const&) {
+    try {
+      if (!frame) {
+        frame = sender.TryGetNextFrame();
+      }
+    } catch (...) {
+      frame_error = std::current_exception();
+    }
+    SetEvent(capture_event);
+  });
+
+  session.StartCapture();
+  const DWORD wait_result = WaitForSingleObject(capture_event, 1500);
+  frame_pool.FrameArrived(token);
+  CloseHandle(capture_event);
+  session.Close();
+  frame_pool.Close();
+
+  if (wait_result != WAIT_OBJECT_0) {
+    throw std::runtime_error("Timed out waiting for window capture frame");
+  }
+  if (frame_error) {
+    std::rethrow_exception(frame_error);
+  }
+  if (!frame) {
+    throw std::runtime_error("Window capture produced no frame");
+  }
+
+  IInspectable* surface_inspectable = reinterpret_cast<IInspectable*>(winrt::get_abi(frame.Surface()));
+  ComPtr<Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess> surface_access;
+  ThrowIfFailed(
+    surface_inspectable->QueryInterface(IID_PPV_ARGS(&surface_access)),
+    "Failed to query IDirect3DDxgiInterfaceAccess"
+  );
+
+  ComPtr<ID3D11Texture2D> source_texture;
+  ThrowIfFailed(surface_access->GetInterface(IID_PPV_ARGS(&source_texture)), "IDirect3DDxgiInterfaceAccess::GetInterface failed");
+
+  return ReadTextureBgra(d3d.device.Get(), d3d.context.Get(), source_texture.Get(), out_width, out_height);
+}
+
 std::vector<uint8_t> CaptureOutputBgra(const OutputSelection& selection, uint32_t* out_width, uint32_t* out_height) {
   ComPtr<ID3D11Device> device;
   ComPtr<ID3D11DeviceContext> context;
@@ -173,38 +385,8 @@ std::vector<uint8_t> CaptureOutputBgra(const OutputSelection& selection, uint32_
 
   ComPtr<ID3D11Texture2D> source_texture;
   ThrowIfFailed(acquired.resource.As(&source_texture), "Failed to query frame texture");
-
-  D3D11_TEXTURE2D_DESC desc{};
-  source_texture->GetDesc(&desc);
-
-  D3D11_TEXTURE2D_DESC staging_desc = desc;
-  staging_desc.BindFlags = 0;
-  staging_desc.MiscFlags = 0;
-  staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-  staging_desc.Usage = D3D11_USAGE_STAGING;
-
-  ComPtr<ID3D11Texture2D> staging_texture;
-  ThrowIfFailed(device->CreateTexture2D(&staging_desc, nullptr, &staging_texture), "CreateTexture2D failed");
-  context->CopyResource(staging_texture.Get(), source_texture.Get());
-  context->Flush();
-
-  D3D11_MAPPED_SUBRESOURCE mapped{};
-  ThrowIfFailed(context->Map(staging_texture.Get(), 0, D3D11_MAP_READ, 0, &mapped), "Map failed");
-
-  const uint32_t width = desc.Width;
-  const uint32_t height = desc.Height;
-  std::vector<uint8_t> pixels(static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
-  for (uint32_t row = 0; row < height; ++row) {
-    const uint8_t* source_row = static_cast<const uint8_t*>(mapped.pData) + static_cast<size_t>(row) * mapped.RowPitch;
-    uint8_t* dest_row = pixels.data() + static_cast<size_t>(row) * static_cast<size_t>(width) * 4;
-    std::memcpy(dest_row, source_row, static_cast<size_t>(width) * 4);
-  }
-
-  context->Unmap(staging_texture.Get(), 0);
+  std::vector<uint8_t> pixels = ReadTextureBgra(device.Get(), context.Get(), source_texture.Get(), out_width, out_height);
   duplication->ReleaseFrame();
-
-  *out_width = width;
-  *out_height = height;
   return pixels;
 }
 
@@ -332,6 +514,30 @@ RECT ReadCropRect(const Napi::Object& rect) {
   return RECT{ x, y, x + width, y + height };
 }
 
+Napi::Value CaptureWindowRegionWrapped(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  ComInitGuard com_guard;
+  RoInitGuard ro_guard;
+  if (FAILED(ro_guard.hr()) && ro_guard.hr() != RPC_E_CHANGED_MODE) {
+    ThrowIfFailed(ro_guard.hr(), "RoInitialize failed");
+  }
+
+  const HWND hwnd = ReadWindowHandleValue(info[0]);
+  if (!hwnd || !IsWindow(hwnd)) {
+    throw std::runtime_error("Window handle is invalid");
+  }
+
+  const RECT rect = ReadCropRect(info[1].As<Napi::Object>());
+  uint32_t width = 0;
+  uint32_t height = 0;
+  std::vector<uint8_t> pixels = CaptureWindowBgra(hwnd, &width, &height);
+  std::vector<uint8_t> cropped = CropBgra(pixels, width, height, rect);
+  const uint32_t crop_width = static_cast<uint32_t>(rect.right - rect.left);
+  const uint32_t crop_height = static_cast<uint32_t>(rect.bottom - rect.top);
+  std::vector<uint8_t> encoded = EncodePngBgra(cropped, crop_width, crop_height);
+  return Napi::Buffer<uint8_t>::Copy(env, encoded.data(), encoded.size());
+}
+
 Napi::Value CaptureMonitorAtPointWrapped(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   ComInitGuard com_guard;
@@ -420,6 +626,7 @@ Napi::Value GetForegroundWindowBoundsWrapped(const Napi::CallbackInfo& info) {
 }
 
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
+  exports.Set("captureWindowRegion", Napi::Function::New(env, CaptureWindowRegionWrapped));
   exports.Set("captureMonitorAtPoint", Napi::Function::New(env, CaptureMonitorAtPointWrapped));
   exports.Set("beginFrozenMonitorCaptureAtPoint", Napi::Function::New(env, BeginFrozenMonitorCaptureAtPointWrapped));
   exports.Set("cropFrozenCapture", Napi::Function::New(env, CropFrozenCaptureWrapped));

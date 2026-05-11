@@ -22,6 +22,7 @@ export { parseHotkeySpec } from "./hotkey-parser.js";
 export { parseSendSpec, sendHotkey, sendHotkeyToWindow } from "./send.js";
 export { snapshotClipboard, restoreClipboard, clearClipboard, readClipboardText, waitForClipboardChange, captureCopyToText } from "./clipboard.js";
 export {
+  captureWindowRegion,
   captureMonitorAtPoint,
   beginFrozenMonitorCaptureAtPoint,
   cropFrozenCapture,

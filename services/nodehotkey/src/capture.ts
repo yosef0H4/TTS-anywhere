@@ -18,6 +18,7 @@ import {
 type NativeFrozenCaptureHandle = FrozenCaptureHandle;
 
 type NativeCaptureModule = {
+  captureWindowRegion(targetWindow: WindowHandle, rect: CaptureCropRect): Buffer;
   captureMonitorAtPoint(x: number, y: number): Buffer;
   beginFrozenMonitorCaptureAtPoint(x: number, y: number): NativeFrozenCaptureHandle;
   cropFrozenCapture(id: number, rect: CaptureCropRect): Buffer;
@@ -56,6 +57,7 @@ function loadCaptureModule(): NativeCaptureModule {
   const addonPath = resolveCaptureAddonPath();
   const loaded = require(addonPath) as Partial<NativeCaptureModule>;
   if (
+    typeof loaded.captureWindowRegion !== "function" ||
     typeof loaded.captureMonitorAtPoint !== "function" ||
     typeof loaded.beginFrozenMonitorCaptureAtPoint !== "function" ||
     typeof loaded.cropFrozenCapture !== "function" ||
@@ -72,6 +74,10 @@ function loadCaptureModule(): NativeCaptureModule {
 
 export async function captureMonitorAtPoint(x: number, y: number): Promise<Buffer> {
   return loadCaptureModule().captureMonitorAtPoint(x, y);
+}
+
+export async function captureWindowRegion(targetWindow: WindowHandle, rect: CaptureCropRect): Promise<Buffer> {
+  return loadCaptureModule().captureWindowRegion(targetWindow, rect);
 }
 
 export async function beginFrozenMonitorCaptureAtPoint(x: number, y: number): Promise<FrozenCaptureHandle> {

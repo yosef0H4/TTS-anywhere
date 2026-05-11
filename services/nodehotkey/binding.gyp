@@ -51,14 +51,16 @@
         [
           "OS=='win'",
           {
-            "libraries": [
-              "-ld3d11",
-              "-ldxgi",
-              "-ldwmapi",
-              "-lole32",
-              "-lwindowscodecs",
-              "-luser32"
-            ],
+             "libraries": [
+               "-ld3d11",
+               "-ldxgi",
+               "-ldwmapi",
+                "-lole32",
+                "-lruntimeobject",
+                "-lwindowsapp",
+                "-lwindowscodecs",
+                "-luser32"
+              ],
             "msvs_settings": {
               "VCCLCompilerTool": {
                 "ExceptionHandling": 1,

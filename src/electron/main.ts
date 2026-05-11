@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import {
   beginFrozenMonitorCaptureAtPoint,
   BorderOverlay,
+  captureWindowRegion,
   captureCopyToText,
   cropFrozenCapture,
   disposeFrozenCapture,
@@ -1926,38 +1927,77 @@ async function captureAutoReaderTargetRect(options: {
 }): Promise<void> {
   let frozen: FrozenCaptureHandle | null = null;
   try {
-    const { rect } = resolveAutoReaderTargetRect();
-    const anchorX = rect.left + Math.floor(rect.width / 2);
-    const anchorY = rect.top + Math.floor(rect.height / 2);
-    frozen = await beginFrozenMonitorCaptureAtPoint(anchorX, anchorY);
+    const target = autoReaderTargetWindow;
+    if (!target) {
+      throw new Error("Automatic reader target window is not locked.");
+    }
+    const { rect } = resolveTargetRectForWindow(target);
     flashOverlayRect(toOverlayRect(rect));
-
-    const cropLeft = rect.left - frozen.bounds.left;
-    const cropTop = rect.top - frozen.bounds.top;
-    const pngBuffer = await cropFrozenCapture(frozen.id, {
-      x: cropLeft,
-      y: cropTop,
+    let captureBackend: "windows_graphics_capture" | "desktop_duplication" = "windows_graphics_capture";
+    let pngBuffer: Buffer;
+    let bounds: Record<string, unknown> = {
+      left: rect.left,
+      top: rect.top,
       width: rect.width,
       height: rect.height
-    });
+    };
+    let crop: Record<string, unknown> = {
+      x: target.region.x,
+      y: target.region.y,
+      width: target.region.width,
+      height: target.region.height
+    };
+    try {
+      pngBuffer = await captureWindowRegion(target.handle, {
+        x: target.region.x,
+        y: target.region.y,
+        width: target.region.width,
+        height: target.region.height
+      });
+    } catch (windowCaptureError) {
+      captureBackend = "desktop_duplication";
+      diag("auto.reader.capture.window-capture.failed", {
+        error: String(windowCaptureError),
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height
+      });
+      const anchorX = rect.left + Math.floor(rect.width / 2);
+      const anchorY = rect.top + Math.floor(rect.height / 2);
+      frozen = await beginFrozenMonitorCaptureAtPoint(anchorX, anchorY);
+      const cropLeft = rect.left - frozen.bounds.left;
+      const cropTop = rect.top - frozen.bounds.top;
+      pngBuffer = await cropFrozenCapture(frozen.id, {
+        x: cropLeft,
+        y: cropTop,
+        width: rect.width,
+        height: rect.height
+      });
+      bounds = {
+        left: frozen.bounds.left,
+        top: frozen.bounds.top,
+        width: frozen.bounds.width,
+        height: frozen.bounds.height
+      };
+      crop = {
+        x: cropLeft,
+        y: cropTop,
+        width: rect.width,
+        height: rect.height
+      };
+    }
 
     emitCapturedImage(pngBuffer, {
       captureKind: "selection",
       ...(options.hotkey ? { hotkey: options.hotkey } : {}),
       automation: options.automation,
       bounds: {
-        left: frozen.bounds.left,
-        top: frozen.bounds.top,
-        width: frozen.bounds.width,
-        height: frozen.bounds.height
+        ...bounds,
+        captureBackend
       },
       frozen,
-      crop: {
-        x: cropLeft,
-        y: cropTop,
-        width: rect.width,
-        height: rect.height
-      },
+      crop,
       sourceEvent: options.sourceEvent
     });
     diag(options.successEvent, {
@@ -1965,7 +2005,8 @@ async function captureAutoReaderTargetRect(options: {
       top: rect.top,
       width: rect.width,
       height: rect.height,
-      frozenAgeMs: Date.now() - frozen.capturedAt
+      captureBackend,
+      frozenAgeMs: frozen ? Date.now() - frozen.capturedAt : undefined
     });
   } catch (error) {
     diag(options.errorEvent, {
