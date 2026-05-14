@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "piper",
+  "name": "Piper TTS",
+  "family": "tts",
+  "description": "OpenAI-compatible Piper adapter for local CPU speech synthesis.",
+  "healthPath": "/healthz",
+  "launcher": {
+    "executable": "uv",
+    "args": ["run", "tts-piper", "serve"]
+  },
+  "selectors": [
+    {
+      "id": "piper",
+      "name": "Piper",
+      "presetId": "default",
+      "capabilities": ["speech"]
+    }
+  ],
+  "presets": [
+    {
+      "id": "default",
+      "name": "Default",
+      "defaultPort": 8011,
+      "capabilities": ["speech"],
+      "configTargets": ["tts.baseUrl"]
+    }
+  ]
+}

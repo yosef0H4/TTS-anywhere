@@ -161,6 +161,22 @@ describe("parseServiceManifest", () => {
 });
 
 describe("scanServiceManifests", () => {
+  it("parses bundled service manifests from the workspace", () => {
+    const result = scanServiceManifests([{ path: path.join(workspaceRoot, "services"), source: "bundled" }]);
+
+    expect(result.errors).toEqual([]);
+    expect(result.services.map((service) => service.manifest.id)).toEqual(expect.arrayContaining([
+      "edge",
+      "h2ovl",
+      "kitten",
+      "kokoro",
+      "paddle",
+      "piper",
+      "rapid",
+      "windows-ocr"
+    ]));
+  });
+
   it("discovers manifests across bundled and external roots", () => {
     const root = makeTempDir();
     const bundledRoot = path.join(root, "services");

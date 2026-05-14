@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "kitten",
+  "name": "Kitten TTS",
+  "family": "tts",
+  "description": "OpenAI-compatible Kitten TTS adapter for CPU inference.",
+  "healthPath": "/healthz",
+  "launcher": {
+    "executable": "uv",
+    "args": ["run", "tts-kitten", "serve"]
+  },
+  "selectors": [
+    {
+      "id": "kitten",
+      "name": "Kitten",
+      "presetId": "default",
+      "capabilities": ["speech"]
+    }
+  ],
+  "presets": [
+    {
+      "id": "default",
+      "name": "Default",
+      "defaultPort": 8014,
+      "capabilities": ["speech"],
+      "configTargets": ["tts.baseUrl"]
+    }
+  ]
+}

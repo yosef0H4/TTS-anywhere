@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "kokoro",
+  "name": "Kokoro TTS",
+  "family": "tts",
+  "description": "OpenAI-compatible Kokoro TTS adapter for NVIDIA GPUs.",
+  "healthPath": "/healthz",
+  "launcher": {
+    "executable": "uv",
+    "args": ["run", "tts-kokoro", "serve"]
+  },
+  "selectors": [
+    {
+      "id": "kokoro-nvidia",
+      "name": "Kokoro NVIDIA",
+      "presetId": "nvidia",
+      "capabilities": ["speech"]
+    }
+  ],
+  "presets": [
+    {
+      "id": "nvidia",
+      "name": "NVIDIA",
+      "defaultPort": 8013,
+      "capabilities": ["speech"],
+      "configTargets": ["tts.baseUrl"],
+      "runtime": {
+        "speech": "gpu"
+      }
+    }
+  ]
+}

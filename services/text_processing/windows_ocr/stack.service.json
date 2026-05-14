@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "windows-ocr",
+  "name": "Windows OCR",
+  "family": "ocr",
+  "description": "OpenAI-compatible OCR service backed by Windows.Media.Ocr.",
+  "healthPath": "/healthz",
+  "launcher": {
+    "executable": "uv",
+    "args": ["run", "python", "launcher.py"]
+  },
+  "selectors": [
+    {
+      "id": "windows-ocr",
+      "name": "Windows OCR",
+      "presetId": "default",
+      "capabilities": ["ocr"]
+    }
+  ],
+  "presets": [
+    {
+      "id": "default",
+      "name": "Default",
+      "defaultPort": 8097,
+      "env": {
+        "UV_PROJECT_ENVIRONMENT": ".venv"
+      },
+      "capabilities": ["ocr"],
+      "configTargets": ["textProcessing.detectorBaseUrl"]
+    }
+  ]
+}

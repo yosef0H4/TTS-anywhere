@@ -71,6 +71,8 @@ const OVERLAY_THEME_COLORS: Record<UiTheme, { outer: string; inner: string }> = 
   }
 };
 
+const MAX_AUTO_READER_NO_TEXT_RETRY_COUNT = 1_000_000;
+
 function isUiTheme(value: unknown): value is UiTheme {
   return value === "zen" || value === "pink" || value === "dark-zen" || value === "dark-pink";
 }
@@ -2709,7 +2711,11 @@ function isValidAutoReaderDelay(value: number | undefined): value is number {
 }
 
 function isValidAutoReaderNoTextRetryCount(value: number | undefined): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 20;
+  return typeof value === "number"
+    && Number.isFinite(value)
+    && Number.isInteger(value)
+    && value >= 0
+    && value <= MAX_AUTO_READER_NO_TEXT_RETRY_COUNT;
 }
 
 function rectRight(rect: { left: number; width: number }): number {
@@ -4132,7 +4138,7 @@ ipcMain.handle("auto-reader:set-settings", (_event, settings: { advanceHotkey: s
     throw new Error("Automatic reader delay must be between 0 and 60000 milliseconds");
   }
   if (!isValidAutoReaderNoTextRetryCount(settings?.noTextRetryCount)) {
-    throw new Error("Automatic reader no-text retry count must be between 0 and 20");
+    throw new Error(`Automatic reader no-text retry count must be between 0 and ${MAX_AUTO_READER_NO_TEXT_RETRY_COUNT}`);
   }
   autoReaderAdvanceHotkey = normalizedHotkey;
   autoReaderAdvanceDelayMs = settings.advanceDelayMs;

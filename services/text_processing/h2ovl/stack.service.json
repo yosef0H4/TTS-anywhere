@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "h2ovl",
+  "name": "H2OVL OCR",
+  "family": "ocr",
+  "description": "OpenAI-compatible GPU OCR service for H2OVL Mississippi.",
+  "healthPath": "/healthz",
+  "launcher": {
+    "executable": "uv",
+    "args": ["run", "python", "launcher.py"]
+  },
+  "selectors": [
+    {
+      "id": "h2ovl-nvidia",
+      "name": "H2OVL NVIDIA",
+      "presetId": "nvidia-ocr",
+      "capabilities": ["ocr"]
+    }
+  ],
+  "presets": [
+    {
+      "id": "nvidia-ocr",
+      "name": "NVIDIA OCR",
+      "defaultPort": 8095,
+      "env": {
+        "UV_PROJECT_ENVIRONMENT": ".venv-gpu"
+      },
+      "capabilities": ["ocr"],
+      "configTargets": ["textProcessing.detectorBaseUrl"],
+      "runtime": {
+        "ocr": "gpu"
+      }
+    }
+  ]
+}

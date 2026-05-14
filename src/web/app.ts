@@ -75,6 +75,7 @@ interface NamedOption {
 }
 
 const SERVICE_NONE_OPTION = "__none__";
+const MAX_AUTO_READER_NO_TEXT_RETRY_COUNT = 1_000_000;
 
 type RequestLane = "ocr" | "detect_main" | "detect_modal";
 
@@ -1055,9 +1056,6 @@ export class WebApp {
     this.bindSelectorFetchBehavior(this.llmModelSelect, "llm-model", () => this.fetchLlmModels(false));
     this.bindSelectorFetchBehavior(this.ttsModelSelect, "tts-model", () => this.fetchTtsModels(false));
     this.bindSelectorFetchBehavior(this.ttsVoiceSelect, "tts-voice", () => this.fetchTtsVoices(false));
-    this.bindSelectorFetchBehavior(this.detectServiceSelect, "service-detect-select", () => this.refreshDiscoveredServicesDashboard());
-    this.bindSelectorFetchBehavior(this.ocrServiceSelect, "service-ocr-select", () => this.refreshDiscoveredServicesDashboard());
-    this.bindSelectorFetchBehavior(this.ttsServicePresetSelect, "service-tts-select", () => this.refreshDiscoveredServicesDashboard());
     this.updateTomSelectPlaceholders();
 
     this.must<HTMLButtonElement>("llm-refetch").addEventListener("click", () => {
@@ -2247,6 +2245,10 @@ export class WebApp {
       this.syncConfigFromInputs();
       void this.applyAutoReaderSettings();
     });
+    this.must<HTMLInputElement>("auto-reader-no-text-retry-count").addEventListener("change", () => {
+      this.syncConfigFromInputs();
+      void this.applyAutoReaderSettings();
+    });
     this.must<HTMLSelectElement>("detector-mode").addEventListener("change", () => this.syncConfigFromInputs());
     this.must<HTMLButtonElement>("detector-health").addEventListener("click", async () => {
       await this.checkDetectorHealth();
@@ -2560,7 +2562,10 @@ export class WebApp {
     );
     this.config.system.autoReaderNoTextRetryCount = Math.max(
       0,
-      Math.min(20, Math.floor(Number(this.must<HTMLInputElement>("auto-reader-no-text-retry-count").value) || DEFAULT_CONFIG.system.autoReaderNoTextRetryCount))
+      Math.min(
+        MAX_AUTO_READER_NO_TEXT_RETRY_COUNT,
+        Math.floor(Number(this.must<HTMLInputElement>("auto-reader-no-text-retry-count").value) || DEFAULT_CONFIG.system.autoReaderNoTextRetryCount)
+      )
     );
     this.config.system.clipboardWatcherEnabled = this.must<HTMLInputElement>("clipboard-watcher-enabled").checked;
     this.config.system.captureDrawRectangle = this.must<HTMLInputElement>("capture-draw-rectangle").checked;
