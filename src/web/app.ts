@@ -3794,8 +3794,6 @@ export class WebApp {
     const speedInput = this.must<HTMLInputElement>("speed-input");
     speedSlider.min = String(MIN_PLAYBACK_RATE);
     speedSlider.max = String(MAX_PLAYBACK_RATE);
-    speedInput.min = String(MIN_PLAYBACK_RATE);
-    speedInput.max = String(MAX_PLAYBACK_RATE);
 
     const updateVol = (val: number) => {
       this.applyVolumeValue(val);
@@ -3805,17 +3803,30 @@ export class WebApp {
       this.applyPlaybackRateValue(val);
     };
 
+    const commitSpeedInput = () => {
+      const raw = speedInput.value.trim();
+      if (!raw) {
+        speedInput.value = String(this.config.ui.playbackRate);
+        return;
+      }
+      const next = Number(raw);
+      if (!Number.isFinite(next)) {
+        speedInput.value = String(this.config.ui.playbackRate);
+        return;
+      }
+      this.applyPlaybackRateValue(next);
+    };
+
     volSlider.addEventListener("input", () => updateVol(Number(volSlider.value)));
     volInput.addEventListener("change", () => updateVol(Number(volInput.value)));
     speedSlider.addEventListener("input", () => updateSpeed(Number(speedSlider.value)));
-    speedInput.addEventListener("input", () => {
-      const raw = speedInput.value.trim();
-      if (!raw || raw.endsWith(".")) return;
-      const next = Number(raw);
-      if (!Number.isFinite(next)) return;
-      this.applyPlaybackRateValue(next);
+    speedInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        commitSpeedInput();
+      }
     });
-    speedInput.addEventListener("change", () => updateSpeed(Number(speedInput.value)));
+    speedInput.addEventListener("blur", commitSpeedInput);
+    speedInput.addEventListener("change", commitSpeedInput);
 
     this.must<HTMLButtonElement>("btn-play").addEventListener("click", async () => {
       if (this.audio.paused) {
@@ -3895,7 +3906,7 @@ export class WebApp {
     const speedInput = this.must<HTMLInputElement>("speed-input");
     this.audio.playbackRate = next;
     this.config.ui.playbackRate = next;
-    speedSlider.value = String(next);
+    speedSlider.value = String(Math.max(MIN_PLAYBACK_RATE, Math.min(MAX_PLAYBACK_RATE, next)));
     speedInput.value = String(next);
     if (persist) {
       this.store.save(this.config);

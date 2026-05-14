@@ -11,7 +11,7 @@ export function sanitizePlaybackRate(value: unknown, fallback = DEFAULT_CONFIG.u
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return fallback;
   }
-  return Math.min(MAX_PLAYBACK_RATE, Math.max(MIN_PLAYBACK_RATE, value));
+  return Math.max(MIN_PLAYBACK_RATE, value);
 }
 
 export class SettingsStore {

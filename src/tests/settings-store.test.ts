@@ -255,6 +255,16 @@ describe("settings store", () => {
     expect(store.load().ui.playbackRate).toBe(0.2);
   });
 
+  it("preserves playback speed above the slider range", () => {
+    const store = new SettingsStore();
+    const cfg = store.load();
+    cfg.ui.playbackRate = 10;
+    store.save(cfg);
+
+    expect(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}").ui?.playbackRate).toBe(10);
+    expect(store.load().ui.playbackRate).toBe(10);
+  });
+
   it("fills missing full screen capture hotkey from defaults", () => {
     const legacy = {
       ...DEFAULT_CONFIG,
