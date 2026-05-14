@@ -48,11 +48,22 @@ export type CaptureCropRect = {
   height: number;
 };
 
-export type SendSpec = {
+export type MouseButton = "left" | "right" | "middle";
+
+export type KeyboardSendSpec = {
+  kind: "keyboard";
   label: string;
   modifiers: number;
   vk: number;
 };
+
+export type MouseSendSpec = {
+  kind: "mouse";
+  label: string;
+  button: MouseButton;
+};
+
+export type SendSpec = KeyboardSendSpec | MouseSendSpec;
 
 export type SendMode = "vk" | "scancode";
 
@@ -62,6 +73,13 @@ export type SendHotkeyOptions = {
   modifierReleaseSettleTimeoutMs?: number;
   modifierReleaseSettlePollMs?: number;
   mode?: SendMode;
+};
+
+export type MouseClickOptions = {
+  pressDurationMs?: number;
+  restoreCursor?: boolean;
+  clickCount?: number;
+  interClickDelayMs?: number;
 };
 
 export type ClipboardWaitMode = "text_or_files" | "any";

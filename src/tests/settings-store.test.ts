@@ -53,7 +53,7 @@ describe("settings store", () => {
     cfg.system.clipboardWatcherEnabled = true;
     cfg.system.clipboardWatcherHotkey = "ctrl+shift+alt+b";
     cfg.system.autoReaderHotkey = "ctrl+shift+alt+r";
-    cfg.system.autoReaderAdvanceHotkey = "ctrl+pagedown";
+    cfg.system.autoReaderAdvanceHotkey = "click";
     cfg.system.autoReaderAdvanceDelayMs = 1350;
     cfg.system.autoReaderNoTextRetryCount = 6;
     cfg.system.abortHotkey = "ctrl+shift+alt+z";
@@ -81,7 +81,7 @@ describe("settings store", () => {
     expect(store.load().system.clipboardWatcherEnabled).toBe(true);
     expect(store.load().system.clipboardWatcherHotkey).toBe("ctrl+shift+alt+b");
     expect(store.load().system.autoReaderHotkey).toBe("ctrl+shift+alt+r");
-    expect(store.load().system.autoReaderAdvanceHotkey).toBe("ctrl+pagedown");
+    expect(store.load().system.autoReaderAdvanceHotkey).toBe("click");
     expect(store.load().system.autoReaderAdvanceDelayMs).toBe(1350);
     expect(store.load().system.autoReaderNoTextRetryCount).toBe(6);
     expect(store.load().system.abortHotkey).toBe("ctrl+shift+alt+z");

@@ -1,8 +1,9 @@
 import { MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, TOKEN_TO_MOD, keyTokenToVk } from "./hotkey-parser.js";
-import type { SendHotkeyOptions, SendMode, SendSpec } from "./types.js";
+import type { MouseButton, MouseClickOptions, SendHotkeyOptions, SendMode, SendSpec } from "./types.js";
 import {
   GetLastError,
   GetAsyncKeyState,
+  GetCursorPos,
   INPUT_KEYBOARD,
   INPUT_SIZE,
   KEYEVENTF_EXTENDEDKEY,
@@ -10,8 +11,15 @@ import {
   KEYEVENTF_SCANCODE,
   MAPVK_VK_TO_VSC_EX,
   MapVirtualKeyW,
+  MOUSEEVENTF_LEFTDOWN,
+  MOUSEEVENTF_LEFTUP,
+  MOUSEEVENTF_MIDDLEDOWN,
+  MOUSEEVENTF_MIDDLEUP,
+  MOUSEEVENTF_RIGHTDOWN,
+  MOUSEEVENTF_RIGHTUP,
   PostMessageW,
   SendInput,
+  SetCursorPos,
   VK_CONTROL,
   VK_RWIN,
   VK_LWIN,
@@ -20,7 +28,8 @@ import {
   WM_KEYDOWN,
   WM_KEYUP,
   WM_SYSKEYDOWN,
-  WM_SYSKEYUP
+  WM_SYSKEYUP,
+  mouse_event
 } from "./win32-bindings.js";
 
 type KeyboardInput = {
@@ -41,6 +50,16 @@ type KeyDescriptor = {
   scanCode: number;
   extended: boolean;
 };
+
+const MOUSE_SPEC_ALIASES = new Map<string, MouseButton>([
+  ["click", "left"],
+  ["leftclick", "left"],
+  ["lclick", "left"],
+  ["rightclick", "right"],
+  ["rclick", "right"],
+  ["middleclick", "middle"],
+  ["mclick", "middle"]
+]);
 
 function isExtendedVk(vk: number): boolean {
   return (
@@ -124,6 +143,15 @@ function activeModifierMask(): number {
 export function parseSendSpec(input: string): SendSpec {
   const normalized = String(input).trim().toLowerCase();
   if (!normalized) throw new Error("Send hotkey string is empty");
+  const compact = normalized.replace(/[\s_-]+/g, "");
+  const mouseButton = MOUSE_SPEC_ALIASES.get(compact);
+  if (mouseButton) {
+    return {
+      kind: "mouse",
+      label: normalized,
+      button: mouseButton
+    };
+  }
 
   const tokens = normalized
     .split("+")
@@ -148,6 +176,7 @@ export function parseSendSpec(input: string): SendSpec {
   if (vk == null) throw new Error(`Unsupported send key token: "${keyToken}"`);
 
   return {
+    kind: "keyboard",
     label: tokens.join("+"),
     modifiers,
     vk
@@ -207,10 +236,69 @@ async function waitForExtraModifiersToRelease(specModifiers: number, options: Se
   return currentMask;
 }
 
+function getCursorPos(): { x: number; y: number } {
+  const point = { x: 0, y: 0 };
+  if (!GetCursorPos(point)) {
+    throw new Error(`GetCursorPos failed (lastError=${GetLastError()})`);
+  }
+  return point;
+}
+
+function mouseButtonFlags(button: MouseButton): { down: number; up: number } {
+  switch (button) {
+    case "left":
+      return { down: MOUSEEVENTF_LEFTDOWN, up: MOUSEEVENTF_LEFTUP };
+    case "right":
+      return { down: MOUSEEVENTF_RIGHTDOWN, up: MOUSEEVENTF_RIGHTUP };
+    case "middle":
+      return { down: MOUSEEVENTF_MIDDLEDOWN, up: MOUSEEVENTF_MIDDLEUP };
+  }
+}
+
+export async function sendMouseClickAtPoint(
+  button: MouseButton,
+  point: { x: number; y: number },
+  options: MouseClickOptions = {}
+): Promise<void> {
+  if (process.platform !== "win32") throw new Error("sendMouseClickAtPoint is Windows-only");
+
+  const targetX = Math.round(point.x);
+  const targetY = Math.round(point.y);
+  const original = options.restoreCursor ? getCursorPos() : null;
+  const clickCount = Math.max(1, Math.floor(options.clickCount ?? 1));
+  const pressDurationMs = Math.max(0, Math.floor(options.pressDurationMs ?? 0));
+  const interClickDelayMs = Math.max(0, Math.floor(options.interClickDelayMs ?? 24));
+  const flags = mouseButtonFlags(button);
+
+  if (!SetCursorPos(targetX, targetY)) {
+    throw new Error(`SetCursorPos failed (lastError=${GetLastError()})`);
+  }
+
+  try {
+    for (let index = 0; index < clickCount; index += 1) {
+      mouse_event(flags.down, 0, 0, 0, 0);
+      if (pressDurationMs > 0) {
+        await sleepMs(pressDurationMs);
+      }
+      mouse_event(flags.up, 0, 0, 0, 0);
+      if (index + 1 < clickCount && interClickDelayMs > 0) {
+        await sleepMs(interClickDelayMs);
+      }
+    }
+  } finally {
+    if (original && !SetCursorPos(original.x, original.y)) {
+      throw new Error(`SetCursorPos failed while restoring cursor (lastError=${GetLastError()})`);
+    }
+  }
+}
+
 export async function sendHotkey(input: string, options: SendHotkeyOptions = {}): Promise<void> {
   if (process.platform !== "win32") throw new Error("sendHotkey is Windows-only");
 
   const spec = parseSendSpec(input);
+  if (spec.kind === "mouse") {
+    throw new Error(`Mouse action "${spec.label}" requires sendMouseClickAtPoint`);
+  }
   const downModifiers = modifierVks(spec.modifiers);
   const events: KeyboardInput[] = [];
   const blind = options.blind ?? false;
@@ -262,6 +350,9 @@ export async function sendHotkeyToWindow(targetWindow: unknown, input: string, o
   if (!targetWindow) throw new Error("Target window handle is required");
 
   const spec = parseSendSpec(input);
+  if (spec.kind === "mouse") {
+    throw new Error(`Mouse action "${spec.label}" is not supported for window-target posting`);
+  }
   const downModifiers = modifierVks(spec.modifiers);
   const specDescriptor = getKeyDescriptor(spec.vk);
 

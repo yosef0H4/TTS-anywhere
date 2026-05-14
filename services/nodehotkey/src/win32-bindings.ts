@@ -27,6 +27,12 @@ export const INPUT_KEYBOARD = 1;
 export const KEYEVENTF_EXTENDEDKEY = 0x0001;
 export const KEYEVENTF_KEYUP = 0x0002;
 export const KEYEVENTF_SCANCODE = 0x0008;
+export const MOUSEEVENTF_LEFTDOWN = 0x0002;
+export const MOUSEEVENTF_LEFTUP = 0x0004;
+export const MOUSEEVENTF_RIGHTDOWN = 0x0008;
+export const MOUSEEVENTF_RIGHTUP = 0x0010;
+export const MOUSEEVENTF_MIDDLEDOWN = 0x0020;
+export const MOUSEEVENTF_MIDDLEUP = 0x0040;
 export const GMEM_MOVEABLE = 0x0002;
 export const GMEM_ZEROINIT = 0x0040;
 export const CF_UNICODETEXT = 13;
@@ -148,6 +154,10 @@ export const PostMessageW = user32.func(
 ) as (hWnd: unknown, msg: number, wParam: number | bigint, lParam: number | bigint) => boolean;
 
 export const GetCursorPos = user32.func("bool __stdcall GetCursorPos(_Out_ POINT *lpPoint)") as (pt: Point) => boolean;
+export const SetCursorPos = user32.func("bool __stdcall SetCursorPos(int X, int Y)") as (x: number, y: number) => boolean;
+export const mouse_event = user32.func(
+  "void __stdcall mouse_event(uint32 dwFlags, uint32 dx, uint32 dy, uint32 dwData, uintptr dwExtraInfo)"
+) as (flags: number, dx: number, dy: number, data: number, extraInfo: number | bigint) => void;
 export const GetModuleHandleW = kernel32.func("void * __stdcall GetModuleHandleW(const char16_t *lpModuleName)") as (
   moduleName: string | null
 ) => unknown;

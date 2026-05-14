@@ -3,8 +3,10 @@ export type {
   HotkeySessionEvents,
   HotkeySessionOptions,
   SendSpec,
+  MouseButton,
   SendMode,
   SendHotkeyOptions,
+  MouseClickOptions,
   MonitorBounds,
   WindowHandle,
   WindowInfo,
@@ -19,7 +21,7 @@ export type {
   CopyCaptureResult
 } from "./types.js";
 export { parseHotkeySpec } from "./hotkey-parser.js";
-export { parseSendSpec, sendHotkey, sendHotkeyToWindow } from "./send.js";
+export { parseSendSpec, sendHotkey, sendHotkeyToWindow, sendMouseClickAtPoint } from "./send.js";
 export { snapshotClipboard, restoreClipboard, clearClipboard, readClipboardText, waitForClipboardChange, captureCopyToText } from "./clipboard.js";
 export {
   captureWindowRegion,

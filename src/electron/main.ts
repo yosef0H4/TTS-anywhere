@@ -14,6 +14,7 @@ import {
   HotkeySession,
   parseSendSpec,
   sendHotkey,
+  sendMouseClickAtPoint,
   sendHotkeyToWindow,
   type FrozenCaptureHandle,
   type WindowHandle
@@ -2371,7 +2372,19 @@ async function advanceAutoReader(runId: number): Promise<void> {
     if (!autoReaderTargetWindow) {
       throw new Error("Automatic reader target window is not locked.");
     }
-    await sendHotkeyToWindow(autoReaderTargetWindow.handle, autoReaderAdvanceHotkey, { pressDurationMs: 24 });
+    const advanceSpec = parseSendSpec(autoReaderAdvanceHotkey);
+    if (advanceSpec.kind === "mouse") {
+      const { rect } = resolveTargetRectForWindow(autoReaderTargetWindow);
+      await sendMouseClickAtPoint(advanceSpec.button, {
+        x: rect.left + Math.floor(rect.width / 2),
+        y: rect.top + Math.floor(rect.height / 2)
+      }, {
+        pressDurationMs: 24,
+        restoreCursor: true
+      });
+    } else {
+      await sendHotkeyToWindow(autoReaderTargetWindow.handle, autoReaderAdvanceHotkey, { pressDurationMs: 24 });
+    }
   } catch (error) {
     stopAutoReader(`Automatic reader could not send "${autoReaderAdvanceHotkey}": ${String(error)}`, "error");
     return;
@@ -2415,25 +2428,30 @@ function handleAutoReaderPageResult(result: AutoReaderPageResult): void {
   }
 
   const textSignature = normalizeAutoReaderText(result.text);
-  if (!textSignature) {
+  const repeatedText = Boolean(autoReaderLastTextSignature) && textSignature === autoReaderLastTextSignature;
+  if (!textSignature || repeatedText) {
     autoReaderNoTextStreak += 1;
     if (autoReaderNoTextStreak >= autoReaderNoTextRetryCount) {
-      stopAutoReader(`Automatic reader stopped after ${autoReaderNoTextRetryCount} consecutive page turns without finding text.`, "error");
+      stopAutoReader(`Automatic reader stopped after ${autoReaderNoTextRetryCount} consecutive page turns without finding new text.`, "error");
       return;
     }
-    diag("auto.reader.result.empty", {
-      runId: result.runId,
-      emptyCount: autoReaderNoTextStreak,
-      noTextRetryCount: autoReaderNoTextRetryCount
-    });
+    if (!textSignature) {
+      diag("auto.reader.result.empty", {
+        runId: result.runId,
+        emptyCount: autoReaderNoTextStreak,
+        noTextRetryCount: autoReaderNoTextRetryCount
+      });
+    } else {
+      diag("auto.reader.result.duplicate", {
+        runId: result.runId,
+        duplicateCount: autoReaderNoTextStreak,
+        noTextRetryCount: autoReaderNoTextRetryCount
+      });
+    }
     void advanceAutoReader(result.runId);
     return;
   }
   autoReaderNoTextStreak = 0;
-  if (autoReaderLastTextSignature && textSignature === autoReaderLastTextSignature) {
-    stopAutoReader("Automatic reader stopped because the next page matched the previous page.", "error");
-    return;
-  }
 
   autoReaderLastTextSignature = textSignature;
   void advanceAutoReader(result.runId);
