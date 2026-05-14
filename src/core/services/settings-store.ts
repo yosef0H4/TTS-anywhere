@@ -44,6 +44,7 @@ export class SettingsStore {
         },
         logging: { ...DEFAULT_CONFIG.logging, ...parsed.logging },
         textProcessing: migratedTextProcessing,
+        services: this.mergeServices(parsed.services),
         preprocessing: {
           ...DEFAULT_CONFIG.preprocessing,
           ...parsed.preprocessing,
@@ -326,6 +327,24 @@ export class SettingsStore {
             ? rapidMode
             : (legacyRapidEnabled === true ? "all" : defaults.detectionMode)),
       detectorBaseUrl: explicitBaseUrl ?? migratedProviderUrl ?? legacyRapidBaseUrl
+    };
+  }
+
+  private mergeServices(services: unknown): AppConfig["services"] {
+    const defaults = DEFAULT_CONFIG.services;
+    if (!services || typeof services !== "object") {
+      return { ...defaults };
+    }
+
+    const value = services as Record<string, unknown>;
+    return {
+      externalRoot: typeof value.externalRoot === "string" ? value.externalRoot : defaults.externalRoot,
+      activeDetectServiceId: typeof value.activeDetectServiceId === "string" ? value.activeDetectServiceId : defaults.activeDetectServiceId,
+      activeDetectPresetId: typeof value.activeDetectPresetId === "string" ? value.activeDetectPresetId : defaults.activeDetectPresetId,
+      activeOcrServiceId: typeof value.activeOcrServiceId === "string" ? value.activeOcrServiceId : defaults.activeOcrServiceId,
+      activeOcrPresetId: typeof value.activeOcrPresetId === "string" ? value.activeOcrPresetId : defaults.activeOcrPresetId,
+      activeTtsServiceId: typeof value.activeTtsServiceId === "string" ? value.activeTtsServiceId : defaults.activeTtsServiceId,
+      activeTtsPresetId: typeof value.activeTtsPresetId === "string" ? value.activeTtsPresetId : defaults.activeTtsPresetId
     };
   }
 }

@@ -189,6 +189,16 @@ export interface TextProcessingConfig {
   detectorBaseUrl: string;
 }
 
+export interface ServicesConfig {
+  externalRoot: string;
+  activeDetectServiceId: string;
+  activeDetectPresetId: string;
+  activeOcrServiceId: string;
+  activeOcrPresetId: string;
+  activeTtsServiceId: string;
+  activeTtsPresetId: string;
+}
+
 export interface PreprocessingSelectionConfig {
   baseState: boolean;
   ops: Array<{ id: string; op: "add" | "sub"; nx: number; ny: number; nw: number; nh: number }>;
@@ -229,6 +239,7 @@ export interface AppConfig {
   system: SystemConfig;
   logging: LoggingConfig;
   textProcessing: TextProcessingConfig;
+  services: ServicesConfig;
   preprocessing: PreprocessingConfig;
 }
 

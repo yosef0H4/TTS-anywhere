@@ -69,6 +69,13 @@ describe("settings store", () => {
     cfg.system.feedbackSounds.globalError.volume = 71;
     cfg.textProcessing.detectionMode = "fullscreen_and_window";
     cfg.textProcessing.detectorBaseUrl = "http://127.0.0.1:8093";
+    cfg.services.externalRoot = "Z:/services/custom";
+    cfg.services.activeDetectServiceId = "paddle";
+    cfg.services.activeDetectPresetId = "cpu-detect-only";
+    cfg.services.activeOcrServiceId = "paddle";
+    cfg.services.activeOcrPresetId = "cpu-detect-ocr";
+    cfg.services.activeTtsServiceId = "edge";
+    cfg.services.activeTtsPresetId = "default";
     store.save(cfg);
 
     expect(localStorage.getItem(SETTINGS_KEY)).not.toBeNull();
@@ -98,6 +105,25 @@ describe("settings store", () => {
     expect(store.load().system.fullCaptureHotkey).toBe(DEFAULT_CONFIG.system.fullCaptureHotkey);
     expect(store.load().textProcessing.detectionMode).toBe("fullscreen_and_window");
     expect(store.load().textProcessing.detectorBaseUrl).toBe("http://127.0.0.1:8093");
+    expect(store.load().services.externalRoot).toBe("Z:/services/custom");
+    expect(store.load().services.activeDetectServiceId).toBe("paddle");
+    expect(store.load().services.activeDetectPresetId).toBe("cpu-detect-only");
+    expect(store.load().services.activeOcrServiceId).toBe("paddle");
+    expect(store.load().services.activeOcrPresetId).toBe("cpu-detect-ocr");
+    expect(store.load().services.activeTtsServiceId).toBe("edge");
+    expect(store.load().services.activeTtsPresetId).toBe("default");
+  });
+
+  it("defaults missing services config for legacy settings", () => {
+    const legacy = {
+      ...DEFAULT_CONFIG,
+      services: undefined
+    };
+
+    localStorage.setItem(LEGACY_SETTINGS_KEYS[0], JSON.stringify(legacy));
+    const restored = new SettingsStore().load();
+
+    expect(restored.services).toEqual(DEFAULT_CONFIG.services);
   });
 
   it("migrates legacy panel width config", () => {

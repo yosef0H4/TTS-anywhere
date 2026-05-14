@@ -371,11 +371,23 @@ contextBridge.exposeInMainWorld("electronAPI", {
   stopManagedService: (serviceId: "paddle" | "edge") => {
     return ipcRenderer.invoke("stack:stop-service", serviceId);
   },
-  openRuntimeServicesFolder: () => {
-    return ipcRenderer.invoke("stack:open-runtime-services") as Promise<string>;
+  openRuntimeServicesFolder: (configuredRoot?: string) => {
+    return ipcRenderer.invoke("stack:open-runtime-services", configuredRoot) as Promise<string>;
   },
   getManagedServicesStatus: () => {
     return ipcRenderer.invoke("stack:get-services-status");
+  },
+  getDiscoveredServices: (externalRoot?: string) => {
+    return ipcRenderer.invoke("stack:discover-services", externalRoot) as Promise<unknown>;
+  },
+  getDiscoveredServiceStatuses: () => {
+    return ipcRenderer.invoke("stack:get-discovered-service-statuses") as Promise<unknown>;
+  },
+  launchDiscoveredService: (request: { slot: "detect" | "ocr" | "tts"; servicePath: string; presetId: string; externalRoot?: string }) => {
+    return ipcRenderer.invoke("stack:launch-discovered-service", request) as Promise<unknown>;
+  },
+  stopDiscoveredService: (slot: "detect" | "ocr" | "tts") => {
+    return ipcRenderer.invoke("stack:stop-discovered-service", slot) as Promise<unknown>;
   },
   recordStartupPhase,
   sendLogEntries: (entries: unknown[]) => {

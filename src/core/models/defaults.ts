@@ -158,6 +158,15 @@ export const DEFAULT_CONFIG: AppConfig = {
     detectionMode: "fullscreen_and_window",
     detectorBaseUrl: "http://127.0.0.1:8091"
   },
+  services: {
+    externalRoot: "",
+    activeDetectServiceId: "",
+    activeDetectPresetId: "",
+    activeOcrServiceId: "",
+    activeOcrPresetId: "",
+    activeTtsServiceId: "",
+    activeTtsPresetId: ""
+  },
   preprocessing: {
     maxImageDimension: 1080,
     binaryThreshold: 0,

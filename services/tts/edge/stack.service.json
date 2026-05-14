@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "edge",
+  "name": "Edge TTS",
+  "family": "tts",
+  "description": "OpenAI-compatible TTS adapter backed by Microsoft Edge voices.",
+  "healthPath": "/healthz",
+  "launcher": {
+    "executable": "uv",
+    "args": ["run", "tts-edge", "serve"]
+  },
+  "selectors": [
+    {
+      "id": "edge",
+      "name": "Edge",
+      "presetId": "default",
+      "capabilities": ["speech"]
+    }
+  ],
+  "presets": [
+    {
+      "id": "default",
+      "name": "Default",
+      "defaultPort": 8012,
+      "capabilities": ["speech"],
+      "configTargets": ["tts.baseUrl"]
+    }
+  ]
+}

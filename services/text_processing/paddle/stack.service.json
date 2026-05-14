@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "id": "paddle",
+  "name": "Paddle OCR",
+  "family": "ocr",
+  "description": "Paddle-based local OCR service with mixable detect and OCR device presets.",
+  "healthPath": "/healthz",
+  "launcher": {
+    "executable": "uv",
+    "args": ["run", "python", "launcher.py"]
+  },
+  "selectors": [
+    {
+      "id": "paddle",
+      "name": "Paddle",
+      "capabilities": ["detect", "ocr"],
+      "runtime": {
+        "detect": "cpu",
+        "ocr": "cpu"
+      }
+    },
+    {
+      "id": "paddle-nvidia",
+      "name": "Paddle NVIDIA",
+      "capabilities": ["detect", "ocr"],
+      "runtime": {
+        "detect": "gpu",
+        "ocr": "gpu"
+      }
+    }
+  ],
+  "presets": [
+    {
+      "id": "cpu-detect-ocr",
+      "name": "CPU Detect + OCR",
+      "defaultPort": 8091,
+      "env": {
+        "UV_PROJECT_ENVIRONMENT": ".venv-cpu"
+      },
+      "args": [
+        "--enable-detect",
+        "--enable-openai-ocr",
+        "--detect-device",
+        "cpu",
+        "--ocr-device",
+        "cpu"
+      ],
+      "capabilities": ["detect", "ocr"],
+      "configTargets": ["textProcessing.detectorBaseUrl"],
+      "runtime": {
+        "detect": "cpu",
+        "ocr": "cpu"
+      }
+    },
+    {
+      "id": "gpu-detect-ocr",
+      "name": "NVIDIA Detect + OCR",
+      "defaultPort": 8092,
+      "env": {
+        "UV_PROJECT_ENVIRONMENT": ".venv-gpu"
+      },
+      "args": [
+        "--enable-detect",
+        "--enable-openai-ocr",
+        "--detect-device",
+        "gpu",
+        "--ocr-device",
+        "gpu"
+      ],
+      "capabilities": ["detect", "ocr"],
+      "configTargets": ["textProcessing.detectorBaseUrl"],
+      "runtime": {
+        "detect": "gpu",
+        "ocr": "gpu"
+      }
+    },
+    {
+      "id": "cpu-detect-only",
+      "name": "CPU Detect Only",
+      "defaultPort": 8093,
+      "env": {
+        "UV_PROJECT_ENVIRONMENT": ".venv-cpu"
+      },
+      "args": [
+        "--enable-detect",
+        "--detect-device",
+        "cpu"
+      ],
+      "capabilities": ["detect"],
+      "configTargets": ["textProcessing.detectorBaseUrl"],
+      "runtime": {
+        "detect": "cpu"
+      }
+    },
+    {
+      "id": "cpu-detect-gpu-ocr",
+      "name": "CPU Detect + NVIDIA OCR",
+      "defaultPort": 8094,
+      "env": {
+        "UV_PROJECT_ENVIRONMENT": ".venv-gpu"
+      },
+      "args": [
+        "--enable-detect",
+        "--enable-openai-ocr",
+        "--detect-device",
+        "cpu",
+        "--ocr-device",
+        "gpu"
+      ],
+      "capabilities": ["detect", "ocr"],
+      "configTargets": ["textProcessing.detectorBaseUrl"],
+      "runtime": {
+        "detect": "cpu",
+        "ocr": "gpu"
+      }
+    },
+    {
+      "id": "gpu-ocr-only",
+      "name": "NVIDIA OCR Only",
+      "defaultPort": 8095,
+      "env": {
+        "UV_PROJECT_ENVIRONMENT": ".venv-gpu"
+      },
+      "args": [
+        "--enable-openai-ocr",
+        "--ocr-device",
+        "gpu"
+      ],
+      "capabilities": ["ocr"],
+      "configTargets": ["textProcessing.detectorBaseUrl"],
+      "runtime": {
+        "ocr": "gpu"
+      }
+    }
+  ]
+}

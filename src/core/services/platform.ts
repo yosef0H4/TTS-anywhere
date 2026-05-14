@@ -38,6 +38,95 @@ export interface ManagedServicesStatus {
   edge: ManagedServiceStatus;
 }
 
+export type DiscoveredServiceSource = "bundled" | "external";
+export type DiscoveredServiceFamily = "ocr" | "tts";
+export type DiscoveredServiceCapability = "detect" | "ocr" | "speech";
+export type DiscoveredServiceConfigTarget = "textProcessing.detectorBaseUrl" | "tts.baseUrl";
+export type DiscoveredServiceDevice = "cpu" | "gpu";
+
+export interface DiscoveredServiceLauncher {
+  executable: string;
+  args?: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+}
+
+export interface DiscoveredServiceRuntime {
+  detect?: DiscoveredServiceDevice;
+  ocr?: DiscoveredServiceDevice;
+  speech?: DiscoveredServiceDevice;
+}
+
+export interface DiscoveredServicePreset {
+  id: string;
+  name: string;
+  defaultPort: number;
+  args?: string[];
+  env?: Record<string, string>;
+  capabilities: DiscoveredServiceCapability[];
+  configTargets: DiscoveredServiceConfigTarget[];
+  runtime?: DiscoveredServiceRuntime;
+}
+
+export interface DiscoveredServiceSelector {
+  id: string;
+  name: string;
+  capabilities: DiscoveredServiceCapability[];
+  presetId?: string;
+  runtime?: DiscoveredServiceRuntime;
+}
+
+export interface DiscoveredServiceCatalogItem {
+  id: string;
+  name: string;
+  family: DiscoveredServiceFamily;
+  description?: string;
+  healthPath?: string;
+  launcher: DiscoveredServiceLauncher;
+  presets: DiscoveredServicePreset[];
+  selectors?: DiscoveredServiceSelector[];
+  manifestPath: string;
+  servicePath: string;
+  rootPath: string;
+  relativePath: string;
+  source: DiscoveredServiceSource;
+}
+
+export interface DiscoveredServiceError {
+  manifestPath: string;
+  message: string;
+}
+
+export interface DiscoveredServicesSnapshot {
+  services: DiscoveredServiceCatalogItem[];
+  errors: DiscoveredServiceError[];
+}
+
+export interface DiscoveredServiceRunUrls {
+  detectionBaseUrl?: string;
+  ocrBaseUrl?: string;
+  ttsBaseUrl?: string;
+}
+
+export type DiscoveredServiceSlot = "detect" | "ocr" | "tts";
+
+export interface DiscoveredServiceRunStatus {
+  slot: DiscoveredServiceSlot;
+  servicePath: string;
+  serviceId: string;
+  family: DiscoveredServiceFamily;
+  presetId: string | null;
+  pid: number | null;
+  state: "stopped" | "starting" | "running" | "failed";
+  managed: boolean;
+  url: string | null;
+  urls: DiscoveredServiceRunUrls | null;
+  launchCwd: string | null;
+  launchCommand: string | null;
+  logLines: string[];
+  error: string | null;
+}
+
 export type ProviderKind = "openai_compatible" | "gemini_sdk";
 
 export interface ProviderLlmConfig {
@@ -219,8 +308,12 @@ export interface ElectronApi {
   }) => Promise<void>;
   launchManagedService: (serviceId: ManagedServiceId) => Promise<ManagedServiceStatus>;
   stopManagedService: (serviceId: ManagedServiceId) => Promise<ManagedServiceStatus>;
-  openRuntimeServicesFolder: () => Promise<string>;
+  openRuntimeServicesFolder: (configuredRoot?: string) => Promise<string>;
   getManagedServicesStatus: () => Promise<ManagedServicesStatus>;
+  getDiscoveredServices?: (externalRoot?: string) => Promise<DiscoveredServicesSnapshot>;
+  getDiscoveredServiceStatuses?: () => Promise<DiscoveredServiceRunStatus[]>;
+  launchDiscoveredService?: (request: { slot: DiscoveredServiceSlot; servicePath: string; presetId: string; externalRoot?: string }) => Promise<DiscoveredServiceRunStatus>;
+  stopDiscoveredService?: (slot: DiscoveredServiceSlot) => Promise<DiscoveredServiceRunStatus>;
   recordStartupPhase?: (phase: string, details?: Record<string, unknown>) => void;
   sendLogEntries: (entries: unknown[]) => void;
   getLogLevel: () => Promise<string>;

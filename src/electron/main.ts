@@ -46,6 +46,7 @@ import type {
   ProviderVoicesRequest
 } from "./provider-ipc.js";
 import { readBundledServicesManifest } from "./service-bundle-manifest.js";
+import { scanServiceManifests } from "./service-manifest.js";
 import { syncBundledServicesToRuntime as syncBundledServicesToRuntimeHelper } from "./runtime-services.js";
 
 type LogLevel = "debug" | "info" | "warn" | "error";
@@ -145,6 +146,34 @@ interface ManagedStackChild {
   child: ChildProcess;
 }
 
+interface DiscoveredServiceRunUrls {
+  detectionBaseUrl?: string;
+  ocrBaseUrl?: string;
+  ttsBaseUrl?: string;
+}
+
+interface DiscoveredServiceRunStatus {
+  slot: "detect" | "ocr" | "tts";
+  servicePath: string;
+  serviceId: string;
+  family: "ocr" | "tts";
+  presetId: string | null;
+  pid: number | null;
+  state: "stopped" | "starting" | "running" | "failed";
+  managed: boolean;
+  url: string | null;
+  urls: DiscoveredServiceRunUrls | null;
+  launchCwd: string | null;
+  launchCommand: string | null;
+  logLines: string[];
+  error: string | null;
+}
+
+interface DiscoveredServiceChild {
+  slot: "detect" | "ocr" | "tts";
+  child: ChildProcess;
+}
+
 const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
   debug: 10,
   info: 20,
@@ -156,6 +185,7 @@ const PADDLE_CPU_PACKAGE_VERSION = "3.2.0";
 const PADDLE_WARM_START_TIMEOUT_MS = 120000;
 const PADDLE_COLD_START_TIMEOUT_MS = 10 * 60 * 1000;
 const CLIPBOARD_WATCH_POLL_MS = 500;
+const DISCOVERED_SERVICE_LOG_LIMIT = 200;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -242,6 +272,11 @@ let managedServiceChildren: Partial<Record<ManagedServiceId, ManagedStackChild>>
 let managedServiceLaunchPromises: Partial<Record<ManagedServiceId, Promise<ManagedServiceStatus>>> = {};
 let managedServiceLaunchTokens: Partial<Record<ManagedServiceId, number>> = {};
 let managedServiceLaunchTokenCounter = 0;
+const discoveredServiceChildren = new Map<string, DiscoveredServiceChild>();
+const discoveredServiceLaunchPromises = new Map<string, Promise<DiscoveredServiceRunStatus>>();
+const discoveredServiceLaunchTokens = new Map<string, number>();
+const discoveredServiceStatuses = new Map<string, DiscoveredServiceRunStatus>();
+let discoveredServiceLaunchTokenCounter = 0;
 const providerLlmService = new ElectronProviderLlmService();
 const providerTtsService = new ElectronProviderTtsService();
 const geminiSdkLlmService = new GeminiSdkLlmService();
@@ -491,6 +526,472 @@ function syncBundledServicesToRuntime(): string {
   });
 }
 
+function selectedServicesRoot(configuredRoot?: string): { path: string; source: "bundled" | "external" } {
+  if (typeof configuredRoot === "string" && configuredRoot.trim().length > 0) {
+    return {
+      path: configuredRoot.trim(),
+      source: "external"
+    };
+  }
+  return {
+    path: syncBundledServicesToRuntime(),
+    source: "bundled"
+  };
+}
+
+function discoverManagedServices(externalRoot?: string): ReturnType<typeof scanServiceManifests> {
+  const root = selectedServicesRoot(externalRoot);
+  return scanServiceManifests([root]);
+}
+
+function discoverManagedServicesSnapshot(externalRoot?: string): {
+  services: Array<{
+    id: string;
+    name: string;
+    family: "ocr" | "tts";
+    description?: string;
+    healthPath?: string;
+    launcher: {
+      executable: string;
+      args?: string[];
+      cwd?: string;
+      env?: Record<string, string>;
+    };
+    presets: Array<{
+      id: string;
+      name: string;
+      defaultPort: number;
+      args?: string[];
+      env?: Record<string, string>;
+      capabilities: Array<"detect" | "ocr" | "speech">;
+      configTargets: Array<"textProcessing.detectorBaseUrl" | "tts.baseUrl">;
+      runtime?: { detect?: "cpu" | "gpu"; ocr?: "cpu" | "gpu"; speech?: "cpu" | "gpu" };
+    }>;
+    manifestPath: string;
+    servicePath: string;
+    rootPath: string;
+    relativePath: string;
+    source: "bundled" | "external";
+  }>;
+  errors: Array<{ manifestPath: string; message: string }>;
+} {
+  const result = discoverManagedServices(externalRoot);
+  return {
+    services: result.services.map((service) => ({
+      id: service.manifest.id,
+      name: service.manifest.name,
+      family: service.manifest.family,
+      ...(service.manifest.description ? { description: service.manifest.description } : {}),
+      ...(service.manifest.healthPath ? { healthPath: service.manifest.healthPath } : {}),
+      launcher: {
+        executable: service.manifest.launcher.executable,
+        ...(service.manifest.launcher.args ? { args: [...service.manifest.launcher.args] } : {}),
+        ...(service.manifest.launcher.cwd ? { cwd: service.manifest.launcher.cwd } : {}),
+        ...(service.manifest.launcher.env ? { env: { ...service.manifest.launcher.env } } : {})
+      },
+      presets: service.manifest.presets.map((preset) => ({
+        id: preset.id,
+        name: preset.name,
+        defaultPort: preset.defaultPort,
+        ...(preset.args ? { args: [...preset.args] } : {}),
+        ...(preset.env ? { env: { ...preset.env } } : {}),
+        capabilities: [...preset.capabilities],
+        configTargets: [...preset.configTargets],
+        ...(preset.runtime ? { runtime: { ...preset.runtime } } : {})
+      })),
+      ...(service.manifest.selectors
+        ? {
+            selectors: service.manifest.selectors.map((selector) => ({
+              id: selector.id,
+              name: selector.name,
+              ...(selector.presetId ? { presetId: selector.presetId } : {}),
+              capabilities: [...selector.capabilities],
+              ...(selector.runtime ? { runtime: { ...selector.runtime } } : {})
+            }))
+          }
+        : {}),
+      manifestPath: service.manifestPath,
+      servicePath: service.servicePath,
+      rootPath: service.rootPath,
+      relativePath: service.relativePath,
+      source: service.source
+    })),
+    errors: result.errors.map((error) => ({ manifestPath: error.manifestPath, message: error.message }))
+  };
+}
+
+function normalizeDiscoveredServicePath(servicePath: string): string {
+  return path.resolve(servicePath);
+}
+
+function familyForSlot(slot: "detect" | "ocr" | "tts"): "ocr" | "tts" {
+  return slot === "tts" ? "tts" : "ocr";
+}
+
+function findDiscoveredService(servicePath: string, externalRoot?: string) {
+  const normalizedPath = normalizeDiscoveredServicePath(servicePath);
+  return discoverManagedServices(externalRoot).services.find(
+    (service) => normalizeDiscoveredServicePath(service.servicePath) === normalizedPath
+  ) ?? null;
+}
+
+function buildDiscoveredServiceStatus(
+  slot: "detect" | "ocr" | "tts",
+  service: ReturnType<typeof discoverManagedServices>["services"][number],
+  next?: Partial<DiscoveredServiceRunStatus>
+): DiscoveredServiceRunStatus {
+  const normalizedPath = normalizeDiscoveredServicePath(service.servicePath);
+  const current = discoveredServiceStatuses.get(slot);
+  return {
+    slot,
+    servicePath: normalizedPath,
+    serviceId: service.manifest.id,
+    family: service.manifest.family,
+    presetId: null,
+    pid: null,
+    state: "stopped",
+    managed: false,
+    url: null,
+    urls: null,
+    launchCwd: null,
+    launchCommand: null,
+    logLines: [],
+    error: null,
+    ...(current ?? {}),
+    ...(next ?? {})
+  };
+}
+
+function setDiscoveredServiceStatus(
+  slot: "detect" | "ocr" | "tts",
+  service: ReturnType<typeof discoverManagedServices>["services"][number],
+  next?: Partial<DiscoveredServiceRunStatus>
+): DiscoveredServiceRunStatus {
+  const status = buildDiscoveredServiceStatus(slot, service, next);
+  discoveredServiceStatuses.set(slot, status);
+  return status;
+}
+
+function discoveredServiceStatusSnapshot(slot: "detect" | "ocr" | "tts"): DiscoveredServiceRunStatus | null {
+  const current = discoveredServiceStatuses.get(slot);
+  return current ? { ...current, urls: current.urls ? { ...current.urls } : null, logLines: [...current.logLines] } : null;
+}
+
+function discoveredServiceStatusesSnapshot(): DiscoveredServiceRunStatus[] {
+  return Array.from(discoveredServiceStatuses.values())
+    .map((status) => ({ ...status, urls: status.urls ? { ...status.urls } : null, logLines: [...status.logLines] }))
+    .sort((left, right) => left.slot.localeCompare(right.slot));
+}
+
+function appendDiscoveredServiceLog(slot: "detect" | "ocr" | "tts", line: string): void {
+  const current = discoveredServiceStatuses.get(slot);
+  if (!current) {
+    return;
+  }
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return;
+  }
+  discoveredServiceStatuses.set(slot, {
+    ...current,
+    logLines: [...current.logLines, trimmed].slice(-DISCOVERED_SERVICE_LOG_LIMIT)
+  });
+}
+
+function appendDiscoveredServiceChunk(slot: "detect" | "ocr" | "tts", stream: "stdout" | "stderr", chunk: unknown): void {
+  for (const line of String(chunk).split(/\r?\n/u)) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+    appendDiscoveredServiceLog(slot, `[${stream}] ${trimmed}`);
+  }
+}
+
+function beginDiscoveredServiceLaunch(slot: "detect" | "ocr" | "tts"): number {
+  const token = ++discoveredServiceLaunchTokenCounter;
+  discoveredServiceLaunchTokens.set(slot, token);
+  return token;
+}
+
+function cancelDiscoveredServiceLaunch(slot: "detect" | "ocr" | "tts"): void {
+  discoveredServiceLaunchTokens.set(slot, ++discoveredServiceLaunchTokenCounter);
+}
+
+function isDiscoveredServiceLaunchCurrent(slot: "detect" | "ocr" | "tts", token: number): boolean {
+  return discoveredServiceLaunchTokens.get(slot) === token;
+}
+
+function assertDiscoveredServiceLaunchCurrent(slot: "detect" | "ocr" | "tts", token: number): void {
+  if (!isDiscoveredServiceLaunchCurrent(slot, token)) {
+    throw new Error(`Discovered service launch cancelled: ${slot}`);
+  }
+}
+
+function attachDiscoveredServiceChildLogging(
+  slot: "detect" | "ocr" | "tts",
+  service: ReturnType<typeof discoverManagedServices>["services"][number],
+  child: ChildProcess
+): void {
+  const logName = `${service.manifest.id}@${service.relativePath}`;
+  child.stdout?.on("data", (chunk) => {
+    appendDiscoveredServiceChunk(slot, "stdout", chunk);
+    writeBackendLog("info", "stack", `${logName}.stdout`, { line: String(chunk).trim() });
+  });
+  child.stderr?.on("data", (chunk) => {
+    appendDiscoveredServiceChunk(slot, "stderr", chunk);
+    writeBackendLog("warn", "stack", `${logName}.stderr`, { line: String(chunk).trim() });
+  });
+  child.on("exit", (code, signal) => {
+    appendDiscoveredServiceLog(slot, `[exit] code=${code ?? "null"} signal=${signal ?? "null"}`);
+    writeBackendLog("info", "stack", `${logName}.exit`, { code, signal });
+    if (discoveredServiceChildren.get(slot)?.child === child) {
+      discoveredServiceChildren.delete(slot);
+    }
+    const current = discoveredServiceStatuses.get(slot);
+    if (current?.state === "running") {
+      discoveredServiceStatuses.set(slot, { ...current, state: "stopped", managed: false, url: null, urls: null, error: null });
+    }
+  });
+  child.on("error", (error) => {
+    appendDiscoveredServiceLog(slot, `[error] ${error.stack ?? String(error)}`);
+    writeBackendLog("error", "stack", `${logName}.error`, { error: error.stack ?? String(error) });
+  });
+}
+
+function spawnDiscoveredServiceChild(
+  slot: "detect" | "ocr" | "tts",
+  service: ReturnType<typeof discoverManagedServices>["services"][number],
+  command: string,
+  args: string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv
+): ChildProcess {
+  const child = spawn(command, args, {
+    cwd,
+    env,
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  attachDiscoveredServiceChildLogging(slot, service, child);
+  discoveredServiceChildren.set(slot, {
+    slot,
+    child
+  });
+  return child;
+}
+
+async function terminateDiscoveredServiceChild(slot: "detect" | "ocr" | "tts"): Promise<void> {
+  const child = discoveredServiceChildren.get(slot)?.child ?? null;
+  if (!child) return;
+  discoveredServiceChildren.delete(slot);
+  await terminateChildTree(child);
+}
+
+function resolveDiscoveredServiceExecutable(executable: string, servicePath: string): string {
+  if (executable === "uv") {
+    return preferredUvCommand();
+  }
+  if (path.isAbsolute(executable) || executable.startsWith(".") || executable.includes("/") || executable.includes("\\")) {
+    return path.resolve(servicePath, executable);
+  }
+  return executable;
+}
+
+function formatDiscoveredServiceCommand(command: string, args: string[]): string {
+  const quote = (value: string): string => {
+    if (value.length === 0 || /[\s"]/u.test(value)) {
+      return `"${value.replace(/"/g, '\\"')}"`;
+    }
+    return value;
+  };
+  return [command, ...args].map(quote).join(" ");
+}
+
+function buildDiscoveredServiceUrls(
+  preset: ReturnType<typeof discoverManagedServices>["services"][number]["manifest"]["presets"][number],
+  baseUrl: string
+): { url: string; urls: DiscoveredServiceRunUrls | null } {
+  const urls: DiscoveredServiceRunUrls = {};
+  if (preset.capabilities.includes("detect")) {
+    urls.detectionBaseUrl = baseUrl;
+  }
+  if (preset.capabilities.includes("ocr")) {
+    urls.ocrBaseUrl = `${baseUrl}/v1`;
+  }
+  if (preset.capabilities.includes("speech")) {
+    urls.ttsBaseUrl = `${baseUrl}/v1`;
+  }
+  const url = urls.ttsBaseUrl ?? urls.ocrBaseUrl ?? urls.detectionBaseUrl ?? baseUrl;
+  return {
+    url,
+    urls: Object.keys(urls).length > 0 ? urls : null
+  };
+}
+
+async function stopDiscoveredService(slot: "detect" | "ocr" | "tts", externalRoot?: string): Promise<DiscoveredServiceRunStatus> {
+  discoveredServiceLaunchPromises.delete(slot);
+  cancelDiscoveredServiceLaunch(slot);
+  await terminateDiscoveredServiceChild(slot);
+  const current = discoveredServiceStatusSnapshot(slot);
+  const service = current ? findDiscoveredService(current.servicePath, externalRoot) : null;
+  if (service) {
+    return setDiscoveredServiceStatus(slot, service, {
+      state: "stopped",
+      managed: false,
+      url: null,
+      urls: null,
+      error: null
+    });
+  }
+  const fallback: DiscoveredServiceRunStatus = current ?? {
+    slot,
+    servicePath: "",
+    serviceId: slot,
+    family: familyForSlot(slot),
+    presetId: null,
+    pid: null,
+    state: "stopped",
+    managed: false,
+    url: null,
+    urls: null,
+    launchCwd: null,
+    launchCommand: null,
+    logLines: [],
+    error: null
+  };
+  discoveredServiceStatuses.set(slot, { ...fallback, state: "stopped", managed: false, url: null, urls: null, error: null });
+  return discoveredServiceStatusSnapshot(slot) as DiscoveredServiceRunStatus;
+}
+
+async function launchDiscoveredServiceInternal(
+  slot: "detect" | "ocr" | "tts",
+  service: ReturnType<typeof discoverManagedServices>["services"][number],
+  preset: ReturnType<typeof discoverManagedServices>["services"][number]["manifest"]["presets"][number],
+  launchToken: number
+): Promise<DiscoveredServiceRunStatus> {
+  const normalizedPath = normalizeDiscoveredServicePath(service.servicePath);
+  const uvCacheDir = path.join(recommendedCpuStackRuntimeRoot(), "uv-cache");
+  ensureDir(uvCacheDir);
+  const port = await resolveAvailablePort(preset.defaultPort);
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const cwd = service.manifest.launcher.cwd ? path.resolve(service.servicePath, service.manifest.launcher.cwd) : service.servicePath;
+  const command = resolveDiscoveredServiceExecutable(service.manifest.launcher.executable, service.servicePath);
+  const args = [
+    ...(service.manifest.launcher.args ?? []),
+    ...(preset.args ?? []),
+    "--host",
+    "127.0.0.1",
+    "--port",
+    String(port)
+  ];
+  const launchCommand = formatDiscoveredServiceCommand(command, args);
+  const env = windowsEnv(process.env, {
+    UV_CACHE_DIR: uvCacheDir,
+    ...(service.manifest.launcher.env ?? {}),
+    ...(preset.env ?? {})
+  });
+  const child = spawnDiscoveredServiceChild(slot, service, command, args, cwd, env);
+  setDiscoveredServiceStatus(slot, service, {
+    presetId: preset.id,
+    pid: child.pid ?? null,
+    state: "starting",
+    managed: false,
+    url: null,
+    urls: null,
+    launchCwd: cwd,
+    launchCommand,
+    logLines: [`[launch] ${launchCommand}`],
+    error: null
+  });
+  writeBackendLog("info", "stack", "discovered-service.started", {
+    slot,
+    serviceId: service.manifest.id,
+    servicePath: normalizedPath,
+    presetId: preset.id,
+    pid: child.pid,
+    port
+  });
+  await waitForServiceHealth(
+    baseUrl,
+    service.manifest.family === "ocr" ? PADDLE_COLD_START_TIMEOUT_MS : 120000,
+    (payload) => payload.ok === true,
+    service.manifest.healthPath ?? "/healthz"
+  );
+  assertDiscoveredServiceLaunchCurrent(slot, launchToken);
+  const urls = buildDiscoveredServiceUrls(preset, baseUrl);
+  return setDiscoveredServiceStatus(slot, service, {
+    presetId: preset.id,
+    pid: child.pid ?? null,
+    state: "running",
+    managed: true,
+    url: urls.url,
+    urls: urls.urls,
+    error: null
+  });
+}
+
+async function launchDiscoveredService(slot: "detect" | "ocr" | "tts", servicePath: string, presetId: string, externalRoot?: string): Promise<DiscoveredServiceRunStatus> {
+  const service = findDiscoveredService(servicePath, externalRoot);
+  if (!service) {
+    throw new Error(`Discovered service not found: ${servicePath}`);
+  }
+  const preset = service.manifest.presets.find((candidate) => candidate.id === presetId);
+  if (!preset) {
+    throw new Error(`Preset not found for ${service.manifest.id}: ${presetId}`);
+  }
+  const current = discoveredServiceStatusSnapshot(slot);
+  if (current?.state === "running" && current.presetId === presetId) {
+    return current;
+  }
+  const inFlight = discoveredServiceLaunchPromises.get(slot);
+  if (inFlight) {
+    return inFlight;
+  }
+  if (current?.state === "running" || current?.state === "starting") {
+    await stopDiscoveredService(slot, externalRoot);
+  }
+  setDiscoveredServiceStatus(slot, service, {
+    presetId,
+    pid: null,
+    state: "starting",
+    managed: false,
+    url: null,
+    urls: null,
+    launchCwd: null,
+    launchCommand: null,
+    logLines: [],
+    error: null
+  });
+  const launchToken = beginDiscoveredServiceLaunch(slot);
+  const launchPromise = (async () => {
+    try {
+      return await launchDiscoveredServiceInternal(slot, service, preset, launchToken);
+    } catch (error) {
+      if (!isDiscoveredServiceLaunchCurrent(slot, launchToken)) {
+        return discoveredServiceStatusSnapshot(slot) ?? buildDiscoveredServiceStatus(slot, service);
+      }
+      discoveredServiceLaunchPromises.delete(slot);
+      await terminateDiscoveredServiceChild(slot);
+      return setDiscoveredServiceStatus(slot, service, {
+        presetId,
+        pid: null,
+        state: "failed",
+        managed: false,
+        url: null,
+        urls: null,
+        error: String(error)
+      });
+    } finally {
+      if (isDiscoveredServiceLaunchCurrent(slot, launchToken)) {
+        discoveredServiceLaunchPromises.delete(slot);
+      }
+    }
+  })();
+  discoveredServiceLaunchPromises.set(slot, launchPromise);
+  return launchPromise;
+}
+
 function envPythonPath(envDir: string): string {
   if (process.platform === "win32") {
     return path.join(envDir, "Scripts", "python.exe");
@@ -651,8 +1152,8 @@ function terminateChildTree(child: ChildProcess): Promise<void> {
   });
 }
 
-async function openRuntimeServicesFolder(): Promise<string> {
-  const target = app.isPackaged ? syncBundledServicesToRuntime() : servicesBasePath();
+async function openRuntimeServicesFolder(configuredRoot?: string): Promise<string> {
+  const target = selectedServicesRoot(configuredRoot).path;
   ensureDir(target);
   return shell.openPath(target);
 }
@@ -686,13 +1187,14 @@ async function resolveAvailablePort(preferredPort: number): Promise<number> {
 async function waitForServiceHealth(
   baseUrl: string,
   timeoutMs: number,
-  validate: (payload: Record<string, unknown>) => boolean
+  validate: (payload: Record<string, unknown>) => boolean,
+  healthPath = "/healthz"
 ): Promise<Record<string, unknown>> {
   const deadline = Date.now() + timeoutMs;
   let lastError = "no response";
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(`${baseUrl}/healthz`);
+      const response = await fetch(`${baseUrl}${healthPath}`);
       if (!response.ok) {
         lastError = `HTTP ${response.status}`;
       } else {
@@ -2003,10 +2505,14 @@ async function captureAutoReaderTargetRect(options: {
     });
     diag(options.successEvent, {
       left: rect.left,
+      pid: null,
       top: rect.top,
       width: rect.width,
       height: rect.height,
       captureBackend,
+      launchCwd: null,
+      launchCommand: null,
+      logLines: [],
       frozenAgeMs: frozen ? Date.now() - frozen.capturedAt : undefined
     });
   } catch (error) {
@@ -3647,9 +4153,16 @@ ipcMain.handle("auto-reader:page-result", (_event, result: AutoReaderPageResult)
   handleAutoReaderPageResult(result);
 });
 ipcMain.handle("stack:get-services-status", () => managedServicesStatusSnapshot());
+ipcMain.handle("stack:discover-services", async (_event, externalRoot?: string) => discoverManagedServicesSnapshot(externalRoot));
+ipcMain.handle("stack:get-discovered-service-statuses", () => discoveredServiceStatusesSnapshot());
+ipcMain.handle(
+  "stack:launch-discovered-service",
+  async (_event, request: { slot: "detect" | "ocr" | "tts"; servicePath: string; presetId: string; externalRoot?: string }) => launchDiscoveredService(request.slot, request.servicePath, request.presetId, request.externalRoot)
+);
+ipcMain.handle("stack:stop-discovered-service", async (_event, slot: "detect" | "ocr" | "tts") => stopDiscoveredService(slot));
 ipcMain.handle("stack:launch-service", async (_event, serviceId: ManagedServiceId) => launchManagedService(serviceId));
 ipcMain.handle("stack:stop-service", async (_event, serviceId: ManagedServiceId) => stopManagedService(serviceId));
-ipcMain.handle("stack:open-runtime-services", async () => openRuntimeServicesFolder());
+ipcMain.handle("stack:open-runtime-services", async (_event, configuredRoot?: string) => openRuntimeServicesFolder(configuredRoot));
 ipcMain.handle("provider:extract-text", async (_event, request: ProviderOcrRequest) => {
   const controller = createProviderController(request.requestId);
   diag("provider.ocr.request.begin", { requestId: request.requestId, provider: request.provider, model: request.config.model });

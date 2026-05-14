@@ -39,7 +39,19 @@ import {
   SettingsStore,
   SETTINGS_KEY
 } from "../core/services/settings-store";
-import type { ManagedServiceId, ManagedServiceStatus, ManagedServicesStatus, UiTheme } from "../core/services/platform";
+import type {
+  DiscoveredServiceCapability,
+  DiscoveredServiceCatalogItem,
+  DiscoveredServicePreset,
+  DiscoveredServiceSlot,
+  DiscoveredServiceRunStatus,
+  DiscoveredServiceSelector,
+  DiscoveredServicesSnapshot,
+  ManagedServiceId,
+  ManagedServiceStatus,
+  ManagedServicesStatus,
+  UiTheme
+} from "../core/services/platform";
 import { WorkspaceResizer } from "../ui/workspace-resizer";
 import { cleanTextForTts, findChunkIndexByTime } from "../core/utils/chunking";
 import { RequestPreemptor } from "../core/utils/request-preemptor";
@@ -61,6 +73,8 @@ interface NamedOption {
   value: string;
   label: string;
 }
+
+const SERVICE_NONE_OPTION = "__none__";
 
 type RequestLane = "ocr" | "detect_main" | "detect_modal";
 
@@ -166,6 +180,9 @@ export class WebApp {
   private llmModelSelect: TomSelect | null = null;
   private ttsModelSelect: TomSelect | null = null;
   private ttsVoiceSelect: TomSelect | null = null;
+  private detectServiceSelect: TomSelect | null = null;
+  private ocrServiceSelect: TomSelect | null = null;
+  private ttsServicePresetSelect: TomSelect | null = null;
   private settingsPeekOpen = false;
   private chunkPlaybackMode = false;
   private chunkPlaybackSession = 0;
@@ -258,6 +275,12 @@ export class WebApp {
   };
   private detectorHealthy = false;
   private managedServicesStatus: ManagedServicesStatus | null = null;
+  private discoveredServices: DiscoveredServicesSnapshot | null = null;
+  private discoveredServiceStatuses: DiscoveredServiceRunStatus[] = [];
+  private serviceDashboardLoading = false;
+  private serviceSlotAliases: Partial<Record<DiscoveredServiceSlot, DiscoveredServiceSlot>> = {};
+  private serviceLogViews: Partial<Record<DiscoveredServiceSlot, boolean>> = {};
+  private serviceStatusPollTimer: number | null = null;
   private lastRenderedActiveChunkId: string | null = null;
   private alwaysOnTopEnabled = false;
   private currentLanguage(): AppConfig["ui"]["language"] {
@@ -648,7 +671,8 @@ export class WebApp {
     this.renderConfig();
     this.logBootstrapStep("config.rendered");
     void this.checkDetectorHealth(false);
-    void this.refreshManagedServicesStatus();
+    void this.refreshDiscoveredServicesDashboard();
+    this.startServiceStatusPolling();
     void this.syncClipboardWatcherStateFromElectron();
     void this.syncAllElectronHotkeysFromSettings();
     void this.applyAutoReaderSettings();
@@ -657,9 +681,11 @@ export class WebApp {
     this.installE2eHooks();
     this.logBootstrapStep("e2e.hooks.installed");
     window.addEventListener("beforeunload", () => {
+      this.stopServiceStatusPolling();
       this.logLifecycle("window.beforeunload");
     });
     window.addEventListener("unload", () => {
+      this.stopServiceStatusPolling();
       this.logLifecycle("window.unload");
     });
     loggers.app.info("App mounted");
@@ -1005,9 +1031,33 @@ export class WebApp {
       placeholder: this.t("tts.voice")
     });
 
+    this.detectServiceSelect = new TomSelect(this.must<HTMLSelectElement>("service-detect-select"), {
+      create: false,
+      persist: false,
+      maxOptions: 500,
+      placeholder: "Text Processing"
+    });
+
+    this.ocrServiceSelect = new TomSelect(this.must<HTMLSelectElement>("service-ocr-select"), {
+      create: false,
+      persist: false,
+      maxOptions: 500,
+      placeholder: "OCR"
+    });
+
+    this.ttsServicePresetSelect = new TomSelect(this.must<HTMLSelectElement>("service-tts-select"), {
+      create: false,
+      persist: false,
+      maxOptions: 500,
+      placeholder: "Text to Speech"
+    });
+
     this.bindSelectorFetchBehavior(this.llmModelSelect, "llm-model", () => this.fetchLlmModels(false));
     this.bindSelectorFetchBehavior(this.ttsModelSelect, "tts-model", () => this.fetchTtsModels(false));
     this.bindSelectorFetchBehavior(this.ttsVoiceSelect, "tts-voice", () => this.fetchTtsVoices(false));
+    this.bindSelectorFetchBehavior(this.detectServiceSelect, "service-detect-select", () => this.refreshDiscoveredServicesDashboard());
+    this.bindSelectorFetchBehavior(this.ocrServiceSelect, "service-ocr-select", () => this.refreshDiscoveredServicesDashboard());
+    this.bindSelectorFetchBehavior(this.ttsServicePresetSelect, "service-tts-select", () => this.refreshDiscoveredServicesDashboard());
     this.updateTomSelectPlaceholders();
 
     this.must<HTMLButtonElement>("llm-refetch").addEventListener("click", () => {
@@ -1045,6 +1095,16 @@ export class WebApp {
       this.config.tts.voice = value;
       this.saveActiveTtsToSelectedProvider();
       this.store.save(this.config);
+    });
+
+    this.detectServiceSelect.on("change", (value: string) => {
+      this.handleServiceSlotSelectionChange("detect", value);
+    });
+    this.ocrServiceSelect.on("change", (value: string) => {
+      this.handleServiceSlotSelectionChange("ocr", value);
+    });
+    this.ttsServicePresetSelect.on("change", (value: string) => {
+      this.handleServiceSlotSelectionChange("tts", value);
     });
   }
 
@@ -1318,12 +1378,594 @@ export class WebApp {
       this.setStatus(this.t("stack.electronOnly"));
       return;
     }
-    const error = await window.electronAPI.openRuntimeServicesFolder();
+    const error = await window.electronAPI.openRuntimeServicesFolder(this.config.services.externalRoot);
     if (error) {
       this.setStatus(this.t("status.runtimeServicesOpenFailed", { error }));
       return;
     }
     this.setStatus(this.t("status.runtimeServicesOpened"));
+  }
+
+  private setLooseStatusChip(chip: HTMLElement, text: string, state: "ok" | "error" | "idle"): void {
+    chip.textContent = text;
+    chip.classList.remove("ok", "error");
+    if (state !== "idle") {
+      chip.classList.add(state);
+    }
+  }
+
+  private getServiceSlotSelect(slot: DiscoveredServiceSlot): TomSelect | null {
+    return slot === "detect"
+      ? this.detectServiceSelect
+      : slot === "ocr"
+        ? this.ocrServiceSelect
+        : this.ttsServicePresetSelect;
+  }
+
+  private getServiceSlotStatusChipId(slot: DiscoveredServiceSlot): string {
+    return slot === "detect"
+      ? "service-detect-status-chip"
+      : slot === "ocr"
+        ? "service-ocr-status-chip"
+        : "service-tts-status-chip";
+  }
+
+  private getServiceSlotViewButtonId(slot: DiscoveredServiceSlot): string {
+    return slot === "detect"
+      ? "btn-view-service-detect-log"
+      : slot === "ocr"
+        ? "btn-view-service-ocr-log"
+        : "btn-view-service-tts-log";
+  }
+
+  private getServiceSlotViewPanelId(slot: DiscoveredServiceSlot): string {
+    return slot === "detect"
+      ? "service-detect-view"
+      : slot === "ocr"
+        ? "service-ocr-view"
+        : "service-tts-view";
+  }
+
+  private getServiceSlotLaunchId(slot: DiscoveredServiceSlot): string {
+    return slot === "detect"
+      ? "service-detect-launch"
+      : slot === "ocr"
+        ? "service-ocr-launch"
+        : "service-tts-launch";
+  }
+
+  private getServiceSlotLogId(slot: DiscoveredServiceSlot): string {
+    return slot === "detect"
+      ? "service-detect-log"
+      : slot === "ocr"
+        ? "service-ocr-log"
+        : "service-tts-log";
+  }
+
+  private getServiceSlotLabel(slot: DiscoveredServiceSlot): string {
+    return slot === "detect"
+      ? "Text Processing"
+      : slot === "ocr"
+        ? "OCR"
+        : "Text to Speech";
+  }
+
+  private getServiceSlotCapability(slot: DiscoveredServiceSlot): "detect" | "ocr" | "speech" {
+    return slot === "detect"
+      ? "detect"
+      : slot === "ocr"
+        ? "ocr"
+        : "speech";
+  }
+
+  private encodeServiceOptionValue(value: { servicePath: string; selectorId?: string; presetId?: string }): string {
+    return JSON.stringify(value);
+  }
+
+  private decodeServiceOptionValue(value: string): { servicePath: string; selectorId?: string; presetId?: string } | null {
+    if (!value || value === SERVICE_NONE_OPTION) return null;
+    try {
+      const parsed = JSON.parse(value) as { servicePath?: unknown; selectorId?: unknown; presetId?: unknown };
+      if (typeof parsed.servicePath !== "string") {
+        return null;
+      }
+      const selectorId = typeof parsed.selectorId === "string" ? parsed.selectorId : undefined;
+      const presetId = typeof parsed.presetId === "string" ? parsed.presetId : undefined;
+      if (!selectorId && !presetId) {
+        return null;
+      }
+      return { servicePath: parsed.servicePath, ...(selectorId ? { selectorId } : {}), ...(presetId ? { presetId } : {}) };
+    } catch {
+      return null;
+    }
+  }
+
+  private formatServicePresetLabel(label: string): string {
+    return label.replace(/\bGPU\b/g, "NVIDIA").replace(/\bgpu\b/g, "NVIDIA");
+  }
+
+  private resolveServiceOption(slot: DiscoveredServiceSlot, value: string): {
+    service: DiscoveredServiceCatalogItem;
+    storedId: string;
+    label: string;
+    key: string;
+    selector?: DiscoveredServiceSelector;
+    preset?: DiscoveredServicePreset;
+  } | null {
+    const parsed = this.decodeServiceOptionValue(value);
+    if (!parsed) {
+      return null;
+    }
+    const service = (this.discoveredServices?.services ?? []).find((entry) => entry.servicePath === parsed.servicePath);
+    if (!service) {
+      return null;
+    }
+    const capability = this.getServiceSlotCapability(slot);
+    if (parsed.selectorId) {
+      const selector = service.selectors?.find((entry) => entry.id === parsed.selectorId && entry.capabilities.includes(capability));
+      if (!selector) {
+        return null;
+      }
+      return {
+        service,
+        storedId: selector.id,
+        label: selector.name,
+        key: `${service.servicePath}::selector::${selector.id}`,
+        selector
+      };
+    }
+    const preset = service.presets.find((entry) => entry.id === parsed.presetId && entry.capabilities.includes(capability));
+    if (!preset) {
+      return null;
+    }
+    return {
+      service,
+      storedId: preset.id,
+      label: `${service.name} - ${this.formatServicePresetLabel(preset.name)}`,
+      key: `${service.servicePath}::preset::${preset.id}`,
+      preset
+    };
+  }
+
+  private capabilitiesForSlots(slots: DiscoveredServiceSlot[]): DiscoveredServiceCapability[] {
+    return Array.from(new Set(slots.map((slot) => this.getServiceSlotCapability(slot))));
+  }
+
+  private resolveSelectorPreset(
+    service: DiscoveredServiceCatalogItem,
+    selector: DiscoveredServiceSelector,
+    slots: DiscoveredServiceSlot[]
+  ): DiscoveredServicePreset | null {
+    const requiredCapabilities = this.capabilitiesForSlots(slots);
+    if (selector.presetId) {
+      const preset = service.presets.find((entry) => entry.id === selector.presetId) ?? null;
+      return preset && requiredCapabilities.every((capability) => preset.capabilities.includes(capability)) ? preset : null;
+    }
+    const candidates = service.presets.filter((preset) => requiredCapabilities.every((capability) => preset.capabilities.includes(capability)));
+    if (candidates.length === 0) {
+      return null;
+    }
+    const runtimeMatched = selector.runtime
+      ? candidates.filter((preset) => requiredCapabilities.every((capability) => {
+          const expected = selector.runtime?.[capability];
+          return !expected || preset.runtime?.[capability] === expected;
+        }))
+      : candidates;
+    const pool = runtimeMatched.length > 0 ? runtimeMatched : candidates;
+    return pool.slice().sort((left, right) => {
+      const leftExtra = left.capabilities.length - requiredCapabilities.length;
+      const rightExtra = right.capabilities.length - requiredCapabilities.length;
+      if (leftExtra !== rightExtra) {
+        return leftExtra - rightExtra;
+      }
+      return left.defaultPort - right.defaultPort;
+    })[0] ?? null;
+  }
+
+  private buildServiceSlotOptions(slot: DiscoveredServiceSlot): NamedOption[] {
+    const capability = this.getServiceSlotCapability(slot);
+    const services = this.discoveredServices?.services ?? [];
+    const options = services.flatMap((service) => {
+      const selectors = service.selectors?.filter((selector) => selector.capabilities.includes(capability)) ?? [];
+      if (selectors.length > 0) {
+        return selectors.map((selector) => ({
+          value: this.encodeServiceOptionValue({ servicePath: service.servicePath, selectorId: selector.id }),
+          label: selector.name
+        }));
+      }
+      return service.presets
+        .filter((preset) => preset.capabilities.includes(capability))
+        .map((preset) => ({
+          value: this.encodeServiceOptionValue({ servicePath: service.servicePath, presetId: preset.id }),
+          label: `${service.name} - ${this.formatServicePresetLabel(preset.name)}`
+        }));
+    });
+    return [
+      { value: SERVICE_NONE_OPTION, label: "None" },
+      ...options.sort((left, right) => left.label.localeCompare(right.label))
+    ];
+  }
+
+  private getConfigServiceSelection(slot: DiscoveredServiceSlot): { serviceId: string; presetId: string } {
+    if (slot === "detect") {
+      return {
+        serviceId: this.config.services.activeDetectServiceId,
+        presetId: this.config.services.activeDetectPresetId
+      };
+    }
+    if (slot === "ocr") {
+      return {
+        serviceId: this.config.services.activeOcrServiceId,
+        presetId: this.config.services.activeOcrPresetId
+      };
+    }
+    return {
+      serviceId: this.config.services.activeTtsServiceId,
+      presetId: this.config.services.activeTtsPresetId
+    };
+  }
+
+  private setConfigServiceSelection(slot: DiscoveredServiceSlot, service: DiscoveredServiceCatalogItem | null, presetId: string): void {
+    const serviceId = service?.id ?? "";
+    const nextPresetId = service ? presetId : "";
+    if (slot === "detect") {
+      this.config.services.activeDetectServiceId = serviceId;
+      this.config.services.activeDetectPresetId = nextPresetId;
+    } else if (slot === "ocr") {
+      this.config.services.activeOcrServiceId = serviceId;
+      this.config.services.activeOcrPresetId = nextPresetId;
+    } else {
+      this.config.services.activeTtsServiceId = serviceId;
+      this.config.services.activeTtsPresetId = nextPresetId;
+    }
+  }
+
+  private getSelectedServiceOptionValue(slot: DiscoveredServiceSlot): string {
+    const current = this.getConfigServiceSelection(slot);
+    if (!current.serviceId || !current.presetId) {
+      return SERVICE_NONE_OPTION;
+    }
+    const service = (this.discoveredServices?.services ?? []).find((entry) => entry.id === current.serviceId);
+    if (!service) {
+      return SERVICE_NONE_OPTION;
+    }
+    const capability = this.getServiceSlotCapability(slot);
+    const selector = service.selectors?.find((entry) => entry.id === current.presetId && entry.capabilities.includes(capability));
+    if (selector) {
+      return this.encodeServiceOptionValue({ servicePath: service.servicePath, selectorId: selector.id });
+    }
+    const migratedSelector = service.selectors?.find((entry) => entry.presetId === current.presetId && entry.capabilities.includes(capability));
+    if (migratedSelector) {
+      return this.encodeServiceOptionValue({ servicePath: service.servicePath, selectorId: migratedSelector.id });
+    }
+    const preset = service.presets.find((entry) => entry.id === current.presetId && entry.capabilities.includes(capability));
+    return preset ? this.encodeServiceOptionValue({ servicePath: service.servicePath, presetId: preset.id }) : SERVICE_NONE_OPTION;
+  }
+
+  private handleServiceSlotSelectionChange(slot: DiscoveredServiceSlot, value: string): void {
+    delete this.serviceSlotAliases[slot];
+    const selection = this.resolveServiceOption(slot, value);
+    if (!selection) {
+      this.setConfigServiceSelection(slot, null, "");
+      this.store.save(this.config);
+      this.renderDiscoveredServicesDashboard();
+      return;
+    }
+    this.setConfigServiceSelection(slot, selection.service, selection.storedId);
+    this.store.save(this.config);
+    this.renderDiscoveredServicesDashboard();
+  }
+
+  private getDiscoveredServiceStatus(slot: DiscoveredServiceSlot): DiscoveredServiceRunStatus | null {
+    const direct = this.discoveredServiceStatuses.find((status) => status.slot === slot) ?? null;
+    if (direct) return direct;
+    const aliased = this.serviceSlotAliases[slot];
+    if (!aliased) return null;
+    const current = this.discoveredServiceStatuses.find((status) => status.slot === aliased) ?? null;
+    return current ? { ...current, slot, logLines: [...current.logLines] } : null;
+  }
+
+  private updateDiscoveredServiceStatus(status: DiscoveredServiceRunStatus): void {
+    const next = this.discoveredServiceStatuses.filter((entry) => entry.slot !== status.slot);
+    next.push(status);
+    next.sort((left, right) => left.slot.localeCompare(right.slot));
+    this.discoveredServiceStatuses = next;
+  }
+
+  private hasActiveDiscoveredService(): boolean {
+    return this.discoveredServiceStatuses.some((status) => status.state === "starting" || status.state === "running");
+  }
+
+  private startServiceStatusPolling(): void {
+    if (this.serviceStatusPollTimer !== null) {
+      return;
+    }
+    this.serviceStatusPollTimer = window.setInterval(() => {
+      if (this.serviceDashboardLoading) {
+        return;
+      }
+      const viewingLogs = Object.values(this.serviceLogViews).some(Boolean);
+      if (!viewingLogs && !this.hasActiveDiscoveredService()) {
+        return;
+      }
+      void this.refreshDiscoveredServiceStatuses();
+    }, 1000);
+  }
+
+  private stopServiceStatusPolling(): void {
+    if (this.serviceStatusPollTimer === null) {
+      return;
+    }
+    window.clearInterval(this.serviceStatusPollTimer);
+    this.serviceStatusPollTimer = null;
+  }
+
+  private async refreshDiscoveredServiceStatuses(): Promise<void> {
+    if (!window.electronAPI?.getDiscoveredServiceStatuses) {
+      return;
+    }
+    try {
+      this.discoveredServiceStatuses = await window.electronAPI.getDiscoveredServiceStatuses();
+      this.renderDiscoveredServicesDashboard();
+    } catch {
+      // Ignore transient poll failures.
+    }
+  }
+
+  private toggleServiceLogView(slot: DiscoveredServiceSlot): void {
+    this.serviceLogViews[slot] = !this.serviceLogViews[slot];
+    this.renderDiscoveredServicesDashboard();
+  }
+
+  private applyDiscoveredServiceUrls(status: DiscoveredServiceRunStatus): void {
+    if (status.urls?.detectionBaseUrl) {
+      this.config.textProcessing.detectorBaseUrl = status.urls.detectionBaseUrl;
+    }
+    if (status.urls?.ocrBaseUrl) {
+      this.config.llm.openaiCompatible.baseUrl = status.urls.ocrBaseUrl;
+      this.config.llm.provider = "openai_compatible";
+      this.applySelectedLlmProviderSettings();
+    }
+    if (status.urls?.ttsBaseUrl) {
+      this.config.tts.openaiCompatible.baseUrl = status.urls.ttsBaseUrl;
+      this.config.tts.provider = "openai_compatible";
+      this.applySelectedTtsProviderSettings();
+    }
+    this.store.save(this.config);
+    this.renderConfig();
+    if (status.urls?.detectionBaseUrl) {
+      void this.checkDetectorHealth(false);
+    }
+  }
+
+  private renderDiscoveredServicesDashboard(): void {
+    const footnote = this.must<HTMLDivElement>("services-dashboard-footnote");
+    const errors = this.must<HTMLDivElement>("services-dashboard-errors");
+    const openButton = this.must<HTMLButtonElement>("btn-open-runtime-services");
+    const refreshButton = this.must<HTMLButtonElement>("btn-refresh-services-dashboard");
+    const launchButton = this.must<HTMLButtonElement>("btn-launch-selected-services");
+    const stopButton = this.must<HTMLButtonElement>("btn-stop-selected-services");
+    this.must<HTMLDivElement>("services-dashboard").setAttribute("aria-busy", this.serviceDashboardLoading ? "true" : "false");
+    openButton.disabled = !window.electronAPI?.openRuntimeServicesFolder;
+    refreshButton.disabled = this.serviceDashboardLoading;
+    launchButton.disabled = this.serviceDashboardLoading;
+    stopButton.disabled = this.serviceDashboardLoading;
+
+    if (!window.electronAPI?.getDiscoveredServices || !window.electronAPI?.launchDiscoveredService || !window.electronAPI?.stopDiscoveredService) {
+      launchButton.disabled = true;
+      stopButton.disabled = true;
+      footnote.textContent = this.t("stack.electronOnly");
+      errors.textContent = "";
+      return;
+    }
+
+    if (this.serviceDashboardLoading) {
+      footnote.textContent = "Refreshing services...";
+    } else {
+      const count = this.discoveredServices?.services.length ?? 0;
+      footnote.textContent = this.config.services.externalRoot.trim().length > 0
+        ? `Detected ${count} service${count === 1 ? "" : "s"} from the selected folder. Launching a service applies its local URLs automatically.`
+        : `Detected ${count} bundled service${count === 1 ? "" : "s"}. Launching a service applies its local URLs automatically.`;
+    }
+
+    const snapshot = this.discoveredServices;
+    for (const slot of ["detect", "ocr", "tts"] as const) {
+      const select = this.getServiceSlotSelect(slot);
+      const options = snapshot ? this.buildServiceSlotOptions(slot) : [];
+      this.applyOptions(select, options, this.getSelectedServiceOptionValue(slot));
+      const chip = this.must<HTMLSpanElement>(this.getServiceSlotStatusChipId(slot));
+      const viewButton = this.must<HTMLButtonElement>(this.getServiceSlotViewButtonId(slot));
+      const viewPanel = this.must<HTMLDivElement>(this.getServiceSlotViewPanelId(slot));
+      const launchText = this.must<HTMLDivElement>(this.getServiceSlotLaunchId(slot));
+      const logText = this.must<HTMLPreElement>(this.getServiceSlotLogId(slot));
+      const status = this.getDiscoveredServiceStatus(slot);
+      if (status?.state === "running") {
+        this.setLooseStatusChip(chip, "Running", "ok");
+      } else if (status?.state === "starting") {
+        this.setLooseStatusChip(chip, "Starting", "idle");
+      } else if (status?.state === "failed") {
+        this.setLooseStatusChip(chip, "Failed", "error");
+      } else {
+        this.setLooseStatusChip(chip, "Stopped", "idle");
+      }
+      const canView = Boolean(status?.launchCommand) || Boolean(status?.logLines.length);
+      viewButton.disabled = !canView;
+      viewButton.textContent = this.serviceLogViews[slot] ? "Hide" : "View";
+      viewButton.setAttribute("aria-expanded", this.serviceLogViews[slot] ? "true" : "false");
+      viewPanel.hidden = !this.serviceLogViews[slot];
+      const launchParts = [
+        status?.pid ? `PID ${status.pid}` : "",
+        status?.launchCwd ? `cd /d "${status.launchCwd}"` : "",
+        status?.launchCommand ?? ""
+      ].filter((part) => part.length > 0);
+      launchText.textContent = launchParts.length > 0 ? launchParts.join("\n") : "No launch recorded.";
+      logText.textContent = status?.logLines.length
+        ? status.logLines.join("\n")
+        : status?.state === "starting"
+          ? "Waiting for output..."
+          : "No output yet.";
+    }
+
+    errors.textContent = snapshot && snapshot.errors.length > 0
+      ? `${snapshot.errors.length} manifest error${snapshot.errors.length === 1 ? "" : "s"}. ${snapshot.errors.map((error) => error.manifestPath).join(" | ")}`
+      : snapshot || this.serviceDashboardLoading
+        ? ""
+        : this.config.services.externalRoot.trim().length > 0
+          ? "No services detected in the selected folder."
+          : "No bundled services detected.";
+  }
+
+  private async refreshDiscoveredServicesDashboard(): Promise<void> {
+    if (!window.electronAPI?.getDiscoveredServices) {
+      this.discoveredServices = null;
+      this.discoveredServiceStatuses = [];
+      this.renderDiscoveredServicesDashboard();
+      return;
+    }
+    this.serviceDashboardLoading = true;
+    this.renderDiscoveredServicesDashboard();
+    try {
+      this.discoveredServices = await window.electronAPI.getDiscoveredServices(this.config.services.externalRoot);
+      this.discoveredServiceStatuses = window.electronAPI.getDiscoveredServiceStatuses
+        ? await window.electronAPI.getDiscoveredServiceStatuses()
+        : [];
+    } catch (error) {
+      this.discoveredServices = { services: [], errors: [{ manifestPath: "services-dashboard", message: String(error) }] };
+      this.discoveredServiceStatuses = [];
+      this.setStatus(`Failed to refresh services: ${String(error)}`);
+    } finally {
+      this.serviceDashboardLoading = false;
+      this.renderDiscoveredServicesDashboard();
+    }
+  }
+
+  private async launchSelectedServices(): Promise<void> {
+    if (!window.electronAPI?.launchDiscoveredService) {
+      this.setStatus(this.t("stack.electronOnly"));
+      return;
+    }
+    const launches: Array<{ slot: DiscoveredServiceSlot; service: DiscoveredServiceCatalogItem; presetId: string; label: string; key: string }> = [];
+    const seen = new Map<string, DiscoveredServiceSlot>();
+    const groupedSelections = new Map<string, {
+      slot: DiscoveredServiceSlot;
+      slots: DiscoveredServiceSlot[];
+      selection: {
+        service: DiscoveredServiceCatalogItem;
+        storedId: string;
+        label: string;
+        key: string;
+        selector?: DiscoveredServiceSelector;
+        preset?: DiscoveredServicePreset;
+      };
+    }>();
+    this.serviceSlotAliases = {};
+    for (const slot of ["detect", "ocr", "tts"] as const) {
+      const rawValue = this.getServiceSlotSelect(slot)?.getValue() ?? "";
+      const value = typeof rawValue === "string" ? rawValue : rawValue[0] ?? "";
+      const selection = this.resolveServiceOption(slot, value);
+      if (!selection) continue;
+      const primarySlot = seen.get(selection.key);
+      if (primarySlot) {
+        this.serviceSlotAliases[slot] = primarySlot;
+        groupedSelections.get(selection.key)?.slots.push(slot);
+        continue;
+      }
+      seen.set(selection.key, slot);
+      groupedSelections.set(selection.key, {
+        slot,
+        slots: [slot],
+        selection
+      });
+    }
+    for (const group of groupedSelections.values()) {
+      const preset = group.selection.preset ?? (group.selection.selector
+        ? this.resolveSelectorPreset(group.selection.service, group.selection.selector, group.slots)
+        : null);
+      if (!preset) {
+        this.setStatus(`Failed to resolve a launch preset for ${group.selection.label}.`);
+        return;
+      }
+      launches.push({
+        slot: group.slot,
+        service: group.selection.service,
+        presetId: preset.id,
+        label: group.selection.label,
+        key: group.selection.key
+      });
+    }
+    if (launches.length === 0) {
+      this.setStatus("Select at least one service preset first.");
+      return;
+    }
+    for (const launch of launches) {
+      this.updateDiscoveredServiceStatus({
+        slot: launch.slot,
+        servicePath: launch.service.servicePath,
+        serviceId: launch.service.id,
+        family: launch.service.family,
+        presetId: launch.presetId,
+        pid: null,
+        state: "starting",
+        managed: false,
+        url: null,
+        urls: null,
+        launchCwd: null,
+        launchCommand: null,
+        logLines: [],
+        error: null
+      });
+    }
+    this.renderDiscoveredServicesDashboard();
+    const startedLabels: string[] = [];
+    for (const launch of launches) {
+      const status = await window.electronAPI.launchDiscoveredService({
+        slot: launch.slot,
+        servicePath: launch.service.servicePath,
+        presetId: launch.presetId,
+        externalRoot: this.config.services.externalRoot
+      });
+      this.updateDiscoveredServiceStatus(status);
+      this.applyDiscoveredServiceUrls(status);
+      startedLabels.push(`${this.getServiceSlotLabel(launch.slot)}: ${launch.label}`);
+      for (const aliasSlot of ["detect", "ocr", "tts"] as const) {
+        if (this.serviceSlotAliases[aliasSlot] === launch.slot) {
+          this.updateDiscoveredServiceStatus({ ...status, slot: aliasSlot });
+        }
+      }
+    }
+    this.renderDiscoveredServicesDashboard();
+    const failed = launches.find((launch) => this.getDiscoveredServiceStatus(launch.slot)?.state === "failed");
+    if (failed) {
+      const status = this.getDiscoveredServiceStatus(failed.slot);
+      this.setStatus(`Failed to launch ${failed.label}: ${status?.error ?? "unknown error"}`);
+      return;
+    }
+    this.setStatus(`Launched ${startedLabels.join(" | ")}.`);
+  }
+
+  private async stopSelectedServices(): Promise<void> {
+    if (!window.electronAPI?.stopDiscoveredService) {
+      this.setStatus(this.t("stack.electronOnly"));
+      return;
+    }
+    const aliases = { ...this.serviceSlotAliases };
+    const stops = new Set<DiscoveredServiceSlot>();
+    for (const slot of ["detect", "ocr", "tts"] as const) {
+      const alias = aliases[slot];
+      stops.add(alias ?? slot);
+    }
+    for (const slot of stops) {
+      const status = await window.electronAPI.stopDiscoveredService(slot);
+      this.updateDiscoveredServiceStatus(status);
+      for (const aliasSlot of ["detect", "ocr", "tts"] as const) {
+        if (aliases[aliasSlot] === slot) {
+          this.updateDiscoveredServiceStatus({ ...status, slot: aliasSlot });
+        }
+      }
+    }
+    this.serviceSlotAliases = {};
+    this.renderDiscoveredServicesDashboard();
+    this.setStatus("Stopped selected services.");
   }
 
   private async fetchTtsVoicesFromElectron(provider: TtsProvider, baseUrl: string | undefined, apiKey: string, model: string): Promise<NamedOption[]> {
@@ -1470,7 +2112,10 @@ export class WebApp {
     const pairs: Array<[TomSelect | null, string]> = [
       [this.llmModelSelect, this.t("ocr.model")],
       [this.ttsModelSelect, this.t("tts.model")],
-      [this.ttsVoiceSelect, this.t("tts.voice")]
+      [this.ttsVoiceSelect, this.t("tts.voice")],
+      [this.detectServiceSelect, "Text Processing"],
+      [this.ocrServiceSelect, "OCR"],
+      [this.ttsServicePresetSelect, "Text to Speech"]
     ];
     for (const [select, placeholder] of pairs) {
       if (!select) continue;
@@ -1606,20 +2251,31 @@ export class WebApp {
     this.must<HTMLButtonElement>("detector-health").addEventListener("click", async () => {
       await this.checkDetectorHealth();
     });
-    this.must<HTMLButtonElement>("btn-launch-paddle-service").addEventListener("click", () => {
-      void this.launchManagedService("paddle");
+    this.must<HTMLInputElement>("services-external-root").addEventListener("change", () => {
+      this.syncConfigFromInputs();
+      void this.refreshDiscoveredServicesDashboard();
     });
-    this.must<HTMLButtonElement>("btn-stop-paddle-service").addEventListener("click", () => {
-      void this.stopManagedService("paddle");
-    });
-    this.must<HTMLButtonElement>("btn-launch-edge-service").addEventListener("click", () => {
-      void this.launchManagedService("edge");
-    });
-    this.must<HTMLButtonElement>("btn-stop-edge-service").addEventListener("click", () => {
-      void this.stopManagedService("edge");
+    this.must<HTMLButtonElement>("btn-refresh-services-dashboard").addEventListener("click", () => {
+      this.syncConfigFromInputs();
+      void this.refreshDiscoveredServicesDashboard();
     });
     this.must<HTMLButtonElement>("btn-open-runtime-services").addEventListener("click", () => {
       void this.openRuntimeServicesFolder();
+    });
+    this.must<HTMLButtonElement>("btn-launch-selected-services").addEventListener("click", () => {
+      void this.launchSelectedServices();
+    });
+    this.must<HTMLButtonElement>("btn-stop-selected-services").addEventListener("click", () => {
+      void this.stopSelectedServices();
+    });
+    this.must<HTMLButtonElement>("btn-view-service-detect-log").addEventListener("click", () => {
+      this.toggleServiceLogView("detect");
+    });
+    this.must<HTMLButtonElement>("btn-view-service-ocr-log").addEventListener("click", () => {
+      this.toggleServiceLogView("ocr");
+    });
+    this.must<HTMLButtonElement>("btn-view-service-tts-log").addEventListener("click", () => {
+      this.toggleServiceLogView("tts");
     });
     this.must<HTMLInputElement>("capture-draw-rectangle").addEventListener("change", () => {
       this.syncConfigFromInputs();
@@ -1859,6 +2515,7 @@ export class WebApp {
       ? detectionMode
       : "off";
     this.config.textProcessing.detectorBaseUrl = this.must<HTMLInputElement>("detector-url").value;
+    this.config.services.externalRoot = this.must<HTMLInputElement>("services-external-root").value.trim();
     this.config.tts.provider = this.must<HTMLSelectElement>("tts-provider").value === "gemini_sdk" ? "gemini_sdk" : "openai_compatible";
     this.syncTtsInputsToActiveConfig();
     const minWords = Number(this.must<HTMLInputElement>("chunk-min").value);
@@ -2068,6 +2725,7 @@ export class WebApp {
     this.must<HTMLSelectElement>("llm-thinking-mode").value = this.config.llm.thinkingMode;
     this.must<HTMLSelectElement>("detector-mode").value = this.config.textProcessing.detectionMode;
     this.must<HTMLInputElement>("detector-url").value = this.config.textProcessing.detectorBaseUrl;
+    this.must<HTMLInputElement>("services-external-root").value = this.config.services.externalRoot;
     this.must<HTMLSelectElement>("tts-provider").value = this.currentTtsProvider();
     this.must<HTMLInputElement>("tts-url").value = this.config.tts.baseUrl;
     this.must<HTMLInputElement>("tts-key").value = this.config.tts.apiKey;
@@ -2129,7 +2787,7 @@ export class WebApp {
       this.detectorHealthy ? this.describeDetectionMode(this.config.textProcessing.detectionMode) : this.t("statuschip.unreachable"),
       this.detectorHealthy ? "idle" : "error"
     );
-    this.renderManagedServicesStatus();
+    this.renderDiscoveredServicesDashboard();
     this.renderAlwaysOnTopButton();
     this.renderMainPreviewOverlay();
   }
@@ -2312,6 +2970,7 @@ export class WebApp {
         system: { ...DEFAULT_CONFIG.system, ...parsed.system },
         logging: { ...DEFAULT_CONFIG.logging, ...parsed.logging },
         textProcessing: this.mergeTextProcessingConfig(parsed.textProcessing),
+        services: { ...DEFAULT_CONFIG.services, ...parsed.services },
         preprocessing: {
           ...DEFAULT_CONFIG.preprocessing,
           ...parsed.preprocessing,
@@ -2570,7 +3229,11 @@ export class WebApp {
       await this.abortVisionWork("new_image", automation?.kind === "auto_reader"
         ? { preserveAutoReaderSession: true, preservePlayback: true }
         : undefined);
-      await this.runPipeline(dataUrl, { source: "hotkey", captureKind, resultMode, automation });
+      const context = { source: "hotkey", captureKind, resultMode } as const;
+      await this.runPipeline(
+        dataUrl,
+        automation === undefined ? context : { ...context, automation }
+      );
     });
 
     window.electronAPI?.onCopiedTextForPlayback(async (text: string) => {
