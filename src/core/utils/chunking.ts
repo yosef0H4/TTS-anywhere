@@ -5,6 +5,7 @@ export function cleanTextForTts(input: string): string {
   // and cap excessive terminal punctuation.
   // First convert newlines to spaces so they become word boundaries
   let cleaned = input.replace(/[\r\n]+/g, " ");
+  cleaned = cleaned.replace(/[\*「」『』【】《》〈〉]/g, "");
   cleaned = cleaned.replace(/[^\p{L}\p{N}\p{P}\p{Z}]/gu, "");
   cleaned = cleaned.replace(/\s+/g, " ").trim();
   cleaned = cleaned.replace(/([.!?]){4,}/g, "$1$1$1");

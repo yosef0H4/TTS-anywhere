@@ -105,7 +105,7 @@ type AutoReaderTargetWindow = {
 };
 type AutoReaderPageResult = {
   runId: number;
-  outcome: "completed" | "failed" | "cancelled";
+  outcome: "ready" | "failed" | "cancelled";
   text?: string;
   message?: string;
 };
@@ -2936,6 +2936,10 @@ function handleAutoReaderPageResult(result: AutoReaderPageResult): void {
 
   if (result.outcome === "failed") {
     stopAutoReader(result.message ?? "Automatic reader stopped due to an OCR or playback error.", "error");
+    return;
+  }
+
+  if (result.outcome !== "ready") {
     return;
   }
 

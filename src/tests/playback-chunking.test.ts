@@ -149,6 +149,60 @@ describe('reconcileChunks', () => {
     expect(byText(result.chunks, 'Nu xi omicron pi rho sigma.').audioUrl).toBe('blob:2');
   });
 
+  it('keeps the speaking chunk stable when a new page is appended at the end', () => {
+    const previousText = 'Alpha beta gamma delta epsilon zeta. Eta theta iota kappa lambda mu.';
+    const previousChunks = createChunkRecords(previousText, DEFAULT_OPTIONS).map((chunk, index) => ({
+      ...chunk,
+      status: 'ready' as const,
+      audioUrl: `blob:${index}`,
+    }));
+
+    const speakingChunkId = previousChunks[0]!.id;
+    const nextText = `${previousText}\n\nNu xi omicron pi rho sigma. Tau upsilon phi chi psi omega.`;
+    const result = reconcileChunks({
+      nextText,
+      previousChunks,
+      activeChunkId: speakingChunkId,
+      speakingChunkId,
+      speakingRevision: previousChunks[0]!.revision,
+      ...DEFAULT_OPTIONS,
+    });
+
+    expect(result.chunks[0]!.id).toBe(speakingChunkId);
+    expect(result.chunks[0]!.status).toBe('ready');
+    expect(result.chunks[0]!.audioUrl).toBe('blob:0');
+    expect(result.dirtyChunkIds).toContain(result.chunks[2]!.id);
+  });
+
+  it('preserves a generated short tail and only creates a new suffix chunk', () => {
+    const previousText = 'hello world this tts. how';
+    const previousChunks = createChunkRecords(previousText, {
+      ...DEFAULT_OPTIONS,
+      finalizeTail: true,
+    }).map((chunk, index) => ({
+      ...chunk,
+      status: 'ready' as const,
+      audioUrl: `blob:${index}`,
+    }));
+
+    const result = reconcileChunks({
+      nextText: 'hello world this tts. how are u',
+      previousChunks,
+      activeChunkId: previousChunks[0]!.id,
+      finalizeTail: true,
+      ...DEFAULT_OPTIONS,
+    });
+
+    expect(result.chunks).toHaveLength(2);
+    expect(result.chunks[0]!.id).toBe(previousChunks[0]!.id);
+    expect(result.chunks[0]!.text).toBe('hello world this tts. how');
+    expect(result.chunks[0]!.status).toBe('ready');
+    expect(result.chunks[0]!.audioUrl).toBe('blob:0');
+    expect(result.chunks[1]!.text).toBe('are u');
+    expect(result.chunks[1]!.status).toBe('dirty');
+    expect(result.dirtyChunkIds).toEqual([result.chunks[1]!.id]);
+  });
+
   it('keeps duplicate chunks stable when editing only the second duplicate', () => {
     const previousText = 'Repeat alpha beta gamma delta epsilon zeta. Repeat alpha beta gamma delta epsilon zeta. Tail theta iota kappa lambda mu nu.';
     const previousChunks = createChunkRecords(previousText, DEFAULT_OPTIONS).map((chunk, index) => ({

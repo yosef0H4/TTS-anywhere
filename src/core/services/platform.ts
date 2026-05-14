@@ -302,7 +302,7 @@ export interface ElectronApi {
   setClipboardWatcherEnabled: (enabled: boolean) => Promise<boolean>;
   reportAutoReaderPageResult: (result: {
     runId: number;
-    outcome: "completed" | "failed" | "cancelled";
+    outcome: "ready" | "failed" | "cancelled";
     text?: string;
     message?: string;
   }) => Promise<void>;

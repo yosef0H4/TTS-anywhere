@@ -130,6 +130,8 @@ interface AutoReaderBufferedPage {
   filterResults: FilteredBox[];
   mergedGroups: MergeGroup[];
   filterStats: { widthRemoved: number; heightRemoved: number; medianRemoved: number; medianHeightPx: number };
+  firstChunkId: string | null;
+  readyReported: boolean;
 }
 
 const rendererBootAt = performance.now();
@@ -254,6 +256,7 @@ export class WebApp {
   private autoReaderSessionRunId: number | null = null;
   private activeAutoReaderPage: AutoReaderBufferedPage | null = null;
   private prefetchedAutoReaderPage: AutoReaderBufferedPage | null = null;
+  private autoReaderHasTranscript = false;
   private modalAbortController: AbortController | null = null;
   private runInProgress = false;
   private readonly requestPreemptor = new RequestPreemptor<RequestLane>();
@@ -3489,15 +3492,16 @@ export class WebApp {
     this.autoReaderSessionRunId = null;
     this.activeAutoReaderPage = null;
     this.prefetchedAutoReaderPage = null;
+    this.autoReaderHasTranscript = false;
   }
 
   private async reportAutoReaderPageResult(result: {
     runId: number;
-    outcome: "completed" | "failed" | "cancelled";
+    outcome: "ready" | "failed" | "cancelled";
     text?: string;
     message?: string;
   }, options: { clearSession?: boolean } = {}): Promise<void> {
-    const { clearSession = result.outcome !== "completed" } = options;
+    const { clearSession = result.outcome !== "ready" } = options;
     if (this.autoReaderSessionRunId !== result.runId) return;
     if (clearSession) {
       this.clearAutoReaderSession();
@@ -3514,11 +3518,14 @@ export class WebApp {
       detectedRawBoxes: structuredClone(this.currentDetectedRawBoxes),
       filterResults: structuredClone(this.currentFilterResults),
       mergedGroups: structuredClone(this.currentMergedGroups),
-      filterStats: { ...this.currentFilterStats }
+      filterStats: { ...this.currentFilterStats },
+      firstChunkId: null,
+      readyReported: false
     };
   }
 
-  private restoreAutoReaderBufferedPage(page: AutoReaderBufferedPage): void {
+  private restoreAutoReaderBufferedPage(page: AutoReaderBufferedPage, options: { restoreText?: boolean } = {}): void {
+    const { restoreText = true } = options;
     this.lastOriginalImageDataUrl = page.imageDataUrl;
     this.currentOcrImageDataUrl = page.imageDataUrl;
     this.currentOcrRegions = structuredClone(page.regions);
@@ -3527,32 +3534,90 @@ export class WebApp {
     this.currentMergedGroups = structuredClone(page.mergedGroups);
     this.currentFilterStats = { ...page.filterStats };
     this.setPreviewImage(page.imageDataUrl);
-    this.setRawTextValuePreservingScroll(page.text);
+    if (restoreText) {
+      this.setRawTextValuePreservingScroll(page.text);
+    }
     this.renderMainPreviewOverlay();
+  }
+
+  private updateAutoReaderTranscript(page: AutoReaderBufferedPage): void {
+    if (page.firstChunkId) {
+      return;
+    }
+
+    if (!this.autoReaderHasTranscript) {
+      this.setRawTextValuePreservingScroll(page.text);
+      this.reconcileText(this.getPlaybackText(), { source: "llm", finalizeTail: true });
+      page.firstChunkId = this.getChunkRecords().find((chunk) => chunk.finalized)?.id ?? null;
+      this.autoReaderHasTranscript = true;
+      return;
+    }
+
+    const raw = this.must<HTMLTextAreaElement>("raw-text");
+    const previousPreparedText = this.getPlaybackText();
+    const previousText = raw.value.replace(/\s+$/, "");
+    const nextText = previousText ? `${previousText}\n\n${page.text}` : page.text;
+    this.setRawTextValuePreservingScroll(nextText);
+    this.reconcileText(this.getPlaybackText(), { source: "llm", finalizeTail: true });
+    page.firstChunkId = this.getChunkRecords().find((chunk) => chunk.finalized && chunk.endChar > previousPreparedText.length)?.id ?? null;
+    this.autoReaderHasTranscript = true;
+  }
+
+  private prefetchAutoReaderPage(page: AutoReaderBufferedPage): void {
+    if (!page.firstChunkId) {
+      return;
+    }
+    this.prefetchFromIndex(page.firstChunkId, this.chunkPlaybackSession);
+  }
+
+  private async markAutoReaderPageReady(page: AutoReaderBufferedPage, runId: number): Promise<void> {
+    if (this.autoReaderSessionRunId !== runId || page.readyReported) {
+      return;
+    }
+    page.readyReported = true;
+    try {
+      await this.reportAutoReaderPageResult({
+        runId,
+        outcome: "ready",
+        text: page.text
+      }, { clearSession: false });
+    } catch (error) {
+      page.readyReported = false;
+      throw error;
+    }
   }
 
   private async startAutoReaderPage(page: AutoReaderBufferedPage, runId: number): Promise<void> {
     if (this.autoReaderSessionRunId !== runId) return;
     this.activeAutoReaderPage = page;
     this.prefetchedAutoReaderPage = null;
-    this.restoreAutoReaderBufferedPage(page);
-    this.updateTimelineFromRawText();
+    this.restoreAutoReaderBufferedPage(page, { restoreText: false });
+    if (page.firstChunkId) {
+      this.activeChunkId = page.firstChunkId;
+      this.syncActiveChunkIndex();
+    }
     this.resetPlaybackForTextChange();
     await this.startOrResumePlayback();
     if (this.autoReaderSessionRunId !== runId || this.activeAutoReaderPage !== page) return;
-    await this.reportAutoReaderPageResult({
-      runId,
-      outcome: "completed",
-      text: page.text
-    }, { clearSession: false });
+    await this.markAutoReaderPageReady(page, runId);
   }
 
-  private promotePrefetchedAutoReaderPage(): void {
+  private promotePrefetchedAutoReaderPage(options: { startPlayback?: boolean } = {}): void {
+    const { startPlayback = true } = options;
     const runId = this.autoReaderSessionRunId;
     const nextPage = this.prefetchedAutoReaderPage;
     if (runId === null || !nextPage) return;
-    this.activeAutoReaderPage = null;
+    this.activeAutoReaderPage = nextPage;
     this.prefetchedAutoReaderPage = null;
+
+    if (!startPlayback) {
+      this.restoreAutoReaderBufferedPage(nextPage, { restoreText: false });
+      void this.markAutoReaderPageReady(nextPage, runId).catch((error) => {
+        loggers.pipeline.error("Automatic reader page ready report failed", { error: String(error), runId });
+      });
+      return;
+    }
+
     void this.startAutoReaderPage(nextPage, runId).catch((error) => {
       loggers.pipeline.error("Automatic reader page promotion failed", { error: String(error), runId });
       void this.reportAutoReaderPageResult({
@@ -3567,9 +3632,11 @@ export class WebApp {
     if (this.autoReaderSessionRunId !== runId) {
       return Promise.resolve();
     }
+    this.updateAutoReaderTranscript(page);
     if (this.activeAutoReaderPage) {
       this.prefetchedAutoReaderPage = page;
-      this.restoreAutoReaderBufferedPage(this.activeAutoReaderPage);
+      this.prefetchAutoReaderPage(page);
+      this.restoreAutoReaderBufferedPage(this.activeAutoReaderPage, { restoreText: false });
       return Promise.resolve();
     }
     return this.startAutoReaderPage(page, runId);
@@ -3864,6 +3931,9 @@ export class WebApp {
         nextIndex,
         totalChunks: this.timeline.chunks.length
       });
+      if (nextChunk && this.prefetchedAutoReaderPage?.firstChunkId === nextChunk.id) {
+        this.promotePrefetchedAutoReaderPage({ startPlayback: false });
+      }
       if (nextIndex >= this.timeline.chunks.length) {
         this.chunkPlaybackMode = false;
         this.audio.src = "";
@@ -4007,7 +4077,7 @@ export class WebApp {
       }, captureContext);
       this.throwIfStale(runId);
       if (autoReaderRunId !== null && activeAutoReaderPage) {
-        this.restoreAutoReaderBufferedPage(activeAutoReaderPage);
+        this.restoreAutoReaderBufferedPage(activeAutoReaderPage, { restoreText: false });
       } else {
         this.currentOcrImageDataUrl = ocrInput.imageDataUrl;
         this.currentOcrRegions = ocrInput.regions;
@@ -4029,7 +4099,7 @@ export class WebApp {
           loggers.pipeline.info("Automatic reader page produced no text", { runId, phase: captureContext.automation?.phase });
           await this.reportAutoReaderPageResult({
             runId: autoReaderRunId,
-            outcome: "completed",
+            outcome: "ready",
             text: ""
           });
           return;
@@ -4070,7 +4140,7 @@ export class WebApp {
         });
         await this.reportAutoReaderPageResult({
           runId: autoReaderRunId,
-          outcome: "completed",
+          outcome: "ready",
           text: ""
         });
       } else {

@@ -44,6 +44,13 @@ interface ReconciledDraft extends ChunkDraft {
   audioUrl?: string;
 }
 
+interface PositionedChunkDraft extends ChunkDraft {
+  sourceId?: string;
+  sourceRevision?: number;
+  sourceStatus?: ChunkStatus;
+  sourceAudioUrl?: string;
+}
+
 interface Token {
   text: string;
   start: number;
@@ -121,6 +128,78 @@ function similarityScore(previous: ChunkRecord, next: ChunkDraft, nextIndex: num
   const distancePenalty = Math.abs(nextIndex - previous.startChar / 1000) * 0.02;
   const sizePenalty = Math.abs(previous.wordCount - next.wordCount) * 0.03;
   return jaccard - distancePenalty - sizePenalty;
+}
+
+function isReusableChunk(previous: ChunkRecord): boolean {
+  return previous.status === "queued"
+    || previous.status === "fetching"
+    || previous.status === "ready"
+    || previous.status === "playing"
+    || Boolean(previous.audioUrl);
+}
+
+function advanceToNonWhitespace(text: string, index: number, limit: number): number {
+  let cursor = index;
+  while (cursor < limit && /\s/.test(text[cursor] ?? "")) {
+    cursor += 1;
+  }
+  return cursor;
+}
+
+function splitDraftsPreservingReusablePrefixes(nextText: string, drafts: ChunkDraft[], previousChunks: ChunkRecord[]): PositionedChunkDraft[] {
+  const reusableChunks = previousChunks
+    .filter(isReusableChunk)
+    .sort((left, right) => left.startChar - right.startChar);
+
+  return drafts.flatMap((draft) => {
+    const pieces: PositionedChunkDraft[] = [];
+    let cursor = draft.start;
+
+    while (cursor < draft.end) {
+      const reusable = reusableChunks.find((chunk) => {
+        if (chunk.startChar !== cursor) {
+          return false;
+        }
+        if (chunk.endChar > draft.end) {
+          return false;
+        }
+        return nextText.slice(chunk.startChar, chunk.endChar).trim() === chunk.text;
+      });
+
+      if (!reusable) {
+        break;
+      }
+
+      pieces.push({
+        text: reusable.text,
+        start: reusable.startChar,
+        end: reusable.endChar,
+        wordCount: reusable.wordCount,
+        finalized: reusable.finalized,
+        sourceId: reusable.id,
+        sourceRevision: reusable.revision,
+        sourceStatus: reusable.status,
+        ...(reusable.audioUrl ? { sourceAudioUrl: reusable.audioUrl } : {}),
+      });
+
+      cursor = advanceToNonWhitespace(nextText, reusable.endChar, draft.end);
+    }
+
+    if (cursor < draft.end) {
+      const suffixText = nextText.slice(cursor, draft.end).trim();
+      if (suffixText) {
+        pieces.push({
+          text: suffixText,
+          start: cursor,
+          end: draft.end,
+          wordCount: countWords(suffixText),
+          finalized: draft.finalized,
+        });
+      }
+    }
+
+    return pieces.length > 0 ? pieces : [draft];
+  });
 }
 
 function resolveFallbackActiveChunkId(
@@ -274,7 +353,11 @@ export function reconcileChunks(params: ReconcileParams): ReconcileResult {
     speakingRevision,
     finalizeTail,
   } = params;
-  const drafts = chunkText(nextText, minWordsPerChunk, maxWordsPerChunk, finalizeTail);
+  const drafts = splitDraftsPreservingReusablePrefixes(
+    nextText,
+    chunkText(nextText, minWordsPerChunk, maxWordsPerChunk, finalizeTail),
+    previousChunks,
+  );
   const allocateId = nextId(previousChunks);
   const unusedPrevious = new Set(previousChunks.map((chunk) => chunk.id));
   const exactBuckets = new Map<string, ChunkRecord[]>();
@@ -287,6 +370,17 @@ export function reconcileChunks(params: ReconcileParams): ReconcileResult {
   }
 
   const chunks: ReconciledDraft[] = drafts.map((draft, index) => {
+    if (draft.sourceId && draft.sourceRevision && draft.sourceStatus) {
+      unusedPrevious.delete(draft.sourceId);
+      return {
+        ...draft,
+        id: draft.sourceId,
+        revision: draft.sourceRevision,
+        status: draft.sourceStatus,
+        ...(draft.sourceAudioUrl ? { audioUrl: draft.sourceAudioUrl } : {}),
+      } satisfies ReconciledDraft;
+    }
+
     const exactBucket = exactBuckets.get(normalize(draft.text));
     let match: ChunkRecord | undefined = exactBucket?.find((candidate) => unusedPrevious.has(candidate.id));
 

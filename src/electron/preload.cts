@@ -359,7 +359,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   reportAutoReaderPageResult: (result: {
     runId: number;
-    outcome: "completed" | "failed" | "cancelled";
+    outcome: "ready" | "failed" | "cancelled";
     text?: string;
     message?: string;
   }) => {
