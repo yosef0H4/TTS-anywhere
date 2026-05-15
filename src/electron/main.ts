@@ -72,6 +72,8 @@ const OVERLAY_THEME_COLORS: Record<UiTheme, { outer: string; inner: string }> = 
 };
 
 const MAX_AUTO_READER_NO_TEXT_RETRY_COUNT = 1_000_000;
+const SERVICE_OWNER_HEARTBEAT_INTERVAL_MS = 2000;
+const SERVICE_OWNER_GRACE_MS = 8000;
 
 function isUiTheme(value: unknown): value is UiTheme {
   return value === "zen" || value === "pink" || value === "dark-zen" || value === "dark-pink";
@@ -300,6 +302,9 @@ let managedServicesStatus: ManagedServicesStatus = {
     error: null
   }
 };
+let serviceOwnerSessionId: string | null = null;
+let serviceOwnerHeartbeatFilePath: string | null = null;
+let serviceOwnerHeartbeatTimer: NodeJS.Timeout | null = null;
 const processStartAt = Date.now();
 const startupPhaseBuffer: string[] = [];
 let startupWatchdogDomReady: NodeJS.Timeout | null = null;
@@ -497,6 +502,67 @@ function windowsEnv(base: NodeJS.ProcessEnv, additions: Record<string, string>):
 
 function ensureDir(dirPath: string): void {
   fs.mkdirSync(dirPath, { recursive: true });
+}
+
+function serviceOwnerHeartbeatDir(): string {
+  return path.join(app.getPath("temp"), "tts-anywhere-service-owner");
+}
+
+function writeServiceOwnerHeartbeat(): void {
+  if (!serviceOwnerSessionId || !serviceOwnerHeartbeatFilePath) {
+    return;
+  }
+  ensureDir(path.dirname(serviceOwnerHeartbeatFilePath));
+  fs.writeFileSync(serviceOwnerHeartbeatFilePath, JSON.stringify({
+    sessionId: serviceOwnerSessionId,
+    ownerPid: process.pid,
+    updatedAt: Date.now()
+  }), "utf-8");
+}
+
+function ensureServiceOwnerHeartbeatSession(): { sessionId: string; heartbeatFilePath: string } {
+  if (!serviceOwnerSessionId || !serviceOwnerHeartbeatFilePath) {
+    serviceOwnerSessionId = `${process.pid}-${Date.now().toString(36)}`;
+    serviceOwnerHeartbeatFilePath = path.join(serviceOwnerHeartbeatDir(), `${serviceOwnerSessionId}.json`);
+    writeServiceOwnerHeartbeat();
+    serviceOwnerHeartbeatTimer = setInterval(() => {
+      writeServiceOwnerHeartbeat();
+    }, SERVICE_OWNER_HEARTBEAT_INTERVAL_MS);
+    serviceOwnerHeartbeatTimer.unref();
+  }
+  return {
+    sessionId: serviceOwnerSessionId,
+    heartbeatFilePath: serviceOwnerHeartbeatFilePath
+  };
+}
+
+function clearServiceOwnerHeartbeatSession(): void {
+  if (serviceOwnerHeartbeatTimer) {
+    clearInterval(serviceOwnerHeartbeatTimer);
+    serviceOwnerHeartbeatTimer = null;
+  }
+  if (serviceOwnerHeartbeatFilePath && fs.existsSync(serviceOwnerHeartbeatFilePath)) {
+    try {
+      fs.unlinkSync(serviceOwnerHeartbeatFilePath);
+    } catch {
+      // Ignore cleanup failures during shutdown.
+    }
+  }
+  serviceOwnerSessionId = null;
+  serviceOwnerHeartbeatFilePath = null;
+}
+
+function withServiceOwnerEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const session = ensureServiceOwnerHeartbeatSession();
+  return {
+    ...env,
+    TTS_ANYWHERE_OWNER_MODE: "heartbeat-file",
+    TTS_ANYWHERE_OWNER_SESSION_ID: session.sessionId,
+    TTS_ANYWHERE_OWNER_PID: String(process.pid),
+    TTS_ANYWHERE_OWNER_HEARTBEAT_FILE: session.heartbeatFilePath,
+    TTS_ANYWHERE_OWNER_HEARTBEAT_INTERVAL_MS: String(SERVICE_OWNER_HEARTBEAT_INTERVAL_MS),
+    TTS_ANYWHERE_OWNER_GRACE_MS: String(SERVICE_OWNER_GRACE_MS)
+  };
 }
 
 function readProjectPythonVersion(projectDir: string): string {
@@ -771,7 +837,7 @@ function spawnDiscoveredServiceChild(
 ): ChildProcess {
   const child = spawn(command, args, {
     cwd,
-    env,
+    env: withServiceOwnerEnv(env),
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -1086,7 +1152,7 @@ function spawnManagedChild(
 ): ChildProcess {
   const child = spawn(command, args, {
     cwd,
-    env,
+    env: withServiceOwnerEnv(env),
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -4313,10 +4379,25 @@ app.on("will-quit", () => {
     terminateChildTreeSync(entry.child);
   }
   managedServiceChildren = {};
+  for (const entry of discoveredServiceChildren.values()) {
+    terminateChildTreeSync(entry.child);
+  }
+  discoveredServiceChildren.clear();
+  for (const [slot, status] of discoveredServiceStatuses.entries()) {
+    discoveredServiceStatuses.set(slot, {
+      ...status,
+      state: "stopped",
+      managed: false,
+      url: null,
+      urls: null,
+      error: null
+    });
+  }
   managedServicesStatus = {
     paddle: { state: "stopped", managed: false, url: null, urls: null, error: null },
     edge: { state: "stopped", managed: false, url: null, urls: null, error: null }
   };
+  clearServiceOwnerHeartbeatSession();
   disposeNativeResources();
   diag("app.will-quit.end");
 });

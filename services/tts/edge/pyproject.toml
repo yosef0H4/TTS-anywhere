@@ -18,3 +18,8 @@ tts-edge = "tts_edge_adapter.cli:main"
 [build-system]
 requires = ["hatchling>=1.25.0"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.4.0"
+]

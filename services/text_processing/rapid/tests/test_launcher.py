@@ -58,8 +58,20 @@ def test_ensure_env_reinstalls_cpu_runtime_when_missing(monkeypatch) -> None:
 
 def test_main_treats_keyboard_interrupt_as_clean_shutdown(monkeypatch) -> None:
     args = launcher.parse_args(["--enable-detect", "--detect-provider", "cpu"])
+
+    class FakeProcess:
+        def wait(self, timeout=None):
+            raise KeyboardInterrupt()
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            return None
+
     monkeypatch.setattr(launcher, "parse_args", lambda argv=None: args)
     monkeypatch.setattr(launcher, "ensure_env", lambda parsed_args: Path("/tmp/python"))
-    monkeypatch.setattr(launcher.subprocess, "run", lambda *args, **kwargs: (_ for _ in ()).throw(KeyboardInterrupt()))
+    monkeypatch.setattr(launcher.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+    monkeypatch.setattr(launcher, "start_owner_watchdog", lambda child, config: launcher.threading.Event())
 
     launcher.main([])
