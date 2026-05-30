@@ -221,6 +221,32 @@ describe('reconcileChunks', () => {
     expect(result.chunks[2]!.id).toBe(previousChunks[2]!.id);
   });
 
+  it('invalidates cached audio when Arabic chunk text changes', () => {
+    const previousText = 'تُرسم الهمزة المتطرفة منفردة على السطر بشكل كامل إذا سكن ما قبلها، مثل كلمة:';
+    const nextText = 'صحيح! الفاء حرف صحيح ساكن، فاستوجب رسم الهمزة المتطرفة بعده على السطر مباشرة دون الالتجاء لحرف مادي يحملها.';
+    const previousChunks = createChunkRecords(previousText, {
+      ...DEFAULT_OPTIONS,
+      finalizeTail: true,
+    }).map((chunk) => ({
+      ...chunk,
+      status: 'ready' as const,
+      audioUrl: 'blob:old-arabic-audio',
+    }));
+
+    const result = reconcileChunks({
+      nextText,
+      previousChunks,
+      finalizeTail: true,
+      ...DEFAULT_OPTIONS,
+    });
+
+    expect(result.chunks).toHaveLength(1);
+    expect(result.chunks[0]!.text).toBe(nextText);
+    expect(result.chunks[0]!.status).toBe('dirty');
+    expect(result.chunks[0]!.audioUrl).toBeUndefined();
+    expect(result.dirtyChunkIds).toEqual([result.chunks[0]!.id]);
+  });
+
   it('remaps the active chunk by similarity when a merge removes its old id', () => {
     const previousText = 'Alpha beta gamma delta epsilon zeta. Eta theta iota kappa lambda mu. Nu xi omicron pi rho sigma.';
     const previousChunks = createChunkRecords(previousText, DEFAULT_OPTIONS);

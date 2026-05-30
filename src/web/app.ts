@@ -174,6 +174,7 @@ export class WebApp {
   private readonly activeHotkeyAudios = new Set<HTMLAudioElement>();
   private readonly lastHotkeyFeedbackAt: Partial<Record<ConfigurableHotkeyKey, number>> = {};
   private lastPlaybackText = "";
+  private playbackDocumentGeneration = 0;
   private timeline: ReadingTimeline = { chunks: [], durationMs: 0 };
   private activeChunkId: string | null = null;
   private activeChunkIndex = 0;
@@ -805,6 +806,7 @@ export class WebApp {
     const previousText = this.lastPlaybackText;
     const treatAsNewDocument = this.shouldTreatAsNewDocument(previousText, nextText, options);
     if (treatAsNewDocument) {
+      this.playbackDocumentGeneration += 1;
       this.abortPlaybackAndSynthesis();
       this.activeChunkId = null;
       this.activeChunkIndex = 0;
@@ -3371,9 +3373,8 @@ export class WebApp {
       this.setStatus(this.t("status.copyHotkeyNoText"));
       return;
     }
-    this.must<HTMLTextAreaElement>("raw-text").value = nextText;
-    this.updateTimelineFromRawText();
-    this.resetPlaybackForTextChange();
+    this.setRawTextValuePreservingScroll(nextText);
+    this.reconcileText(this.getPlaybackText(), { source: "user", finalizeTail: true, treatAsNewDocument: true });
     this.setStatus(this.t(statusKey));
     try {
       await this.startOrResumePlayback();
@@ -4599,14 +4600,15 @@ export class WebApp {
     const controller = new AbortController();
     this.chunkAbortControllersById.set(chunkId, controller);
     const revision = chunk.revision;
+    const documentGeneration = this.playbackDocumentGeneration;
     const requestPromise = this.synthesizeChunk(chunk.index, chunk.text, session, controller.signal)
       .then((audioBlob) => {
-        if (session !== this.chunkPlaybackSession) {
+        if (session !== this.chunkPlaybackSession || documentGeneration !== this.playbackDocumentGeneration) {
           throw new Error("Cancelled");
         }
         const url = URL.createObjectURL(audioBlob);
         const current = this.getChunkById(chunkId);
-        if (!current || current.revision !== revision) {
+        if (!current || current.revision !== revision || documentGeneration !== this.playbackDocumentGeneration) {
           URL.revokeObjectURL(url);
           throw new Error("Cancelled");
         }

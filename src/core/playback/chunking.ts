@@ -59,9 +59,9 @@ interface Token {
   hasStop: boolean;
 }
 
-const STOP_REGEX = /[.!?;:)]$/;
-const WORD_PATTERN = /[A-Za-z0-9]+(?:'[A-Za-z0-9]+)*/;
-const WORD_REGEX = /[A-Za-z0-9]+(?:'[A-Za-z0-9]+)*/g;
+const STOP_REGEX = /[.!?;:)؟؛]$/u;
+const WORD_PATTERN = /[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/u;
+const WORD_REGEX = /[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu;
 
 function tokenize(text: string): Token[] {
   const matches = text.matchAll(/\S+/g);
