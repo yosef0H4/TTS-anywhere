@@ -35,6 +35,7 @@ HELPER_EXE = BUILD_DIR / "windows_natural_helper.exe"
 SYSTEM_SPEECH_SYNTHESIZER_DIR = Path(
     r"C:\Windows\SystemApps\MicrosoftWindows.Client.Core_cw5n1h2txyewy\SpeechSynthesizer"
 )
+WINDOWS_APPS_DIR = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "WindowsApps"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -116,22 +117,58 @@ def ensure_helper() -> Path:
     return compile_helper()
 
 
+def find_powershell() -> str | None:
+    system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+    candidates = (
+        system_root / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe",
+        system_root / "Sysnative" / "WindowsPowerShell" / "v1.0" / "powershell.exe",
+        shutil.which("powershell.exe"),
+        shutil.which("powershell"),
+        shutil.which("pwsh.exe"),
+        shutil.which("pwsh"),
+    )
+    for candidate in candidates:
+        if not candidate:
+            continue
+        candidate_path = Path(candidate)
+        if candidate_path.exists():
+            return str(candidate_path)
+    return None
+
+
+def discover_windowsapps_voice_roots() -> list[str]:
+    if not WINDOWS_APPS_DIR.exists():
+        return []
+    return [
+        str(path)
+        for path in WINDOWS_APPS_DIR.glob("MicrosoftWindows.Voice.*")
+        if path.is_dir() and (path / "Tokens.xml").exists()
+    ]
+
+
 def discover_installed_voice_roots() -> list[str]:
     if os.name != "nt":
         return []
+    powershell = find_powershell()
+    if powershell is None:
+        return discover_windowsapps_voice_roots()
     script = (
         "Get-AppxPackage | "
         "Where-Object { $_.Name -like 'MicrosoftWindows.Voice.*' -and $_.InstallLocation } | "
         "Select-Object -ExpandProperty InstallLocation"
     )
-    result = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", script],
-        cwd=PROJECT_ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    try:
+        result = subprocess.run(
+            [powershell, "-NoProfile", "-Command", script],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return discover_windowsapps_voice_roots()
+    roots = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    return roots or discover_windowsapps_voice_roots()
 
 
 def read_extra_voice_roots(env: dict[str, str] | None = None) -> list[str]:
