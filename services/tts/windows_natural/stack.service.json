@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "windows-natural",
+  "name": "Windows Natural TTS",
+  "family": "tts",
+  "description": "OpenAI-compatible TTS adapter backed by local Windows Narrator natural voices.",
+  "healthPath": "/healthz",
+  "launcher": {
+    "executable": "uv",
+    "args": ["run", "python", "launcher.py"]
+  },
+  "selectors": [
+    {
+      "id": "windows-natural",
+      "name": "Windows Natural",
+      "presetId": "default",
+      "capabilities": ["speech"]
+    }
+  ],
+  "presets": [
+    {
+      "id": "default",
+      "name": "Default",
+      "defaultPort": 8016,
+      "env": {
+        "UV_PROJECT_ENVIRONMENT": ".venv"
+      },
+      "capabilities": ["speech"],
+      "configTargets": ["tts.baseUrl"]
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+# Python/build caches
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Generated helper and downloaded SDK packages
+.build/
+.cache/
+
+# Local diagnostics and reverse-engineering output
+.analysis/
+.analysis-providers.txt
+ghidra_exports/
+ghidra_projects/
+../.analysis/
+
+# Local validation audio
+acceptance_*.wav
+*.wav
+
+# User-installed or extracted voice packages must not be committed
+*.msix
+*.appx
+*.appxbundle
+*.msixbundle
+**/MicrosoftWindows.Voice.*/
+
+# Copied Microsoft/Windows runtime binaries must not be committed
+**/Microsoft.CognitiveServices.Speech*.dll
+**/SpeechSynthesizerExtension.dll
+
+# Generated native helper binary
+windows_natural_helper.exe
+**/windows_natural_helper.exe

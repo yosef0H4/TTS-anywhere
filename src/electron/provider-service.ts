@@ -206,11 +206,15 @@ export class ElectronProviderTtsService {
         response_format: config.format
       }, { signal: mergedController.signal });
       const audioBytes = new Uint8Array(await response.arrayBuffer());
-      const mimeType = config.format === "wav"
-        ? "audio/wav"
-        : config.format === "opus"
-          ? "audio/ogg; codecs=opus"
-          : "audio/mpeg";
+      const headerMimeType = typeof (response as { headers?: { get?: (name: string) => string | null } }).headers?.get === "function"
+        ? (response as { headers: { get: (name: string) => string | null } }).headers.get("content-type")
+        : null;
+      const mimeType = headerMimeType?.trim()
+        || (config.format === "wav"
+          ? "audio/wav"
+          : config.format === "opus"
+            ? "audio/ogg; codecs=opus"
+            : "audio/mpeg");
       return { audioBytes, mimeType };
     } finally {
       clearTimeout(timeout);
