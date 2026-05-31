@@ -24,6 +24,10 @@ class Settings(BaseSettings):
 
     api_key: str | None = Field(default=None, alias="API_KEY")
     default_voice: str = Field(default="windows-natural:en-GB:SoniaNeural", alias="WINDOWS_NATURAL_DEFAULT_VOICE")
+    cors_allow_origin_regex: str = Field(
+        default=r"^https?://(127\.0\.0\.1|localhost)(:\d+)?$",
+        alias="WINDOWS_NATURAL_CORS_ALLOW_ORIGIN_REGEX",
+    )
 
 
 class SpeechRequest(BaseModel):
@@ -54,8 +58,11 @@ class HelperClient:
     def synthesize(self, text: str, voice_id: str) -> bytes:
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp:
             temp_path = Path(temp.name)
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False) as text_temp:
+            text_temp.write(text)
+            text_path = Path(text_temp.name)
         try:
-            cmd = self._base_cmd() + ["synthesize", "--voice-id", voice_id, "--text", text, "--out", str(temp_path)]
+            cmd = self._base_cmd() + ["synthesize", "--voice-id", voice_id, "--text-file", str(text_path), "--out", str(temp_path)]
             for root in self._voice_roots():
                 cmd.extend(["--voice-root", root])
             subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -74,6 +81,7 @@ class HelperClient:
             ) from error
         finally:
             temp_path.unlink(missing_ok=True)
+            text_path.unlink(missing_ok=True)
 
 
 class WindowsNaturalRuntime:
@@ -170,7 +178,12 @@ def create_app(settings: Settings | None = None, runtime: WindowsNaturalRuntime 
     runtime_instance = runtime or WindowsNaturalRuntime(cfg)
     auth = _auth(cfg.api_key)
     app = FastAPI(title="TTS Windows Natural Adapter", version="0.1.0")
-    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=cfg.cors_allow_origin_regex,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
 
     @app.get("/v1/models")
     def models(_: None = Depends(auth)) -> dict[str, object]:

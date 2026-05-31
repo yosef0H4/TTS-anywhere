@@ -30,3 +30,5 @@ bench_results/
 .bundle-resources/
 bin/uv.exe
 bin/uvx.exe
+
+EyeHearYou/

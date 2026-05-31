@@ -107,6 +107,7 @@ interface HotkeyBindingConfig {
   statusId: string;
   recordButtonId: string;
   clearButtonId: string;
+  resetButtonId: string;
   applyButtonId: string;
   cancelButtonId: string;
   beginEdit: (() => Promise<string>) | undefined;
@@ -435,6 +436,7 @@ export class WebApp {
           statusId: "hotkey-recording-status",
           recordButtonId: "btn-hotkey-record",
           clearButtonId: "btn-hotkey-clear",
+          resetButtonId: "btn-hotkey-reset",
           applyButtonId: "btn-hotkey-apply",
           cancelButtonId: "btn-hotkey-cancel",
           beginEdit: api?.beginCaptureHotkeyEdit,
@@ -449,6 +451,7 @@ export class WebApp {
           statusId: "ocr-clipboard-hotkey-recording-status",
           recordButtonId: "btn-ocr-clipboard-hotkey-record",
           clearButtonId: "btn-ocr-clipboard-hotkey-clear",
+          resetButtonId: "btn-ocr-clipboard-hotkey-reset",
           applyButtonId: "btn-ocr-clipboard-hotkey-apply",
           cancelButtonId: "btn-ocr-clipboard-hotkey-cancel",
           beginEdit: api?.beginOcrClipboardHotkeyEdit,
@@ -463,6 +466,7 @@ export class WebApp {
           statusId: "full-capture-hotkey-recording-status",
           recordButtonId: "btn-full-capture-hotkey-record",
           clearButtonId: "btn-full-capture-hotkey-clear",
+          resetButtonId: "btn-full-capture-hotkey-reset",
           applyButtonId: "btn-full-capture-hotkey-apply",
           cancelButtonId: "btn-full-capture-hotkey-cancel",
           beginEdit: api?.beginFullCaptureHotkeyEdit,
@@ -477,6 +481,7 @@ export class WebApp {
           statusId: "active-window-capture-hotkey-recording-status",
           recordButtonId: "btn-active-window-capture-hotkey-record",
           clearButtonId: "btn-active-window-capture-hotkey-clear",
+          resetButtonId: "btn-active-window-capture-hotkey-reset",
           applyButtonId: "btn-active-window-capture-hotkey-apply",
           cancelButtonId: "btn-active-window-capture-hotkey-cancel",
           beginEdit: api?.beginActiveWindowCaptureHotkeyEdit,
@@ -491,6 +496,7 @@ export class WebApp {
           statusId: "copy-hotkey-recording-status",
           recordButtonId: "btn-copy-hotkey-record",
           clearButtonId: "btn-copy-hotkey-clear",
+          resetButtonId: "btn-copy-hotkey-reset",
           applyButtonId: "btn-copy-hotkey-apply",
           cancelButtonId: "btn-copy-hotkey-cancel",
           beginEdit: api?.beginCopyHotkeyEdit,
@@ -505,6 +511,7 @@ export class WebApp {
           statusId: "auto-reader-hotkey-recording-status",
           recordButtonId: "btn-auto-reader-hotkey-record",
           clearButtonId: "btn-auto-reader-hotkey-clear",
+          resetButtonId: "btn-auto-reader-hotkey-reset",
           applyButtonId: "btn-auto-reader-hotkey-apply",
           cancelButtonId: "btn-auto-reader-hotkey-cancel",
           beginEdit: api?.beginAutoReaderHotkeyEdit,
@@ -519,6 +526,7 @@ export class WebApp {
           statusId: "clipboard-watcher-hotkey-recording-status",
           recordButtonId: "btn-clipboard-watcher-hotkey-record",
           clearButtonId: "btn-clipboard-watcher-hotkey-clear",
+          resetButtonId: "btn-clipboard-watcher-hotkey-reset",
           applyButtonId: "btn-clipboard-watcher-hotkey-apply",
           cancelButtonId: "btn-clipboard-watcher-hotkey-cancel",
           beginEdit: api?.beginClipboardWatcherHotkeyEdit,
@@ -533,6 +541,7 @@ export class WebApp {
           statusId: "abort-hotkey-recording-status",
           recordButtonId: "btn-abort-hotkey-record",
           clearButtonId: "btn-abort-hotkey-clear",
+          resetButtonId: "btn-abort-hotkey-reset",
           applyButtonId: "btn-abort-hotkey-apply",
           cancelButtonId: "btn-abort-hotkey-cancel",
           beginEdit: api?.beginAbortHotkeyEdit,
@@ -547,6 +556,7 @@ export class WebApp {
           statusId: "play-pause-hotkey-recording-status",
           recordButtonId: "btn-play-pause-hotkey-record",
           clearButtonId: "btn-play-pause-hotkey-clear",
+          resetButtonId: "btn-play-pause-hotkey-reset",
           applyButtonId: "btn-play-pause-hotkey-apply",
           cancelButtonId: "btn-play-pause-hotkey-cancel",
           beginEdit: api?.beginPlayPauseHotkeyEdit,
@@ -561,6 +571,7 @@ export class WebApp {
           statusId: "next-chunk-hotkey-recording-status",
           recordButtonId: "btn-next-chunk-hotkey-record",
           clearButtonId: "btn-next-chunk-hotkey-clear",
+          resetButtonId: "btn-next-chunk-hotkey-reset",
           applyButtonId: "btn-next-chunk-hotkey-apply",
           cancelButtonId: "btn-next-chunk-hotkey-cancel",
           beginEdit: api?.beginNextChunkHotkeyEdit,
@@ -575,6 +586,7 @@ export class WebApp {
           statusId: "previous-chunk-hotkey-recording-status",
           recordButtonId: "btn-previous-chunk-hotkey-record",
           clearButtonId: "btn-previous-chunk-hotkey-clear",
+          resetButtonId: "btn-previous-chunk-hotkey-reset",
           applyButtonId: "btn-previous-chunk-hotkey-apply",
           cancelButtonId: "btn-previous-chunk-hotkey-cancel",
           beginEdit: api?.beginPreviousChunkHotkeyEdit,
@@ -589,6 +601,7 @@ export class WebApp {
           statusId: "volume-up-hotkey-recording-status",
           recordButtonId: "btn-volume-up-hotkey-record",
           clearButtonId: "btn-volume-up-hotkey-clear",
+          resetButtonId: "btn-volume-up-hotkey-reset",
           applyButtonId: "btn-volume-up-hotkey-apply",
           cancelButtonId: "btn-volume-up-hotkey-cancel",
           beginEdit: api?.beginVolumeUpHotkeyEdit,
@@ -603,6 +616,7 @@ export class WebApp {
           statusId: "volume-down-hotkey-recording-status",
           recordButtonId: "btn-volume-down-hotkey-record",
           clearButtonId: "btn-volume-down-hotkey-clear",
+          resetButtonId: "btn-volume-down-hotkey-reset",
           applyButtonId: "btn-volume-down-hotkey-apply",
           cancelButtonId: "btn-volume-down-hotkey-cancel",
           beginEdit: api?.beginVolumeDownHotkeyEdit,
@@ -617,6 +631,7 @@ export class WebApp {
           statusId: "replay-capture-hotkey-recording-status",
           recordButtonId: "btn-replay-capture-hotkey-record",
           clearButtonId: "btn-replay-capture-hotkey-clear",
+          resetButtonId: "btn-replay-capture-hotkey-reset",
           applyButtonId: "btn-replay-capture-hotkey-apply",
           cancelButtonId: "btn-replay-capture-hotkey-cancel",
           beginEdit: api?.beginReplayCaptureHotkeyEdit,
@@ -2323,174 +2338,9 @@ export class WebApp {
       this.setStatus(this.t("status.settingsReset"));
     });
 
-    this.must<HTMLButtonElement>("btn-hotkey-record").addEventListener("click", () => {
-      void this.beginHotkeyRecording("capture");
-    });
-    this.must<HTMLButtonElement>("btn-hotkey-clear").addEventListener("click", () => {
-      void this.clearHotkey("capture");
-    });
-    this.must<HTMLButtonElement>("btn-hotkey-apply").addEventListener("click", () => {
-      void this.applyRecordedHotkey("capture");
-    });
-    this.must<HTMLButtonElement>("btn-hotkey-cancel").addEventListener("click", () => {
-      void this.cancelHotkeyRecording("capture");
-    });
-    this.must<HTMLButtonElement>("btn-ocr-clipboard-hotkey-record").addEventListener("click", () => {
-      void this.beginHotkeyRecording("ocrClipboard");
-    });
-    this.must<HTMLButtonElement>("btn-ocr-clipboard-hotkey-clear").addEventListener("click", () => {
-      void this.clearHotkey("ocrClipboard");
-    });
-    this.must<HTMLButtonElement>("btn-ocr-clipboard-hotkey-apply").addEventListener("click", () => {
-      void this.applyRecordedHotkey("ocrClipboard");
-    });
-    this.must<HTMLButtonElement>("btn-ocr-clipboard-hotkey-cancel").addEventListener("click", () => {
-      void this.cancelHotkeyRecording("ocrClipboard");
-    });
-    this.must<HTMLButtonElement>("btn-full-capture-hotkey-record").addEventListener("click", () => {
-      void this.beginHotkeyRecording("fullCapture");
-    });
-    this.must<HTMLButtonElement>("btn-full-capture-hotkey-clear").addEventListener("click", () => {
-      void this.clearHotkey("fullCapture");
-    });
-    this.must<HTMLButtonElement>("btn-full-capture-hotkey-apply").addEventListener("click", () => {
-      void this.applyRecordedHotkey("fullCapture");
-    });
-    this.must<HTMLButtonElement>("btn-full-capture-hotkey-cancel").addEventListener("click", () => {
-      void this.cancelHotkeyRecording("fullCapture");
-    });
-    this.must<HTMLButtonElement>("btn-active-window-capture-hotkey-record").addEventListener("click", () => {
-      void this.beginHotkeyRecording("activeWindowCapture");
-    });
-    this.must<HTMLButtonElement>("btn-active-window-capture-hotkey-clear").addEventListener("click", () => {
-      void this.clearHotkey("activeWindowCapture");
-    });
-    this.must<HTMLButtonElement>("btn-active-window-capture-hotkey-apply").addEventListener("click", () => {
-      void this.applyRecordedHotkey("activeWindowCapture");
-    });
-    this.must<HTMLButtonElement>("btn-active-window-capture-hotkey-cancel").addEventListener("click", () => {
-      void this.cancelHotkeyRecording("activeWindowCapture");
-    });
-    this.must<HTMLButtonElement>("btn-copy-hotkey-record").addEventListener("click", () => {
-      void this.beginHotkeyRecording("copyPlay");
-    });
-    this.must<HTMLButtonElement>("btn-copy-hotkey-clear").addEventListener("click", () => {
-      void this.clearHotkey("copyPlay");
-    });
-    this.must<HTMLButtonElement>("btn-copy-hotkey-apply").addEventListener("click", () => {
-      void this.applyRecordedHotkey("copyPlay");
-    });
-    this.must<HTMLButtonElement>("btn-copy-hotkey-cancel").addEventListener("click", () => {
-      void this.cancelHotkeyRecording("copyPlay");
-    });
-    this.must<HTMLButtonElement>("btn-auto-reader-hotkey-record").addEventListener("click", () => {
-      void this.beginHotkeyRecording("autoReader");
-    });
-    this.must<HTMLButtonElement>("btn-auto-reader-hotkey-clear").addEventListener("click", () => {
-      void this.clearHotkey("autoReader");
-    });
-    this.must<HTMLButtonElement>("btn-auto-reader-hotkey-apply").addEventListener("click", () => {
-      void this.applyRecordedHotkey("autoReader");
-    });
-    this.must<HTMLButtonElement>("btn-auto-reader-hotkey-cancel").addEventListener("click", () => {
-      void this.cancelHotkeyRecording("autoReader");
-    });
-    this.must<HTMLButtonElement>("btn-clipboard-watcher-hotkey-record").addEventListener("click", () => {
-      void this.beginHotkeyRecording("clipboardWatcher");
-    });
-    this.must<HTMLButtonElement>("btn-clipboard-watcher-hotkey-clear").addEventListener("click", () => {
-      void this.clearHotkey("clipboardWatcher");
-    });
-    this.must<HTMLButtonElement>("btn-clipboard-watcher-hotkey-apply").addEventListener("click", () => {
-      void this.applyRecordedHotkey("clipboardWatcher");
-    });
-    this.must<HTMLButtonElement>("btn-clipboard-watcher-hotkey-cancel").addEventListener("click", () => {
-      void this.cancelHotkeyRecording("clipboardWatcher");
-    });
-    this.must<HTMLButtonElement>("btn-abort-hotkey-record").addEventListener("click", () => {
-      void this.beginHotkeyRecording("abort");
-    });
-    this.must<HTMLButtonElement>("btn-abort-hotkey-clear").addEventListener("click", () => {
-      void this.clearHotkey("abort");
-    });
-    this.must<HTMLButtonElement>("btn-abort-hotkey-apply").addEventListener("click", () => {
-      void this.applyRecordedHotkey("abort");
-    });
-    this.must<HTMLButtonElement>("btn-abort-hotkey-cancel").addEventListener("click", () => {
-      void this.cancelHotkeyRecording("abort");
-    });
-    this.must<HTMLButtonElement>("btn-play-pause-hotkey-record").addEventListener("click", () => {
-      void this.beginHotkeyRecording("playPause");
-    });
-    this.must<HTMLButtonElement>("btn-play-pause-hotkey-clear").addEventListener("click", () => {
-      void this.clearHotkey("playPause");
-    });
-    this.must<HTMLButtonElement>("btn-play-pause-hotkey-apply").addEventListener("click", () => {
-      void this.applyRecordedHotkey("playPause");
-    });
-    this.must<HTMLButtonElement>("btn-play-pause-hotkey-cancel").addEventListener("click", () => {
-      void this.cancelHotkeyRecording("playPause");
-    });
-    this.must<HTMLButtonElement>("btn-next-chunk-hotkey-record").addEventListener("click", () => {
-      void this.beginHotkeyRecording("nextChunk");
-    });
-    this.must<HTMLButtonElement>("btn-next-chunk-hotkey-clear").addEventListener("click", () => {
-      void this.clearHotkey("nextChunk");
-    });
-    this.must<HTMLButtonElement>("btn-next-chunk-hotkey-apply").addEventListener("click", () => {
-      void this.applyRecordedHotkey("nextChunk");
-    });
-    this.must<HTMLButtonElement>("btn-next-chunk-hotkey-cancel").addEventListener("click", () => {
-      void this.cancelHotkeyRecording("nextChunk");
-    });
-    this.must<HTMLButtonElement>("btn-previous-chunk-hotkey-record").addEventListener("click", () => {
-      void this.beginHotkeyRecording("previousChunk");
-    });
-    this.must<HTMLButtonElement>("btn-previous-chunk-hotkey-clear").addEventListener("click", () => {
-      void this.clearHotkey("previousChunk");
-    });
-    this.must<HTMLButtonElement>("btn-previous-chunk-hotkey-apply").addEventListener("click", () => {
-      void this.applyRecordedHotkey("previousChunk");
-    });
-    this.must<HTMLButtonElement>("btn-previous-chunk-hotkey-cancel").addEventListener("click", () => {
-      void this.cancelHotkeyRecording("previousChunk");
-    });
-    this.must<HTMLButtonElement>("btn-volume-up-hotkey-record").addEventListener("click", () => {
-      void this.beginHotkeyRecording("volumeUp");
-    });
-    this.must<HTMLButtonElement>("btn-volume-up-hotkey-clear").addEventListener("click", () => {
-      void this.clearHotkey("volumeUp");
-    });
-    this.must<HTMLButtonElement>("btn-volume-up-hotkey-apply").addEventListener("click", () => {
-      void this.applyRecordedHotkey("volumeUp");
-    });
-    this.must<HTMLButtonElement>("btn-volume-up-hotkey-cancel").addEventListener("click", () => {
-      void this.cancelHotkeyRecording("volumeUp");
-    });
-    this.must<HTMLButtonElement>("btn-volume-down-hotkey-record").addEventListener("click", () => {
-      void this.beginHotkeyRecording("volumeDown");
-    });
-    this.must<HTMLButtonElement>("btn-volume-down-hotkey-clear").addEventListener("click", () => {
-      void this.clearHotkey("volumeDown");
-    });
-    this.must<HTMLButtonElement>("btn-volume-down-hotkey-apply").addEventListener("click", () => {
-      void this.applyRecordedHotkey("volumeDown");
-    });
-    this.must<HTMLButtonElement>("btn-volume-down-hotkey-cancel").addEventListener("click", () => {
-      void this.cancelHotkeyRecording("volumeDown");
-    });
-    this.must<HTMLButtonElement>("btn-replay-capture-hotkey-record").addEventListener("click", () => {
-      void this.beginHotkeyRecording("replayCapture");
-    });
-    this.must<HTMLButtonElement>("btn-replay-capture-hotkey-clear").addEventListener("click", () => {
-      void this.clearHotkey("replayCapture");
-    });
-    this.must<HTMLButtonElement>("btn-replay-capture-hotkey-apply").addEventListener("click", () => {
-      void this.applyRecordedHotkey("replayCapture");
-    });
-    this.must<HTMLButtonElement>("btn-replay-capture-hotkey-cancel").addEventListener("click", () => {
-      void this.cancelHotkeyRecording("replayCapture");
-    });
+    for (const key of this.getConfigurableHotkeyKeys()) {
+      this.bindHotkeyButtons(key);
+    }
 
     const rawTextEl = this.must<HTMLTextAreaElement>("raw-text");
     rawTextEl.addEventListener("beforeinput", (event) => {
@@ -3413,18 +3263,22 @@ export class WebApp {
       const editing = this.hotkeyRecordingState[key];
       const recordButton = this.must<HTMLButtonElement>(binding.recordButtonId);
       const clearButton = this.must<HTMLButtonElement>(binding.clearButtonId);
+      const resetButton = this.must<HTMLButtonElement>(binding.resetButtonId);
       const applyButton = this.must<HTMLButtonElement>(binding.applyButtonId);
       const cancelButton = this.must<HTMLButtonElement>(binding.cancelButtonId);
       recordButton.hidden = editing;
       clearButton.hidden = editing;
+      resetButton.hidden = editing;
       applyButton.hidden = !editing;
       cancelButton.hidden = !editing;
       recordButton.style.display = editing ? "none" : "";
       clearButton.style.display = editing ? "none" : "";
+      resetButton.style.display = editing ? "none" : "";
       applyButton.style.display = editing ? "" : "none";
       cancelButton.style.display = editing ? "" : "none";
       recordButton.disabled = !available || this.hotkeyRecordingState[key];
       clearButton.disabled = !available || editing;
+      resetButton.disabled = !available || editing || this.config.system[binding.systemKey] === this.getDefaultHotkeyValue(key);
       applyButton.disabled = !available || !this.pendingHotkeys[key];
       cancelButton.disabled = !available || !editing;
     }
@@ -3725,6 +3579,11 @@ export class WebApp {
     }
   }
 
+  private getDefaultHotkeyValue(key: ConfigurableHotkeyKey): string {
+    const binding = this.getHotkeyBindingConfig(key);
+    return DEFAULT_CONFIG.system[binding.systemKey];
+  }
+
   private async beginHotkeyRecording(key: ConfigurableHotkeyKey): Promise<void> {
     if (this.hotkeyRecordingState[key]) return;
     const binding = this.getHotkeyBindingConfig(key);
@@ -3847,12 +3706,51 @@ export class WebApp {
     this.renderHotkeyButtonState();
   }
 
+  private async resetHotkey(key: ConfigurableHotkeyKey): Promise<void> {
+    const binding = this.getHotkeyBindingConfig(key);
+    const defaultValue = this.getDefaultHotkeyValue(key);
+    this.hotkeyRecordingState[key] = false;
+    this.pendingHotkeys[key] = null;
+    this.stopHotkeyRecordingListener(key);
+    try {
+      const applied = await binding.apply?.(defaultValue);
+      const next = applied ?? defaultValue;
+      this.config.system[binding.systemKey] = next;
+      this.must<HTMLInputElement>(binding.inputId).value = next;
+      this.setHotkeyRecordingStatus(key, this.getHotkeyAppliedStatus(next));
+      this.store.save(this.config);
+    } catch (error) {
+      this.setHotkeyRecordingStatus(key, this.t("hotkey.applyFailed", { error: String(error) }));
+      return;
+    }
+    this.renderHotkeyButtonState();
+  }
+
   private getHotkeyStatus(value: string): string {
     return value ? this.t("hotkey.currentActive") : this.t("hotkey.none");
   }
 
   private getHotkeyAppliedStatus(value: string): string {
     return value ? this.t("hotkey.active", { hotkey: value }) : this.t("hotkey.none");
+  }
+
+  private bindHotkeyButtons(key: ConfigurableHotkeyKey): void {
+    const binding = this.getHotkeyBindingConfig(key);
+    this.must<HTMLButtonElement>(binding.recordButtonId).addEventListener("click", () => {
+      void this.beginHotkeyRecording(key);
+    });
+    this.must<HTMLButtonElement>(binding.clearButtonId).addEventListener("click", () => {
+      void this.clearHotkey(key);
+    });
+    this.must<HTMLButtonElement>(binding.resetButtonId).addEventListener("click", () => {
+      void this.resetHotkey(key);
+    });
+    this.must<HTMLButtonElement>(binding.applyButtonId).addEventListener("click", () => {
+      void this.applyRecordedHotkey(key);
+    });
+    this.must<HTMLButtonElement>(binding.cancelButtonId).addEventListener("click", () => {
+      void this.cancelHotkeyRecording(key);
+    });
   }
 
   private bindPlayback(): void {

@@ -126,6 +126,7 @@ namespace WindowsNaturalHelper
         {
             string voiceId = null;
             string text = null;
+            string textFile = null;
             string outPath = null;
             var roots = new List<string>();
             for (var i = 0; i < args.Length; i++)
@@ -138,6 +139,10 @@ namespace WindowsNaturalHelper
                 {
                     text = args[++i];
                 }
+                else if (args[i] == "--text-file" && i + 1 < args.Length)
+                {
+                    textFile = args[++i];
+                }
                 else if (args[i] == "--out" && i + 1 < args.Length)
                 {
                     outPath = args[++i];
@@ -146,6 +151,11 @@ namespace WindowsNaturalHelper
                 {
                     roots.Add(args[++i]);
                 }
+            }
+
+            if (!string.IsNullOrWhiteSpace(textFile))
+            {
+                text = File.ReadAllText(textFile);
             }
 
             if (string.IsNullOrWhiteSpace(voiceId) || string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(outPath))

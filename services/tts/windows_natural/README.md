@@ -74,6 +74,7 @@ Installed Windows natural voice packages under `C:\Program Files\WindowsApps\Mic
 - `WINDOWS_NATURAL_VOICE_PATHS`: optional semicolon-separated list of user-supplied local voice folders.
 - `WINDOWS_NATURAL_DEFAULT_VOICE`: optional default voice id, for example `windows-natural:en-GB:RyanNeural`.
 - `API_KEY`: optional bearer token for local API auth.
+- `WINDOWS_NATURAL_CORS_ALLOW_ORIGIN_REGEX`: optional FastAPI CORS origin regex. Defaults to localhost/127.0.0.1 browser origins only.
 
 ## Outputs
 
