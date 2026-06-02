@@ -12,6 +12,8 @@ describe("chunking", () => {
     expect(cleanTextForTts("Hi 😊   there!!!!\n\n#ok")).toBe("Hi there!!! #ok");
     expect(cleanTextForTts("*hello* **world**")).toBe("hello world");
     expect(cleanTextForTts("「hello」 『world』 【test】 《ok》 〈fine〉")).toBe("hello world test ok fine");
+    expect(cleanTextForTts("hello _____ world")).toBe("hello world");
+    expect(cleanTextForTts("hello___world")).toBe("hello world");
   });
 
   it("preserves word boundaries from newlines", () => {

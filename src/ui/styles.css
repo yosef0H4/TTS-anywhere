@@ -1823,6 +1823,12 @@ body {
     cursor: not-allowed;
 }
 
+.exit-pill {
+    border-color: color-mix(in srgb, #ef4444 70%, var(--line)) !important;
+    color: #b91c1c !important;
+    background: color-mix(in srgb, #ef4444 8%, var(--panel-2)) !important;
+}
+
 .upload-btn input {
     display: none;
 }

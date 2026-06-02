@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
-from tts_windows_natural_adapter.app import Settings, WindowsNaturalRuntime, create_app
+from tts_windows_natural_adapter.app import HelperClient, Settings, WindowsNaturalRuntime, create_app
 
 
 class FakeHelper:
     def __init__(self) -> None:
-        self.synth_calls: list[tuple[str, str, str | None]] = []
+        self.synth_calls: list[tuple[str, str, str | None, str]] = []
         self.list_voice_calls = 0
 
     def list_voices(self) -> dict[str, object]:
@@ -41,14 +42,19 @@ class FakeHelper:
             ],
         }
 
-    def synthesize(self, text: str, voice_id: str, voice_root: str | None = None) -> bytes:
-        self.synth_calls.append((text, voice_id, voice_root))
+    def synthesize(self, text: str, voice_id: str, voice_root: str | None = None, output_format: str = "Riff24Khz16BitMonoPcm") -> bytes:
+        self.synth_calls.append((text, voice_id, voice_root, output_format))
         return b"RIFFtestWAVEfmt "
 
 
 def _client(helper: FakeHelper | None = None) -> TestClient:
     runtime = WindowsNaturalRuntime(Settings(), helper=helper or FakeHelper())  # type: ignore[arg-type]
     return TestClient(create_app(settings=Settings(), runtime=runtime))
+
+
+def _client_with_settings(settings: Settings, helper: FakeHelper | None = None) -> TestClient:
+    runtime = WindowsNaturalRuntime(settings, helper=helper or FakeHelper())  # type: ignore[arg-type]
+    return TestClient(create_app(settings=settings, runtime=runtime))
 
 
 def test_models_endpoint_lists_windows_natural() -> None:
@@ -86,7 +92,7 @@ def test_speech_synthesizes_with_sonia() -> None:
     response = client.post("/v1/audio/speech", json={"input": "hello", "voice": "windows-natural:en-GB:SoniaNeural", "response_format": "wav"})
     assert response.status_code == 200
     assert response.headers["content-type"] == "audio/wav"
-    assert helper.synth_calls == [("hello", "windows-natural:en-GB:SoniaNeural", "C:\\voices\\sonia")]
+    assert helper.synth_calls == [("hello", "windows-natural:en-GB:SoniaNeural", "C:\\voices\\sonia", "Riff24Khz16BitMonoPcm")]
 
 
 def test_speech_reuses_cached_voice_probe() -> None:
@@ -99,9 +105,32 @@ def test_speech_reuses_cached_voice_probe() -> None:
 
     assert helper.list_voice_calls == 1
     assert helper.synth_calls == [
-        ("hello", "windows-natural:en-GB:SoniaNeural", "C:\\voices\\sonia"),
-        ("hello again", "windows-natural:en-GB:SoniaNeural", "C:\\voices\\sonia"),
+        ("hello", "windows-natural:en-GB:SoniaNeural", "C:\\voices\\sonia", "Riff24Khz16BitMonoPcm"),
+        ("hello again", "windows-natural:en-GB:SoniaNeural", "C:\\voices\\sonia", "Riff24Khz16BitMonoPcm"),
     ]
+
+
+def test_speech_uses_configured_output_format() -> None:
+    helper = FakeHelper()
+    settings = Settings(WINDOWS_NATURAL_OUTPUT_FORMAT="Riff16Khz16BitMonoPcm")
+    client = _client_with_settings(settings, helper)
+
+    response = client.post("/v1/audio/speech", json={"input": "hello", "voice": "windows-natural:en-GB:SoniaNeural"})
+
+    assert response.status_code == 200
+    assert helper.synth_calls == [("hello", "windows-natural:en-GB:SoniaNeural", "C:\\voices\\sonia", "Riff16Khz16BitMonoPcm")]
+
+
+def test_daemon_pool_size_env_defaults_to_three(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("WINDOWS_NATURAL_DAEMON_POOL_SIZE", raising=False)
+
+    assert HelperClient._read_daemon_pool_size() == 3
+
+
+def test_daemon_pool_size_env_allows_disable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WINDOWS_NATURAL_DAEMON_POOL_SIZE", "0")
+
+    assert HelperClient._read_daemon_pool_size() == 0
 
 
 def test_health_reports_compatible_and_incompatible_voices() -> None:

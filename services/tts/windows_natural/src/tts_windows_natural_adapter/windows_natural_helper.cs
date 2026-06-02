@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -72,6 +73,10 @@ namespace WindowsNaturalHelper
                 {
                     return Synthesize(args.Skip(1).ToArray());
                 }
+                if (string.Equals(command, "serve-json", StringComparison.OrdinalIgnoreCase))
+                {
+                    return ServeJson(args.Skip(1).ToArray());
+                }
                 if (string.Equals(command, "list-render-devices", StringComparison.OrdinalIgnoreCase))
                 {
                     return ListRenderDevices();
@@ -122,12 +127,155 @@ namespace WindowsNaturalHelper
             return 0;
         }
 
+        private static int ServeJson(string[] args)
+        {
+            var roots = new List<string>();
+            for (var i = 0; i < args.Length; i++)
+            {
+                if (args[i] == "--voice-root" && i + 1 < args.Length)
+                {
+                    roots.Add(args[++i]);
+                }
+            }
+
+            using (var daemon = new JsonDaemon(roots))
+            {
+                daemon.Run();
+            }
+            return 0;
+        }
+
+        private sealed class JsonDaemon : IDisposable
+        {
+            private readonly JavaScriptSerializer serializer = new JavaScriptSerializer();
+            private readonly Dictionary<string, VoiceRecord> voicesById = new Dictionary<string, VoiceRecord>(StringComparer.Ordinal);
+            private readonly WindowsUdkSpeech activation;
+            private string installedLicense;
+            private string legacyKey;
+
+            public JsonDaemon(IEnumerable<string> roots)
+            {
+                activation = WindowsUdkSpeech.Create();
+                foreach (var root in roots)
+                {
+                    if (!Directory.Exists(root))
+                    {
+                        continue;
+                    }
+                    foreach (var voice in LoadVoices(root, false))
+                    {
+                        if (!voicesById.ContainsKey(voice.id))
+                        {
+                            voicesById.Add(voice.id, voice);
+                        }
+                    }
+                }
+            }
+
+            public void Run()
+            {
+                string line;
+                while ((line = Console.ReadLine()) != null)
+                {
+                    if (string.IsNullOrWhiteSpace(line))
+                    {
+                        continue;
+                    }
+                    Console.WriteLine(serializer.Serialize(HandleLine(line)));
+                    Console.Out.Flush();
+                }
+            }
+
+            private Dictionary<string, object> HandleLine(string line)
+            {
+                var requestId = "";
+                try
+                {
+                    var request = serializer.Deserialize<Dictionary<string, object>>(line);
+                    requestId = GetString(request, "id");
+                    var command = GetString(request, "command");
+                    if (string.Equals(command, "synthesize", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return Synthesize(requestId, request);
+                    }
+                    if (string.Equals(command, "ping", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return Ok(requestId, new Dictionary<string, object> { { "helper_version", HelperVersion }, { "voice_count", voicesById.Count } });
+                    }
+                    return Error(requestId, "unsupported command");
+                }
+                catch (Exception ex)
+                {
+                    return Error(requestId, ex.Message);
+                }
+            }
+
+            private Dictionary<string, object> Synthesize(string requestId, Dictionary<string, object> request)
+            {
+                var voiceId = GetString(request, "voice_id");
+                var voiceRoot = GetString(request, "voice_root");
+                var textFile = GetString(request, "text_file");
+                var outPath = GetString(request, "out_path");
+                var outputFormat = ParseOutputFormat(GetString(request, "output_format"));
+                if (string.IsNullOrWhiteSpace(voiceId) || string.IsNullOrWhiteSpace(textFile) || string.IsNullOrWhiteSpace(outPath))
+                {
+                    return Error(requestId, "missing required synthesis args");
+                }
+                VoiceRecord voice;
+                if (!voicesById.TryGetValue(voiceId, out voice))
+                {
+                    return Error(requestId, "voice not found");
+                }
+                var root = string.IsNullOrWhiteSpace(voiceRoot) ? voice.path : voiceRoot;
+                var text = File.ReadAllText(textFile);
+                var stopwatch = Stopwatch.StartNew();
+                RunSynthesisCached(root, voice, text, outPath, outputFormat, activation, ref installedLicense, ref legacyKey);
+                stopwatch.Stop();
+                return Ok(requestId, new Dictionary<string, object>
+                {
+                    { "elapsed_ms", stopwatch.Elapsed.TotalMilliseconds },
+                    { "bytes", new FileInfo(outPath).Length }
+                });
+            }
+
+            private static string GetString(Dictionary<string, object> request, string key)
+            {
+                object value;
+                if (!request.TryGetValue(key, out value) || value == null)
+                {
+                    return "";
+                }
+                return Convert.ToString(value) ?? "";
+            }
+
+            private static Dictionary<string, object> Ok(string requestId, Dictionary<string, object> extra)
+            {
+                var response = new Dictionary<string, object> { { "ok", true }, { "id", requestId } };
+                foreach (var item in extra)
+                {
+                    response[item.Key] = item.Value;
+                }
+                return response;
+            }
+
+            private static Dictionary<string, object> Error(string requestId, string message)
+            {
+                return new Dictionary<string, object> { { "ok", false }, { "id", requestId }, { "error", message } };
+            }
+
+            public void Dispose()
+            {
+                activation.Dispose();
+            }
+        }
+
         private static int Synthesize(string[] args)
         {
             string voiceId = null;
             string text = null;
             string textFile = null;
             string outPath = null;
+            var outputFormat = SpeechSynthesisOutputFormat.Riff24Khz16BitMonoPcm;
             var roots = new List<string>();
             for (var i = 0; i < args.Length; i++)
             {
@@ -146,6 +294,10 @@ namespace WindowsNaturalHelper
                 else if (args[i] == "--out" && i + 1 < args.Length)
                 {
                     outPath = args[++i];
+                }
+                else if (args[i] == "--output-format" && i + 1 < args.Length)
+                {
+                    outputFormat = ParseOutputFormat(args[++i]);
                 }
                 else if (args[i] == "--voice-root" && i + 1 < args.Length)
                 {
@@ -175,7 +327,7 @@ namespace WindowsNaturalHelper
                     }
                     try
                     {
-                        RunSynthesis(root, voice, text, outPath);
+                        RunSynthesis(root, voice, text, outPath, outputFormat);
                         return 0;
                     }
                     catch (Exception ex)
@@ -418,7 +570,7 @@ namespace WindowsNaturalHelper
             var tempFile = Path.Combine(Path.GetTempPath(), "windows-natural-probe-" + Guid.NewGuid().ToString("N") + ".wav");
             try
             {
-                RunInstalledSynthesis(root, voiceName, "probe", tempFile);
+                RunInstalledSynthesis(root, voiceName, "probe", tempFile, SpeechSynthesisOutputFormat.Riff24Khz16BitMonoPcm);
                 var fileInfo = new FileInfo(tempFile);
                 if (!fileInfo.Exists || fileInfo.Length < 1024)
                 {
@@ -439,7 +591,7 @@ namespace WindowsNaturalHelper
             var tempFile = Path.Combine(Path.GetTempPath(), "windows-natural-probe-" + Guid.NewGuid().ToString("N") + ".wav");
             try
             {
-                RunLegacySynthesis(root, voiceName, "probe", tempFile);
+                RunLegacySynthesis(root, voiceName, "probe", tempFile, SpeechSynthesisOutputFormat.Riff24Khz16BitMonoPcm);
             }
             finally
             {
@@ -450,22 +602,49 @@ namespace WindowsNaturalHelper
             }
         }
 
-        private static void RunSynthesis(string root, VoiceRecord voice, string text, string outPath)
+        private static void RunSynthesis(string root, VoiceRecord voice, string text, string outPath, SpeechSynthesisOutputFormat outputFormat)
         {
             if (string.Equals(voice.backend, "installed-appx-current", StringComparison.Ordinal))
             {
-                RunInstalledSynthesis(root, voice.name, text, outPath);
+                RunInstalledSynthesis(root, voice.name, text, outPath, outputFormat);
                 return;
             }
 
-            RunLegacySynthesis(root, voice.name, text, outPath);
+            RunLegacySynthesis(root, voice.name, text, outPath, outputFormat);
         }
 
-        private static void RunInstalledSynthesis(string root, string voiceName, string text, string outPath)
+        private static void RunSynthesisCached(
+            string root,
+            VoiceRecord voice,
+            string text,
+            string outPath,
+            SpeechSynthesisOutputFormat outputFormat,
+            WindowsUdkSpeech activation,
+            ref string installedLicense,
+            ref string legacyKey)
+        {
+            if (string.Equals(voice.backend, "installed-appx-current", StringComparison.Ordinal))
+            {
+                if (string.IsNullOrWhiteSpace(installedLicense))
+                {
+                    installedLicense = ExtractInstalledAppxLicense();
+                }
+                RunSpeechSdkSynthesis(root, voice.name, text, outPath, installedLicense, outputFormat);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(legacyKey))
+            {
+                legacyKey = ExtractLegacyKey();
+            }
+            RunSpeechSdkSynthesis(root, voice.name, text, outPath, legacyKey, outputFormat);
+        }
+
+        private static void RunInstalledSynthesis(string root, string voiceName, string text, string outPath, SpeechSynthesisOutputFormat outputFormat)
         {
             using (WindowsUdkSpeech.Create())
             {
-                RunSpeechSdkSynthesis(root, voiceName, text, outPath, ExtractInstalledAppxLicense());
+                RunSpeechSdkSynthesis(root, voiceName, text, outPath, ExtractInstalledAppxLicense(), outputFormat);
             }
         }
 
@@ -830,15 +1009,15 @@ namespace WindowsNaturalHelper
             return output;
         }
 
-        private static void RunLegacySynthesis(string root, string voiceName, string text, string outPath)
+        private static void RunLegacySynthesis(string root, string voiceName, string text, string outPath, SpeechSynthesisOutputFormat outputFormat)
         {
-            RunSpeechSdkSynthesis(root, voiceName, text, outPath, ExtractLegacyKey());
+            RunSpeechSdkSynthesis(root, voiceName, text, outPath, ExtractLegacyKey(), outputFormat);
         }
 
-        private static void RunSpeechSdkSynthesis(string root, string voiceName, string text, string outPath, string license)
+        private static void RunSpeechSdkSynthesis(string root, string voiceName, string text, string outPath, string license, SpeechSynthesisOutputFormat outputFormat)
         {
             var cfg = EmbeddedSpeechConfig.FromPaths(new[] { root });
-            cfg.SetSpeechSynthesisOutputFormat(SpeechSynthesisOutputFormat.Riff24Khz16BitMonoPcm);
+            cfg.SetSpeechSynthesisOutputFormat(outputFormat);
             cfg.SetSpeechSynthesisVoice(voiceName, license);
             using (var audio = AudioConfig.FromWavFileOutput(outPath))
             using (var synth = new SpeechSynthesizer(cfg, audio))
@@ -853,6 +1032,22 @@ namespace WindowsNaturalHelper
                 {
                     throw new InvalidOperationException("Unexpected synthesis result: " + result.Reason);
                 }
+            }
+        }
+
+        private static SpeechSynthesisOutputFormat ParseOutputFormat(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return SpeechSynthesisOutputFormat.Riff24Khz16BitMonoPcm;
+            }
+            try
+            {
+                return (SpeechSynthesisOutputFormat)Enum.Parse(typeof(SpeechSynthesisOutputFormat), value, true);
+            }
+            catch
+            {
+                throw new InvalidOperationException("Unsupported output format: " + value);
             }
         }
 

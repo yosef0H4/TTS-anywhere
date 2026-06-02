@@ -123,6 +123,12 @@ type CaptureContext = {
   automation?: { kind: "auto_reader"; runId: number; phase: "initial" | "replay" };
 };
 
+type E2eCaptureTextOptions = {
+  autoReader?: boolean;
+  startPlayback?: boolean;
+  imageDataUrl?: string;
+};
+
 interface AutoReaderBufferedPage {
   text: string;
   imageDataUrl: string;
@@ -256,6 +262,7 @@ export class WebApp {
   private activeRunId = 0;
   private activeRunAbortController: AbortController | null = null;
   private autoReaderSessionRunId: number | null = null;
+  private e2eAutoReaderRunCounter = 0;
   private activeAutoReaderPage: AutoReaderBufferedPage | null = null;
   private prefetchedAutoReaderPage: AutoReaderBufferedPage | null = null;
   private autoReaderHasTranscript = false;
@@ -676,6 +683,8 @@ export class WebApp {
     this.logBootstrapStep("capture.bound");
     this.bindBreak();
     this.logBootstrapStep("break.bound");
+    this.bindExit();
+    this.logBootstrapStep("exit.bound");
     this.bindMainPreviewRenderer();
     this.logBootstrapStep("main.preview.bound");
     this.bindPreprocessModal();
@@ -719,6 +728,10 @@ export class WebApp {
         setRawText: (text: string) => void;
         dispatchEngine: (event: unknown) => void;
         startPlayback: () => Promise<void>;
+        simulateCapturedText: (text: string, options?: E2eCaptureTextOptions) => Promise<unknown>;
+        dispatchPlaybackHotkey: (action: PlaybackHotkeyAction) => Promise<unknown>;
+        getReadingPreviewState: () => unknown;
+        getRecentUiState: () => unknown;
         setTypingState: (typing: { userTyping?: boolean; ocrStreaming?: boolean; activeOcrRequests?: number }) => void;
         getPlaybackMetrics: () => PlaybackMetrics;
         clearPlaybackMetrics: () => void;
@@ -752,6 +765,15 @@ export class WebApp {
       startPlayback: async () => {
         await this.startOrResumePlayback();
       },
+      simulateCapturedText: async (text, options = {}) => {
+        return this.simulateCapturedTextForE2e(text, options);
+      },
+      dispatchPlaybackHotkey: async (action) => {
+        await this.handlePlaybackHotkey(action);
+        return this.getRecentUiStateForE2e();
+      },
+      getReadingPreviewState: () => this.getReadingPreviewStateForE2e(),
+      getRecentUiState: () => this.getRecentUiStateForE2e(),
       setTypingState: (typing) => {
         if (typeof typing.userTyping === "boolean") {
           this.isUserTyping = typing.userTyping;
@@ -768,9 +790,7 @@ export class WebApp {
         this.renderReadingPreview();
       },
       getPlaybackMetrics: () => ({
-        sessionStarts: this.playbackMetrics.sessionStarts,
-        playChunkRequests: this.playbackMetrics.playChunkRequests,
-        ttsStartsBySessionAndHash: { ...this.playbackMetrics.ttsStartsBySessionAndHash }
+        ...this.getPlaybackMetricsSnapshot()
       }),
       clearPlaybackMetrics: () => {
         this.playbackMetrics.sessionStarts = 0;
@@ -778,6 +798,89 @@ export class WebApp {
         this.playbackMetrics.ttsStartsBySessionAndHash = {};
       }
     };
+  }
+
+  private getPlaybackMetricsSnapshot(): PlaybackMetrics {
+    return {
+      sessionStarts: this.playbackMetrics.sessionStarts,
+      playChunkRequests: this.playbackMetrics.playChunkRequests,
+      ttsStartsBySessionAndHash: { ...this.playbackMetrics.ttsStartsBySessionAndHash }
+    };
+  }
+
+  private getReadingPreviewStateForE2e(): unknown {
+    const spans = Array.from(this.must<HTMLDivElement>("reading-preview").querySelectorAll("span"));
+    return {
+      activeChunkIndex: this.activeChunkIndex,
+      activeChunkId: this.activeChunkId,
+      chunkPlaybackMode: this.chunkPlaybackMode,
+      audioPaused: this.audio.paused,
+      chunks: this.getChunkRecords().map((chunk, index) => {
+        const span = spans[index];
+        const classes = span ? Array.from(span.classList) : [];
+        return {
+          id: chunk.id,
+          index: chunk.index,
+          text: chunk.text,
+          status: chunk.status,
+          finalized: chunk.finalized,
+          isActive: classes.includes("active-chunk"),
+          classes
+        };
+      })
+    };
+  }
+
+  private getRecentUiStateForE2e(): unknown {
+    return {
+      statusText: this.must<HTMLDivElement>("status-text").textContent,
+      rawText: this.must<HTMLTextAreaElement>("raw-text").value,
+      serviceChips: {
+        detect: document.getElementById("service-detect-status-chip")?.textContent?.trim() ?? null,
+        ocr: document.getElementById("service-ocr-status-chip")?.textContent?.trim() ?? null,
+        tts: document.getElementById("service-tts-status-chip")?.textContent?.trim() ?? null
+      },
+      playback: this.getPlaybackMetricsSnapshot(),
+      readingPreview: this.getReadingPreviewStateForE2e()
+    };
+  }
+
+  private blankImageDataUrl(): string {
+    return "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAALSURBVBhXY2AAAgAABQABqtXIUQAAAABJRU5ErkJggg==";
+  }
+
+  private async simulateCapturedTextForE2e(text: string, options: E2eCaptureTextOptions = {}): Promise<unknown> {
+    const nextText = text.trim();
+    if (!nextText) {
+      throw new Error("simulateCapturedText requires non-empty text");
+    }
+    loggers.capture.info("E2E captured text simulated", {
+      length: nextText.length,
+      autoReader: Boolean(options.autoReader),
+      startPlayback: options.startPlayback !== false
+    });
+    await this.abortVisionWork("new_image", options.autoReader ? { preserveAutoReaderSession: true, preservePlayback: true } : undefined);
+    if (options.autoReader) {
+      const runId = ++this.e2eAutoReaderRunCounter;
+      this.autoReaderSessionRunId = runId;
+      const page = this.snapshotAutoReaderBufferedPage(nextText, options.imageDataUrl ?? this.blankImageDataUrl(), []);
+      this.updateAutoReaderTranscript(page);
+      if (options.startPlayback === false) {
+        this.activeAutoReaderPage = page;
+        this.restoreAutoReaderBufferedPage(page, { restoreText: false });
+        this.renderReadingPreview();
+        return this.getRecentUiStateForE2e();
+      }
+      await this.startAutoReaderPage(page, runId);
+      return this.getRecentUiStateForE2e();
+    }
+    this.setRawTextValuePreservingScroll(nextText);
+    this.reconcileText(this.getPlaybackText(), { source: "llm", finalizeTail: true, treatAsNewDocument: true });
+    this.renderReadingPreview();
+    if (options.startPlayback !== false) {
+      await this.startOrResumePlayback();
+    }
+    return this.getRecentUiStateForE2e();
   }
 
   private getChunkRecords(): ChunkRecord[] {
@@ -2888,6 +2991,19 @@ export class WebApp {
     });
   }
 
+  private bindExit(): void {
+    this.must<HTMLButtonElement>("btn-exit-app").addEventListener("click", async () => {
+      if (!window.electronAPI?.requestExit) {
+        this.setStatus(this.t("stack.electronOnly"));
+        return;
+      }
+      if (!window.confirm(this.t("actions.exitConfirm"))) {
+        return;
+      }
+      await window.electronAPI.requestExit();
+    });
+  }
+
   private updateBreakButtonState(): void {
     const btn = this.must<HTMLButtonElement>("btn-break");
     btn.disabled = !this.hasActiveWork();
@@ -3447,11 +3563,14 @@ export class WebApp {
     this.activeAutoReaderPage = page;
     this.prefetchedAutoReaderPage = null;
     this.restoreAutoReaderBufferedPage(page, { restoreText: false });
-    if (page.firstChunkId) {
-      this.activeChunkId = page.firstChunkId;
-      this.syncActiveChunkIndex();
-    }
+    const firstChunkId = page.firstChunkId;
     this.resetPlaybackForTextChange();
+    if (this.autoReaderSessionRunId !== runId) return;
+    if (page.firstChunkId) {
+      this.activeChunkId = firstChunkId;
+      this.syncActiveChunkIndex();
+      this.renderReadingPreview();
+    }
     await this.startOrResumePlayback();
     if (this.autoReaderSessionRunId !== runId || this.activeAutoReaderPage !== page) return;
     await this.markAutoReaderPageReady(page, runId);
@@ -4476,6 +4595,10 @@ export class WebApp {
       this.prefetchFromIndex(chunk.id, session);
     } catch (error) {
       if (session !== this.chunkPlaybackSession) return;
+      if (this.isAbortError(error)) {
+        loggers.playback.info("Chunk playback cancelled", { index: chunk.index + 1, session });
+        return;
+      }
       this.failPlaybackAtChunk(chunk.id);
       await this.playConfiguredErrorFeedback();
       this.setStatus(this.t("status.chunkSynthesisFailed", { current: chunk.index + 1, total: this.timeline.chunks.length, error: String(error) }));
@@ -4690,6 +4813,10 @@ export class WebApp {
         return blob;
       } catch (error) {
         lastError = error;
+        if (this.isAbortError(error) || session !== this.chunkPlaybackSession || signal.aborted) {
+          loggers.tts.info("Chunk synthesis cancelled", { index: index + 1, attempt });
+          throw new Error("Cancelled");
+        }
         loggers.tts.warn("Chunk synthesis attempt failed", { index: index + 1, attempt, error: String(error) });
         if (attempt < maxAttempts) {
           this.setStatus(this.t("status.retryingChunk", { current: index + 1, total: this.timeline.chunks.length, attempt, retries }));

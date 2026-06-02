@@ -13,6 +13,7 @@ function createApi(overrides: Partial<ElectronApi> = {}): ElectronApi {
     onHotkeyFeedback: () => undefined,
     getAlwaysOnTop: async () => false,
     setAlwaysOnTop: async () => false,
+    requestExit: async () => undefined,
     beginCaptureHotkeyEdit: async () => "",
     applyCaptureHotkey: async () => "",
     clearCaptureHotkey: async () => "",
@@ -164,5 +165,39 @@ describe("electron provider client", () => {
 
     expect(result.audioBlob.size).toBe(3);
     expect(result.audioBlob.type).toBe("audio/mpeg");
+  });
+
+  it("treats structured OCR cancellation as local cancellation", async () => {
+    const api = createApi({
+      extractProviderText: async () => ({ text: "", cancelled: true })
+    });
+    const service = new ElectronBackedLlmService(api);
+
+    await expect(service.extractTextFromImage("data:image/png;base64,abc", {
+      baseUrl: "https://example.com/v1",
+      apiKey: "k",
+      model: "ocr-model",
+      promptTemplate: "Extract",
+      imageDetail: "low",
+      ocrStreamingEnabled: false,
+      ocrStreamingFallbackToNonStream: true,
+      maxTokens: 256
+    })).rejects.toThrow("Cancelled");
+  });
+
+  it("treats structured TTS cancellation as local cancellation", async () => {
+    const api = createApi({
+      synthesizeProviderText: async () => ({ audioBytes: new Uint8Array(), mimeType: "application/octet-stream", cancelled: true })
+    });
+    const service = new ElectronBackedTtsService(api);
+
+    await expect(service.synthesize("hi", {
+      baseUrl: "https://example.com/v1",
+      apiKey: "k",
+      model: "tts-model",
+      voice: "alloy",
+      format: "mp3",
+      speed: 1
+    })).rejects.toThrow("Cancelled");
   });
 });

@@ -25,7 +25,7 @@ Run Playwright code against the same Electron renderer window:
 npm run pw:exec -- "return await page.title()"
 ```
 
-Available variables are `page`, `context`, `browser`, `expect`, `fs`, and `path`. Snippets run inside an async function, so use `await` and `return`.
+Available variables are `page`, `context`, `browser`, `expect`, `fs`, `path`, `logs`, and `debug`. Snippets run inside an async function, so use `await` and `return`.
 
 Prefer `npm run pw:stdin` for anything more than a tiny one-liner. It avoids shell quoting mistakes and is easier for coding agents to revise. Prefer Playwright locators and `page.evaluate`. Avoid pixel or coordinate interaction unless there is no semantic alternative.
 
@@ -59,6 +59,54 @@ Inspect visible text:
 
 ```bash
 npm run pw:exec -- "return await page.locator('body').innerText()"
+```
+
+Read recent app logs:
+
+```powershell
+@'
+return logs.tail({ lines: 40 });
+'@ | npm run pw:stdin
+```
+
+Filter logs by category:
+
+```powershell
+@'
+return logs.tail({ lines: 20, category: 'playback' });
+'@ | npm run pw:stdin
+```
+
+Take a screenshot:
+
+```powershell
+@'
+return await debug.screenshot({ path: 'test-results/agent-window.png', fullPage: true });
+'@ | npm run pw:stdin
+```
+
+Fake captured text, play it, and inspect active chunks:
+
+```powershell
+@'
+const text = [
+  'For other uses, see Sherlock Holmes (disambiguation).',
+  'Sherlock Holmes is a fictional detective created by British author Arthur Conan Doyle.',
+  'Referring to himself as a consulting detective, Holmes is known for observation and deduction.'
+].join(' ');
+
+await debug.captureText(text, { autoReader: true, startPlayback: true });
+return await debug.readingPreviewState();
+'@ | npm run pw:stdin
+```
+
+Fake playback hotkeys:
+
+```powershell
+@'
+await debug.hotkey('next_chunk');
+return await debug.uiState();
+'@ | npm run pw:stdin
 ```
 
 Launch selected services, wait for OCR/TTS, write text, and play:
@@ -144,6 +192,9 @@ return await page.locator('#settings-drawer').getAttribute('aria-hidden');
 - Use Bash heredocs or PowerShell here-strings for multiline snippets instead of packing complex code into one shell argument.
 - Use `window.__e2e` for renderer test hooks when present.
 - Use `window.electronAPI` to inspect preload-backed Electron behavior from the renderer.
+- Use `logs.tail(...)` before changing code when the bug may involve Electron, service launchers, OCR/TTS requests, or playback timing.
+- Use `debug.screenshot(...)` for visual context, but pair it with DOM state like `debug.readingPreviewState()` when checking highlights/classes.
+- Use `debug.captureText(...)` and `debug.hotkey(...)` instead of real global hotkeys for deterministic bug reproduction.
 - Use `--page <pattern>` if multiple pages are attached.
 - If the CLI cannot connect, start or restart `npm run dev:electron:debug`.
 - Treat snippets as arbitrary local code execution; use only in development.
@@ -154,4 +205,7 @@ return await page.locator('#settings-drawer').getAttribute('aria-hidden');
 - Do not click controls behind the settings drawer. If Playwright says `#settings-drawer` intercepts pointer events, close it with `#btn-settings-toggle` first.
 - Do not wait for text processing to run when the selected text processing service is `__none__`; wait for OCR and TTS chips for playback.
 - Do not assume writing `textarea.value` is enough. Dispatch `input` and `change` events after setting `#raw-text`.
+- Do not rely only on screenshots to decide whether highlighting is correct. Check `.active-chunk` through `debug.readingPreviewState()`.
+- Do not send real OS/global hotkeys when a fake `debug.hotkey(...)` or `debug.captureText(...)` path can test the same renderer behavior.
+- Do not ignore recent logs; `logs.tail({ category: 'playback' })` often explains chunk/session timing.
 - Do not close the browser or Electron app from snippets unless explicitly asked. The CLI already disconnects without closing the dev window.

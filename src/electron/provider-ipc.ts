@@ -77,11 +77,13 @@ export interface ProviderVoicesRequest extends ProviderModelsRequest {
 
 export interface ProviderTextResult {
   text: string;
+  cancelled?: boolean;
 }
 
 export interface ProviderAudioResult {
   audioBytes: Uint8Array;
   mimeType: string;
+  cancelled?: boolean;
 }
 
 export interface ProviderOcrStreamEvent {

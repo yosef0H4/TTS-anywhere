@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, ipcMain, nativeImage, shell } from "electron";
+import { app, BrowserWindow, clipboard, ipcMain, Menu, nativeImage, shell, Tray } from "electron";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -70,6 +70,15 @@ const OVERLAY_THEME_COLORS: Record<UiTheme, { outer: string; inner: string }> = 
     inner: "#fff1f7"
   }
 };
+
+function isExpectedProviderAbort(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return normalized.includes("abort") || normalized.includes("cancel");
+}
+
+function isExpectedEmptyOcr(message: string): boolean {
+  return message.toLowerCase().includes("ocr produced empty text");
+}
 
 const MAX_AUTO_READER_NO_TEXT_RETRY_COUNT = 1_000_000;
 const SERVICE_OWNER_HEARTBEAT_INTERVAL_MS = 2000;
@@ -195,6 +204,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
 let isPinned = false;
 let currentLogLevel: LogLevel = "info";
 let captureHotkeySession: HotkeySession | null = null;
@@ -211,6 +221,7 @@ let playbackPreviousHotkeySession: HotkeySession | null = null;
 let volumeUpHotkeySession: HotkeySession | null = null;
 let volumeDownHotkeySession: HotkeySession | null = null;
 let replayCaptureHotkeySession: HotkeySession | null = null;
+let quitRequested = false;
 let activeCaptureHotkey = "ctrl+shift+alt+s";
 let activeOcrClipboardHotkey = "ctrl+shift+alt+c";
 let activeFullCaptureHotkey = "ctrl+shift+alt+a";
@@ -320,8 +331,79 @@ function processUptimeMs(): number {
 function focusMainWindow(targetWindow: BrowserWindow | null): void {
   if (!targetWindow || targetWindow.isDestroyed()) return;
   if (targetWindow.isMinimized()) targetWindow.restore();
+  targetWindow.setSkipTaskbar(false);
   if (!targetWindow.isVisible()) targetWindow.show();
   targetWindow.focus();
+}
+
+function showMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    mainWindow = createMainWindow();
+  }
+  focusMainWindow(mainWindow);
+  diag("tray.window.show");
+}
+
+function hideMainWindowToTray(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.setSkipTaskbar(true);
+  mainWindow.hide();
+  diag("tray.window.hide");
+}
+
+function refreshTrayMenu(): void {
+  if (!tray) return;
+  const windowVisible = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible());
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: "Show",
+      enabled: !windowVisible,
+      click: () => showMainWindow()
+    },
+    {
+      label: "Hide",
+      enabled: windowVisible,
+      click: () => hideMainWindowToTray()
+    },
+    { type: "separator" },
+    {
+      label: "Exit",
+      click: () => requestAppClose()
+    }
+  ]);
+  tray.setContextMenu(contextMenu);
+}
+
+function createTray(): Tray | null {
+  if (tray && !tray.isDestroyed()) return tray;
+  const iconPath = process.platform === "win32" ? process.execPath : "";
+  let icon = iconPath ? nativeImage.createFromPath(iconPath) : nativeImage.createEmpty();
+  if (icon.isEmpty()) {
+    icon = nativeImage.createFromDataURL("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAABWSURBVDhPzYxBDgAQDAT90iM83hOIg0SmFo0Dm/TQ6XZCTrHcTCDwzqeCFjLFjWDMCTeCWZn7VsCnHnaWAkp42wpmYUcK+MR9KVBlxaWAXN2MwDvvBRXwJOfj2r8uAAAAAABJRU5ErkJggg==");
+  }
+  const nextTray = new Tray(icon);
+  nextTray.setToolTip("TTS Anywhere");
+  nextTray.on("click", () => showMainWindow());
+  nextTray.on("double-click", () => showMainWindow());
+  nextTray.on("right-click", () => refreshTrayMenu());
+  tray = nextTray;
+  refreshTrayMenu();
+  diag("tray.created", { iconPath: iconPath || null });
+  return tray;
+}
+
+function configureWindowsUserTasks(): void {
+  if (process.platform !== "win32") return;
+  app.setUserTasks([
+    {
+      program: process.execPath,
+      arguments: "--quit",
+      iconPath: process.execPath,
+      iconIndex: 0,
+      title: "Exit",
+      description: "Exit TTS Anywhere"
+    }
+  ]);
 }
 
 function prefsPath(): string {
@@ -2036,6 +2118,7 @@ function requestAppClose(): void {
     return;
   }
   appCloseInFlight = true;
+  quitRequested = true;
   diag("app.close.requested");
 
   const win = mainWindow;
@@ -2139,12 +2222,19 @@ function createMainWindow(): BrowserWindow {
 
   win.on("show", () => {
     diag("window.show");
+    refreshTrayMenu();
   });
   win.on("hide", () => {
     diag("window.hide");
+    refreshTrayMenu();
   });
-  win.on("close", () => {
-    diag("window.close");
+  win.on("close", (event) => {
+    diag("window.close", { quitRequested, appCloseInFlight });
+    if (!quitRequested && !appCloseInFlight) {
+      event.preventDefault();
+      hideMainWindowToTray();
+      refreshTrayMenu();
+    }
   });
   win.on("closed", () => {
     diag("window.closed");
@@ -2152,6 +2242,7 @@ function createMainWindow(): BrowserWindow {
     startupWatchdogRendererMount = clearStartupWatchdog(startupWatchdogRendererMount);
     clearShutdownWatchdog();
     mainWindow = null;
+    refreshTrayMenu();
   });
 
   if (isDevMode()) {
@@ -3190,13 +3281,22 @@ if (!hasSingleInstanceLock) {
   diag("app.single-instance.lock.failed");
   app.quit();
 } else {
-  app.on("second-instance", () => {
-    diag("app.second-instance");
-    focusMainWindow(mainWindow);
+  app.on("second-instance", (_event, argv) => {
+    diag("app.second-instance", { quitArg: argv.includes("--quit") });
+    if (argv.includes("--quit")) {
+      requestAppClose();
+      return;
+    }
+    showMainWindow();
   });
 
   app.whenReady().then(() => {
     flushStartupPhaseBuffer();
+    configureWindowsUserTasks();
+    if (process.argv.includes("--quit")) {
+      requestAppClose();
+      return;
+    }
     migrateLegacyUserData();
     diag("app.ready");
     const nativePrefs = loadNativePrefs();
@@ -3253,6 +3353,7 @@ if (!hasSingleInstanceLock) {
     diag("app.main-window.create.begin");
     mainWindow = createMainWindow();
     diag("app.main-window.create.end", { hasWindow: Boolean(mainWindow) });
+    createTray();
     overlay = new BorderOverlay({
       thickness: 2,
       ...getOverlayThemeColors(activeTheme)
@@ -3480,6 +3581,7 @@ if (!hasSingleInstanceLock) {
       }
       if (BrowserWindow.getAllWindows().length === 0) {
         mainWindow = createMainWindow();
+        createTray();
         return;
       }
       focusMainWindow(mainWindow);
@@ -3489,6 +3591,7 @@ if (!hasSingleInstanceLock) {
 
 app.on("before-quit", (_event) => {
   diag("app.before-quit");
+  quitRequested = true;
 });
 
 ipcMain.handle("capture:begin-hotkey-edit", () => {
@@ -4194,6 +4297,9 @@ ipcMain.handle("clipboard:write-text", (_event, text: string) => {
 });
 ipcMain.handle("window:get-always-on-top", () => isPinned);
 ipcMain.handle("window:set-always-on-top", (_event, enabled: boolean) => setAlwaysOnTopState(enabled));
+ipcMain.handle("app:request-exit", () => {
+  requestAppClose();
+});
 ipcMain.handle("clipboard-watcher:get-enabled", () => clipboardWatcherEnabled);
 ipcMain.handle("clipboard-watcher:set-enabled", (_event, enabled: boolean) => {
   return setClipboardWatcherEnabledState(enabled, { source: "ipc" });
@@ -4250,6 +4356,14 @@ ipcMain.handle("provider:extract-text", async (_event, request: ProviderOcrReque
     return result;
   } catch (error) {
     const message = extractErrorMessage(error);
+    if (isExpectedProviderAbort(message)) {
+      diag("provider.ocr.request.cancelled", { requestId: request.requestId, error: message });
+      return { text: "", cancelled: true };
+    }
+    if (isExpectedEmptyOcr(message)) {
+      diag("provider.ocr.request.empty", { requestId: request.requestId });
+      return { text: "" };
+    }
     diag("provider.ocr.request.failed", { requestId: request.requestId, error: message });
     throw new Error(message);
   } finally {
@@ -4277,6 +4391,16 @@ ipcMain.handle("provider:start-ocr-stream", async (_event, request: ProviderOcrR
     return result;
   } catch (error) {
     const message = extractErrorMessage(error);
+    if (isExpectedProviderAbort(message)) {
+      sendProviderOcrStreamEvent({ requestId: request.requestId, type: "error", error: "Cancelled" });
+      diag("provider.ocr.stream.cancelled", { requestId: request.requestId, error: message });
+      return { text: "", cancelled: true };
+    }
+    if (isExpectedEmptyOcr(message)) {
+      sendProviderOcrStreamEvent({ requestId: request.requestId, type: "done", text: "" });
+      diag("provider.ocr.stream.empty", { requestId: request.requestId });
+      return { text: "" };
+    }
     sendProviderOcrStreamEvent({ requestId: request.requestId, type: "error", error: message });
     diag("provider.ocr.stream.failed", { requestId: request.requestId, error: message });
     throw new Error(message);
@@ -4301,6 +4425,10 @@ ipcMain.handle("provider:synthesize-text", async (_event, request: ProviderTtsRe
     return result;
   } catch (error) {
     const message = extractErrorMessage(error);
+    if (isExpectedProviderAbort(message)) {
+      diag("provider.tts.request.cancelled", { requestId: request.requestId, error: message });
+      return { audioBytes: new Uint8Array(), mimeType: "application/octet-stream", cancelled: true };
+    }
     diag("provider.tts.request.failed", { requestId: request.requestId, error: message });
     throw new Error(message);
   } finally {
@@ -4361,8 +4489,8 @@ process.on("unhandledRejection", (reason) => {
 });
 
 app.on("window-all-closed", () => {
-  diag("app.window-all-closed");
-  if (process.platform !== "darwin") {
+  diag("app.window-all-closed", { quitRequested, appCloseInFlight });
+  if ((quitRequested || appCloseInFlight) && process.platform !== "darwin") {
     app.quit();
   }
 });
@@ -4399,6 +4527,8 @@ app.on("will-quit", () => {
   };
   clearServiceOwnerHeartbeatSession();
   disposeNativeResources();
+  tray?.destroy();
+  tray = null;
   diag("app.will-quit.end");
 });
 

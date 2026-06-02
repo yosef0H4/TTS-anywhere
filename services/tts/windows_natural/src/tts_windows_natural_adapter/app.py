@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 import tempfile
+import threading
+import uuid
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -24,6 +27,7 @@ class Settings(BaseSettings):
 
     api_key: str | None = Field(default=None, alias="API_KEY")
     default_voice: str = Field(default="windows-natural:en-GB:SoniaNeural", alias="WINDOWS_NATURAL_DEFAULT_VOICE")
+    output_format: str = Field(default="Riff24Khz16BitMonoPcm", alias="WINDOWS_NATURAL_OUTPUT_FORMAT")
     cors_allow_origin_regex: str = Field(
         default=r"^https?://(127\.0\.0\.1|localhost)(:\d+)?$",
         alias="WINDOWS_NATURAL_CORS_ALLOW_ORIGIN_REGEX",
@@ -42,6 +46,12 @@ class HelperClient:
     def __init__(self) -> None:
         self._helper_exe = helper_manager.ensure_helper()
         self._voice_roots_cache = helper_manager.all_voice_roots()
+        self._daemons: list[subprocess.Popen[str] | None] = []
+        self._daemon_locks: list[threading.Lock] = []
+        self._daemon_pool_lock = threading.Lock()
+        self._next_daemon_index = 0
+        self._daemon_enabled = os.environ.get("WINDOWS_NATURAL_DISABLE_DAEMON", "").strip().lower() not in {"1", "true", "yes", "on"}
+        self._daemon_pool_size = self._read_daemon_pool_size()
 
     def _base_cmd(self) -> list[str]:
         return [str(self._helper_exe)]
@@ -56,7 +66,17 @@ class HelperClient:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         return json.loads(result.stdout)
 
-    def synthesize(self, text: str, voice_id: str, voice_root: str | None = None) -> bytes:
+    def synthesize(self, text: str, voice_id: str, voice_root: str | None = None, output_format: str = "Riff24Khz16BitMonoPcm") -> bytes:
+        if self._daemon_enabled and self._daemon_pool_size > 0:
+            try:
+                return self._synthesize_with_daemon(text, voice_id, voice_root, output_format)
+            except Exception:
+                logger.warning("Windows natural daemon synthesis failed; falling back to one-shot helper", exc_info=True)
+                self._stop_daemon()
+
+        return self._synthesize_oneshot(text, voice_id, voice_root, output_format)
+
+    def _synthesize_oneshot(self, text: str, voice_id: str, voice_root: str | None = None, output_format: str = "Riff24Khz16BitMonoPcm") -> bytes:
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp:
             temp_path = Path(temp.name)
         with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False) as text_temp:
@@ -64,6 +84,7 @@ class HelperClient:
             text_path = Path(text_temp.name)
         try:
             cmd = self._base_cmd() + ["synthesize", "--voice-id", voice_id, "--text-file", str(text_path), "--out", str(temp_path)]
+            cmd.extend(["--output-format", output_format])
             voice_roots = [voice_root] if voice_root else self._voice_roots()
             for root in voice_roots:
                 cmd.extend(["--voice-root", root])
@@ -84,6 +105,99 @@ class HelperClient:
         finally:
             temp_path.unlink(missing_ok=True)
             text_path.unlink(missing_ok=True)
+
+    def _synthesize_with_daemon(self, text: str, voice_id: str, voice_root: str | None = None, output_format: str = "Riff24Khz16BitMonoPcm") -> bytes:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp:
+            temp_path = Path(temp.name)
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False) as text_temp:
+            text_temp.write(text)
+            text_path = Path(text_temp.name)
+        try:
+            request_id = uuid.uuid4().hex
+            request = {
+                "id": request_id,
+                "command": "synthesize",
+                "voice_id": voice_id,
+                "voice_root": voice_root or "",
+                "output_format": output_format,
+                "text_file": str(text_path),
+                "out_path": str(temp_path),
+            }
+            daemon_index = self._next_daemon_slot()
+            with self._daemon_locks[daemon_index]:
+                daemon = self._ensure_daemon(daemon_index)
+                assert daemon.stdin is not None
+                assert daemon.stdout is not None
+                daemon.stdin.write(json.dumps(request) + "\n")
+                daemon.stdin.flush()
+                raw = daemon.stdout.readline()
+            if not raw:
+                raise RuntimeError("daemon exited without a response")
+            response = json.loads(raw)
+            if response.get("id") != request_id:
+                raise RuntimeError("daemon response id mismatch")
+            if response.get("ok") is not True:
+                raise RuntimeError(str(response.get("error") or "daemon synthesis failed"))
+            return temp_path.read_bytes()
+        except RuntimeError as error:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "message": str(error),
+                        "type": "invalid_request_error",
+                        "code": "windows_natural_helper_failed",
+                    }
+                },
+            ) from error
+        finally:
+            temp_path.unlink(missing_ok=True)
+            text_path.unlink(missing_ok=True)
+
+    def _ensure_daemon(self, index: int) -> subprocess.Popen[str]:
+        daemon = self._daemons[index]
+        if daemon is not None and daemon.poll() is None:
+            return daemon
+        cmd = self._base_cmd() + ["serve-json"]
+        for root in self._voice_roots():
+            cmd.extend(["--voice-root", root])
+        self._daemons[index] = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+        return self._daemons[index]
+
+    def _stop_daemon(self) -> None:
+        for index, daemon in enumerate(self._daemons):
+            self._daemons[index] = None
+            if daemon is None or daemon.poll() is not None:
+                continue
+            daemon.terminate()
+            try:
+                daemon.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                daemon.kill()
+
+    def _next_daemon_slot(self) -> int:
+        with self._daemon_pool_lock:
+            if not self._daemons:
+                self._daemons = [None for _ in range(self._daemon_pool_size)]
+                self._daemon_locks = [threading.Lock() for _ in range(self._daemon_pool_size)]
+            index = self._next_daemon_index % self._daemon_pool_size
+            self._next_daemon_index += 1
+            return index
+
+    @staticmethod
+    def _read_daemon_pool_size() -> int:
+        raw = os.environ.get("WINDOWS_NATURAL_DAEMON_POOL_SIZE", "3").strip()
+        try:
+            return max(0, int(raw))
+        except ValueError:
+            return 3
 
 
 class WindowsNaturalRuntime:
@@ -143,7 +257,7 @@ class WindowsNaturalRuntime:
                 },
             )
         voice_root = selected_voice_record.get("path")
-        return self.helper.synthesize(payload, selected_voice, str(voice_root) if voice_root else None)
+        return self.helper.synthesize(payload, selected_voice, str(voice_root) if voice_root else None, self.settings.output_format)
 
     def health_payload(self) -> dict[str, object]:
         discovered = self.discovered_voices()

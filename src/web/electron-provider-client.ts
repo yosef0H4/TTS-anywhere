@@ -62,7 +62,11 @@ export class ElectronBackedLlmService {
       if (options?.signal?.aborted) {
         throw new Error("Cancelled");
       }
-      return await this.api.extractProviderText(request);
+      const result = await this.api.extractProviderText(request);
+      if (result.cancelled) {
+        throw new Error("Cancelled");
+      }
+      return result;
     } catch (error) {
       throw asCancelled(error);
     } finally {
@@ -88,7 +92,11 @@ export class ElectronBackedLlmService {
       if (options?.signal?.aborted) {
         throw new Error("Cancelled");
       }
-      return await this.api.startProviderOcrStream(request);
+      const result = await this.api.startProviderOcrStream(request);
+      if (result.cancelled) {
+        throw new Error("Cancelled");
+      }
+      return result;
     } catch (error) {
       throw asCancelled(error);
     } finally {
@@ -116,6 +124,9 @@ export class ElectronBackedTtsService {
         throw new Error("Cancelled");
       }
       const result = await this.api.synthesizeProviderText(request);
+      if (result.cancelled) {
+        throw new Error("Cancelled");
+      }
       const copiedBytes = new Uint8Array(result.audioBytes.byteLength);
       copiedBytes.set(result.audioBytes);
       return { audioBlob: new Blob([copiedBytes.buffer], { type: result.mimeType }) };

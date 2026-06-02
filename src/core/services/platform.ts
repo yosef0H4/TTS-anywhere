@@ -184,11 +184,13 @@ export interface ProviderVoicesRequest extends ProviderModelsRequest {
 
 export interface ProviderTextResult {
   text: string;
+  cancelled?: boolean;
 }
 
 export interface ProviderAudioResult {
   audioBytes: Uint8Array;
   mimeType: string;
+  cancelled?: boolean;
 }
 
 export interface ProviderOcrStreamEvent {
@@ -215,6 +217,7 @@ export interface ElectronApi {
   onHotkeyFeedback: (handler: (event: HotkeyFeedbackEvent) => void) => void;
   getAlwaysOnTop: () => Promise<boolean>;
   setAlwaysOnTop: (enabled: boolean) => Promise<boolean>;
+  requestExit: () => Promise<void>;
   beginCaptureHotkeyEdit: () => Promise<string>;
   applyCaptureHotkey: (hotkey: string) => Promise<string>;
   clearCaptureHotkey: () => Promise<string>;

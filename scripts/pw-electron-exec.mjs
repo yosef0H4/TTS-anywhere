@@ -7,6 +7,7 @@ import process from "node:process";
 const DEFAULT_ENDPOINT = "http://127.0.0.1:9222";
 const DEFAULT_TIMEOUT_MS = 30000;
 const DEV_PAGE_HINTS = ["localhost:5173", "127.0.0.1:5173"];
+const DEFAULT_LOG_PATH = path.resolve("logs", "tts-anywhere.log");
 
 function usage() {
   return [
@@ -149,8 +150,86 @@ function formatResult(value) {
   }
 }
 
+function parseLogLine(line) {
+  try {
+    const parsed = JSON.parse(line);
+    if (parsed && typeof parsed === "object") return parsed;
+  } catch {
+    // Fall through to raw-line shape.
+  }
+  return { raw: line };
+}
+
+function logMatches(entry, options) {
+  if (options.category && entry.category !== options.category) return false;
+  if (options.level && entry.level !== options.level) return false;
+  if (options.since && typeof entry.timestamp === "string" && entry.timestamp < options.since) return false;
+  return true;
+}
+
+function createLogsHelper() {
+  return {
+    tail(options = {}) {
+      const lines = Number.isFinite(Number(options.lines)) ? Math.max(1, Math.floor(Number(options.lines))) : 80;
+      const logPath = path.resolve(String(options.path ?? DEFAULT_LOG_PATH));
+      if (!fs.existsSync(logPath)) {
+        return {
+          path: logPath,
+          entries: [],
+          missing: true
+        };
+      }
+      const rawLines = fs.readFileSync(logPath, "utf8").split(/\r?\n/u).filter(Boolean);
+      const entries = rawLines
+        .map(parseLogLine)
+        .filter((entry) => logMatches(entry, options))
+        .slice(-lines);
+      return {
+        path: logPath,
+        entries
+      };
+    }
+  };
+}
+
+function createDebugHelper(page) {
+  return {
+    async screenshot(options = {}) {
+      const screenshotPath = path.resolve(String(options.path ?? path.join("test-results", `electron-debug-${Date.now()}.png`)));
+      fs.mkdirSync(path.dirname(screenshotPath), { recursive: true });
+      await page.screenshot({
+        path: screenshotPath,
+        fullPage: options.fullPage !== false
+      });
+      return screenshotPath;
+    },
+    async captureText(text, options = {}) {
+      return page.evaluate(({ nextText, nextOptions }) => {
+        const e2e = window.__e2e;
+        if (!e2e?.simulateCapturedText) throw new Error("window.__e2e.simulateCapturedText is unavailable");
+        return e2e.simulateCapturedText(nextText, nextOptions);
+      }, { nextText: String(text), nextOptions: options });
+    },
+    async hotkey(action) {
+      return page.evaluate((nextAction) => {
+        const e2e = window.__e2e;
+        if (!e2e?.dispatchPlaybackHotkey) throw new Error("window.__e2e.dispatchPlaybackHotkey is unavailable");
+        return e2e.dispatchPlaybackHotkey(nextAction);
+      }, action);
+    },
+    async readingPreviewState() {
+      return page.evaluate(() => window.__e2e?.getReadingPreviewState?.());
+    },
+    async uiState() {
+      return page.evaluate(() => window.__e2e?.getRecentUiState?.());
+    }
+  };
+}
+
 async function executeSnippet({ browser, page, source }) {
   const context = page.context();
+  const logs = createLogsHelper();
+  const debug = createDebugHelper(page);
   const runner = new Function(
     "page",
     "context",
@@ -158,9 +237,11 @@ async function executeSnippet({ browser, page, source }) {
     "expect",
     "fs",
     "path",
+    "logs",
+    "debug",
     `"use strict"; return (async () => {\n${source}\n})();`
   );
-  return runner(page, context, browser, expect, fs, path);
+  return runner(page, context, browser, expect, fs, path, logs, debug);
 }
 
 async function run(options) {
@@ -211,6 +292,8 @@ function runSelfTest() {
   if (formatResult({ ok: true }) !== "{\n  \"ok\": true\n}") throw new Error("JSON formatting failed");
   const terminatorParsed = parseArgs(["--", "return await page.title()"]);
   if (terminatorParsed.snippetParts.join(" ") !== "return await page.title()") throw new Error("terminator parse failed");
+  const missingLogs = createLogsHelper().tail({ path: "missing-test-log-file.log" });
+  if (!missingLogs.missing || !Array.isArray(missingLogs.entries)) throw new Error("logs helper missing-file handling failed");
   console.log("pw-electron-exec self-test passed");
 }
 
