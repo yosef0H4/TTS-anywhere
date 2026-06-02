@@ -41,12 +41,13 @@ class SpeechRequest(BaseModel):
 class HelperClient:
     def __init__(self) -> None:
         self._helper_exe = helper_manager.ensure_helper()
+        self._voice_roots_cache = helper_manager.all_voice_roots()
 
     def _base_cmd(self) -> list[str]:
         return [str(self._helper_exe)]
 
     def _voice_roots(self) -> list[str]:
-        return helper_manager.all_voice_roots()
+        return list(self._voice_roots_cache)
 
     def list_voices(self) -> dict[str, object]:
         cmd = self._base_cmd() + ["list-voices", "--probe-synthesis"]
@@ -55,7 +56,7 @@ class HelperClient:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         return json.loads(result.stdout)
 
-    def synthesize(self, text: str, voice_id: str) -> bytes:
+    def synthesize(self, text: str, voice_id: str, voice_root: str | None = None) -> bytes:
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp:
             temp_path = Path(temp.name)
         with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False) as text_temp:
@@ -63,7 +64,8 @@ class HelperClient:
             text_path = Path(text_temp.name)
         try:
             cmd = self._base_cmd() + ["synthesize", "--voice-id", voice_id, "--text-file", str(text_path), "--out", str(temp_path)]
-            for root in self._voice_roots():
+            voice_roots = [voice_root] if voice_root else self._voice_roots()
+            for root in voice_roots:
                 cmd.extend(["--voice-root", root])
             subprocess.run(cmd, capture_output=True, text=True, check=True)
             return temp_path.read_bytes()
@@ -88,16 +90,22 @@ class WindowsNaturalRuntime:
     def __init__(self, settings: Settings, helper: HelperClient | None = None) -> None:
         self.settings = settings
         self.helper = helper or HelperClient()
+        self._voices_payload_cache: dict[str, object] | None = None
+
+    def _voices_payload(self) -> dict[str, object]:
+        if self._voices_payload_cache is None:
+            self._voices_payload_cache = self.helper.list_voices()
+        return self._voices_payload_cache
 
     def list_voices(self) -> list[dict[str, object]]:
-        payload = self.helper.list_voices()
+        payload = self._voices_payload()
         voices = payload.get("voices", [])
         if not isinstance(voices, list):
             return []
         return [voice for voice in voices if isinstance(voice, dict) and voice.get("compatible") is True]
 
     def discovered_voices(self) -> list[dict[str, object]]:
-        payload = self.helper.list_voices()
+        payload = self._voices_payload()
         voices = payload.get("voices", [])
         if not isinstance(voices, list):
             return []
@@ -107,7 +115,7 @@ class WindowsNaturalRuntime:
         return [voice for voice in self.discovered_voices() if voice.get("compatible") is not True]
 
     def helper_version(self) -> str:
-        payload = self.helper.list_voices()
+        payload = self._voices_payload()
         version = payload.get("helper_version", "")
         return str(version)
 
@@ -122,8 +130,8 @@ class WindowsNaturalRuntime:
                 detail={"error": {"message": "Input text is empty", "type": "invalid_request_error", "code": "empty_input"}},
             )
         selected_voice = (voice or self.settings.default_voice).strip()
-        available = {str(item.get("id")) for item in self.list_voices()}
-        if selected_voice not in available:
+        selected_voice_record = next((item for item in self.list_voices() if str(item.get("id")) == selected_voice), None)
+        if selected_voice_record is None:
             raise HTTPException(
                 status_code=400,
                 detail={
@@ -134,7 +142,8 @@ class WindowsNaturalRuntime:
                     }
                 },
             )
-        return self.helper.synthesize(payload, selected_voice)
+        voice_root = selected_voice_record.get("path")
+        return self.helper.synthesize(payload, selected_voice, str(voice_root) if voice_root else None)
 
     def health_payload(self) -> dict[str, object]:
         discovered = self.discovered_voices()

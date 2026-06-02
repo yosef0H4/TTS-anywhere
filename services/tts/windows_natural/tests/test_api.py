@@ -7,9 +7,11 @@ from tts_windows_natural_adapter.app import Settings, WindowsNaturalRuntime, cre
 
 class FakeHelper:
     def __init__(self) -> None:
-        self.synth_calls: list[tuple[str, str]] = []
+        self.synth_calls: list[tuple[str, str, str | None]] = []
+        self.list_voice_calls = 0
 
     def list_voices(self) -> dict[str, object]:
+        self.list_voice_calls += 1
         return {
             "helper_version": "0.1.0",
             "voices": [
@@ -19,6 +21,7 @@ class FakeHelper:
                     "language": "en-GB",
                     "gender": "Female",
                     "source": "narrator_local",
+                    "path": "C:\\voices\\sonia",
                     "backend": "embedded-legacy-key",
                     "compatibilityMode": "embedded_legacy_key",
                     "compatible": True,
@@ -29,6 +32,7 @@ class FakeHelper:
                     "language": "en-GB",
                     "gender": "Female",
                     "source": "narrator_local",
+                    "path": "C:\\voices\\sonia-installed",
                     "backend": "installed-appx-current",
                     "compatibilityMode": "installed_voice_requires_current_narrator_license",
                     "compatible": False,
@@ -37,8 +41,8 @@ class FakeHelper:
             ],
         }
 
-    def synthesize(self, text: str, voice_id: str) -> bytes:
-        self.synth_calls.append((text, voice_id))
+    def synthesize(self, text: str, voice_id: str, voice_root: str | None = None) -> bytes:
+        self.synth_calls.append((text, voice_id, voice_root))
         return b"RIFFtestWAVEfmt "
 
 
@@ -82,7 +86,22 @@ def test_speech_synthesizes_with_sonia() -> None:
     response = client.post("/v1/audio/speech", json={"input": "hello", "voice": "windows-natural:en-GB:SoniaNeural", "response_format": "wav"})
     assert response.status_code == 200
     assert response.headers["content-type"] == "audio/wav"
-    assert helper.synth_calls == [("hello", "windows-natural:en-GB:SoniaNeural")]
+    assert helper.synth_calls == [("hello", "windows-natural:en-GB:SoniaNeural", "C:\\voices\\sonia")]
+
+
+def test_speech_reuses_cached_voice_probe() -> None:
+    helper = FakeHelper()
+    client = _client(helper)
+
+    for text in ("hello", "hello again"):
+        response = client.post("/v1/audio/speech", json={"input": text, "voice": "windows-natural:en-GB:SoniaNeural", "response_format": "wav"})
+        assert response.status_code == 200
+
+    assert helper.list_voice_calls == 1
+    assert helper.synth_calls == [
+        ("hello", "windows-natural:en-GB:SoniaNeural", "C:\\voices\\sonia"),
+        ("hello again", "windows-natural:en-GB:SoniaNeural", "C:\\voices\\sonia"),
+    ]
 
 
 def test_health_reports_compatible_and_incompatible_voices() -> None:
