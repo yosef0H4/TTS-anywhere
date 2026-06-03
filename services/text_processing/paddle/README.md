@@ -169,6 +169,13 @@ List models:
 curl http://127.0.0.1:8093/v1/models
 ```
 
+The OpenAI-compatible OCR endpoint exposes:
+
+- `paddle`: existing default PaddleOCR recognition model (`PP-OCRv5_mobile_rec`)
+- `paddle-arabic`: Arabic-script recognition model (`arabic_PP-OCRv5_mobile_rec`)
+
+The OCR engines are loaded lazily on first request for each model, not during startup.
+
 Detect request:
 
 ```bash

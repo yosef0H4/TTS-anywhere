@@ -1094,7 +1094,11 @@ async function launchDiscoveredService(slot: "detect" | "ocr" | "tts", servicePa
     throw new Error(`Preset not found for ${service.manifest.id}: ${presetId}`);
   }
   const current = discoveredServiceStatusSnapshot(slot);
-  if (current?.state === "running" && current.presetId === presetId) {
+  if (
+    current?.state === "running"
+    && current.presetId === presetId
+    && normalizeDiscoveredServicePath(current.servicePath) === normalizeDiscoveredServicePath(service.servicePath)
+  ) {
     return current;
   }
   const inFlight = discoveredServiceLaunchPromises.get(slot);

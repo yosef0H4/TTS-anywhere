@@ -39,6 +39,11 @@ logger = logging.getLogger("uvicorn.error")
 
 DEFAULT_DETECT_MODEL_NAME = "PP-OCRv5_mobile_det"
 DEFAULT_RECOGNITION_MODEL_NAME = "PP-OCRv5_mobile_rec"
+ARABIC_RECOGNITION_MODEL_NAME = "arabic_PP-OCRv5_mobile_rec"
+OPENAI_OCR_MODELS = {
+    "paddle": DEFAULT_RECOGNITION_MODEL_NAME,
+    "paddle-arabic": ARABIC_RECOGNITION_MODEL_NAME,
+}
 DEFAULT_CPU_THREADS = 4
 
 
@@ -206,10 +211,11 @@ class PaddleOcrFactory:
     def __init__(self, config: RuntimeConfig, resolution: DeviceResolution):
         self.config = config
         self.resolution = resolution
-        self._ocr: Any | None = None
+        self._engines: dict[str, Any] = {}
 
-    def get_engine(self) -> Any:
-        if self._ocr is None:
+    def get_engine(self, model_id: str | None = None) -> Any:
+        recognition_model_name = OPENAI_OCR_MODELS.get((model_id or "").strip(), self.config.ocr_recognition_model_name)
+        if recognition_model_name not in self._engines:
             if paddle is None:
                 raise RuntimeError("Paddle runtime is not installed. Use the Windows host scripts to install the CPU or GPU runtime.")
             if PaddleOCR is None:
@@ -221,12 +227,12 @@ class PaddleOcrFactory:
                 self.resolution.resolved,
                 _describe_runtime_device(self.resolution),
                 self.config.ocr_detection_model_name,
-                self.config.ocr_recognition_model_name,
+                recognition_model_name,
             )
-            self._ocr = PaddleOCR(
+            self._engines[recognition_model_name] = PaddleOCR(
                 text_detection_model_name=self.config.ocr_detection_model_name,
                 text_detection_model_dir=self.config.ocr_detection_model_dir,
-                text_recognition_model_name=self.config.ocr_recognition_model_name,
+                text_recognition_model_name=recognition_model_name,
                 text_recognition_model_dir=self.config.ocr_recognition_model_dir,
                 use_doc_orientation_classify=False,
                 use_doc_unwarping=False,
@@ -236,7 +242,7 @@ class PaddleOcrFactory:
                 enable_cinn=False,
                 cpu_threads=self.config.cpu_threads,
             )
-        return self._ocr
+        return self._engines[recognition_model_name]
 
 
 def _load_rgb_image(payload: bytes) -> np.ndarray:
@@ -379,11 +385,12 @@ def _build_openai_models_response() -> dict[str, Any]:
         "object": "list",
         "data": [
             {
-                "id": "paddle",
+                "id": model_id,
                 "object": "model",
                 "created": created,
                 "owned_by": "paddle-text-processing",
             }
+            for model_id in OPENAI_OCR_MODELS
         ],
     }
 
@@ -570,7 +577,7 @@ def create_app(
                 raise HTTPException(status_code=400, detail=f"Image parsing failed: {error}") from error
 
             try:
-                ocr = ocr_engines.get_engine()
+                ocr = ocr_engines.get_engine(body.model)
             except Exception as error:  # noqa: BLE001
                 logger.exception("Paddle OCR initialization failed")
                 raise HTTPException(status_code=500, detail=f"Paddle OCR init failed: {error}") from error

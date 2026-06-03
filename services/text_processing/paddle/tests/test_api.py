@@ -61,9 +61,12 @@ class FakeOcrResult:
 
 
 class FakeOcrEngine:
+    def __init__(self, label: str = "default"):
+        self.label = label
+
     def predict(self, image_rgb: np.ndarray) -> list[FakeOcrResult]:
         assert image_rgb.ndim == 3
-        return [FakeOcrResult(["hello", "world"])]
+        return [FakeOcrResult([self.label, "world"])]
 
 
 class FakeDetectFactory:
@@ -78,10 +81,12 @@ class FakeDetectFactory:
 class FakeOcrFactory:
     def __init__(self) -> None:
         self.calls = 0
+        self.models: list[str | None] = []
 
-    def get_engine(self) -> FakeOcrEngine:
+    def get_engine(self, model_id: str | None = None) -> FakeOcrEngine:
         self.calls += 1
-        return FakeOcrEngine()
+        self.models.append(model_id)
+        return FakeOcrEngine(model_id or "paddle")
 
 
 class BrokenFactory:
@@ -190,7 +195,7 @@ def test_openai_models_lists_paddle_model() -> None:
     data = res.json()
 
     assert res.status_code == 200
-    assert data["data"][0]["id"] == "paddle"
+    assert [item["id"] for item in data["data"]] == ["paddle", "paddle-arabic"]
 
 
 def test_openai_ocr_returns_chat_completion_shape() -> None:
@@ -201,8 +206,22 @@ def test_openai_ocr_returns_chat_completion_shape() -> None:
 
     assert res.status_code == 200
     assert data["model"] == "paddle-test"
-    assert data["choices"][0]["message"]["content"] == "hello\nworld"
+    assert data["choices"][0]["message"]["content"] == "paddle-test\nworld"
     assert factory.calls == 1
+    assert factory.models == ["paddle-test"]
+
+
+def test_openai_ocr_routes_arabic_model() -> None:
+    factory = FakeOcrFactory()
+    client = _client(enable_detect=False, enable_openai_ocr=True, ocr_factory=factory)
+    body = _openai_body()
+    body["model"] = "paddle-arabic"
+    res = client.post("/v1/chat/completions", json=body)
+    data = res.json()
+
+    assert res.status_code == 200
+    assert data["choices"][0]["message"]["content"] == "paddle-arabic\nworld"
+    assert factory.models == ["paddle-arabic"]
 
 
 def test_openai_ocr_fake_streaming_returns_sse_chunks() -> None:

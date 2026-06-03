@@ -1854,6 +1854,17 @@ export class WebApp {
     }
     if (status.urls?.ocrBaseUrl) {
       this.config.llm.openaiCompatible.baseUrl = status.urls.ocrBaseUrl;
+      if (status.serviceId === "katib") {
+        const defaultPrompt = DEFAULT_CONFIG.llm.openaiCompatible.promptTemplate;
+        this.config.llm.openaiCompatible.model = "oddadmix/Katib-Qwen3.5-0.8B-0.1";
+        if (!this.config.llm.openaiCompatible.promptTemplate.trim() || this.config.llm.openaiCompatible.promptTemplate === defaultPrompt) {
+          this.config.llm.openaiCompatible.promptTemplate = "Free OCR";
+        }
+        this.config.llm.openaiCompatible.ocrStreamingEnabled = false;
+        this.config.llm.openaiCompatible.maxTokens = 512;
+      } else if (status.serviceId === "paddle") {
+        this.config.llm.openaiCompatible.model = "paddle";
+      }
       this.config.llm.provider = "openai_compatible";
       this.applySelectedLlmProviderSettings();
     }
@@ -1864,6 +1875,10 @@ export class WebApp {
         this.config.tts.openaiCompatible.voice = "M1";
         this.config.tts.openaiCompatible.format = "wav";
         this.config.reading.chunkTimeoutMs = Math.max(this.config.reading.chunkTimeoutMs, 60000);
+      } else if (status.serviceId === "windows-natural") {
+        this.config.tts.openaiCompatible.model = "windows-natural";
+        this.config.tts.openaiCompatible.voice = "windows-natural:en-GB:SoniaNeural";
+        this.config.tts.openaiCompatible.format = "wav";
       }
       this.config.tts.provider = "openai_compatible";
       this.applySelectedTtsProviderSettings();

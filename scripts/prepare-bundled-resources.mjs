@@ -31,6 +31,8 @@ const allowedTopLevelFiles = new Set([
   "pyproject.toml",
   "uv.lock",
   "launcher.py",
+  "basic_usage_test.py",
+  "benchmark_ocr.py",
   ".python-version"
 ]);
 

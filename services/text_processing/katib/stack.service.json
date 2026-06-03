@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "katib",
+  "name": "Katib OCR",
+  "family": "ocr",
+  "description": "OpenAI-compatible GPU OCR service for oddadmix/Katib-Qwen3.5-0.8B-0.1.",
+  "healthPath": "/healthz",
+  "launcher": {
+    "executable": "uv",
+    "args": ["run", "python", "launcher.py"]
+  },
+  "selectors": [
+    {
+      "id": "katib-nvidia",
+      "name": "Katib NVIDIA",
+      "presetId": "nvidia-ocr",
+      "capabilities": ["ocr"]
+    }
+  ],
+  "presets": [
+    {
+      "id": "nvidia-ocr",
+      "name": "NVIDIA OCR",
+      "defaultPort": 8096,
+      "env": {
+        "UV_PROJECT_ENVIRONMENT": ".venv-gpu"
+      },
+      "capabilities": ["ocr"],
+      "configTargets": ["textProcessing.detectorBaseUrl"],
+      "runtime": {
+        "ocr": "gpu"
+      }
+    }
+  ]
+}

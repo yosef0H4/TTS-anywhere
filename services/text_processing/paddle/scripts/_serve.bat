@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 
 set "HOST=%~1"
 set "PORT=%~2"
@@ -71,10 +71,10 @@ if defined DRY_RUN (
   ) else (
     echo UV_VENV=skip
   )
-  set "RUN_CMD="%ENV_PYTHON%" launcher.py --host %HOST% --port %PORT% --detect-device %DETECT_DEVICE% --ocr-device %OCR_DEVICE%"
-  if "%ENABLE_DETECT%"=="1" set "RUN_CMD=%RUN_CMD% --enable-detect"
-  if "%ENABLE_OPENAI_OCR%"=="1" set "RUN_CMD=%RUN_CMD% --enable-openai-ocr"
-  echo RUN=%RUN_CMD%
+  set "RUN_CMD=%ENV_PYTHON% launcher.py --host %HOST% --port %PORT% --detect-device %DETECT_DEVICE% --ocr-device %OCR_DEVICE%"
+  if "%ENABLE_DETECT%"=="1" set "RUN_CMD=!RUN_CMD! --enable-detect"
+  if "%ENABLE_OPENAI_OCR%"=="1" set "RUN_CMD=!RUN_CMD! --enable-openai-ocr"
+  echo RUN=!RUN_CMD!
   exit /b 0
 )
 

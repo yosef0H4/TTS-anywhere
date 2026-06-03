@@ -210,6 +210,11 @@ function createDebugHelper(page) {
         return e2e.simulateCapturedText(nextText, nextOptions);
       }, { nextText: String(text), nextOptions: options });
     },
+    async uploadImage(filePath) {
+      const resolved = path.resolve(String(filePath));
+      await page.locator("#image-upload").setInputFiles(resolved);
+      return resolved;
+    },
     async hotkey(action) {
       return page.evaluate((nextAction) => {
         const e2e = window.__e2e;
