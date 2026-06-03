@@ -39,6 +39,23 @@ function normalizeOpenAiBaseUrl(baseUrl: string): string {
   return trimmed;
 }
 
+function completedTtsResponseFormat(config: TtsConfig): "mp3" | "wav" | "opus" {
+  const model = config.model.trim().toLowerCase();
+  if (
+    model === "kokoro" ||
+    model.startsWith("piper") ||
+    model.startsWith("kitten") ||
+    model === "windows-natural" ||
+    model.startsWith("windows-natural:")
+  ) {
+    return "wav";
+  }
+  if (model === "edge" || model.startsWith("edge-")) {
+    return "mp3";
+  }
+  return config.format;
+}
+
 function resolveReasoningEffort(model: string, thinkingMode: "provider_default" | "low" | "off" | undefined): "none" | "low" | null {
   const normalized = model.trim().toLowerCase();
   if (thinkingMode === "off") {
@@ -196,7 +213,7 @@ export class OpenAiCompatibleTtsService {
         input: text,
         voice: config.voice,
         speed: config.speed,
-        response_format: config.format
+        response_format: completedTtsResponseFormat(config)
       }, { signal: mergedController.signal });
 
       const audioArrayBuffer = await response.arrayBuffer();

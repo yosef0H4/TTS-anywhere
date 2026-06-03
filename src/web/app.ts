@@ -69,6 +69,12 @@ import { HOTKEY_SOUND_OPTIONS, HOTKEY_SOUND_URLS } from "./hotkey-sounds";
 import { applyTranslationsToElement, translate, type TranslationKey } from "./i18n";
 import "../ui/styles.css";
 
+if (import.meta.hot) {
+  import.meta.hot.accept("../ui/template", () => {
+    window.location.reload();
+  });
+}
+
 interface NamedOption {
   value: string;
   label: string;

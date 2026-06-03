@@ -121,6 +121,28 @@ describe("openai compatible clients", () => {
     expect(result.audioBlob.size).toBeGreaterThan(0);
   });
 
+  it("uses completed WAV output for local Kokoro TTS", async () => {
+    const create = vi.fn().mockResolvedValue({
+      arrayBuffer: async () => new TextEncoder().encode("audio").buffer
+    });
+
+    const service = new OpenAiCompatibleTtsService(() => ({
+      audio: {
+        speech: {
+          create
+        }
+      }
+    }));
+
+    await service.synthesize("text", makeTtsConfig({ model: "kokoro", format: "mp3" }));
+
+    expect(create).toHaveBeenCalledOnce();
+    const [firstCallParams] = create.mock.calls[0] ?? [];
+    expect(firstCallParams).toEqual(expect.objectContaining({
+      response_format: "wav"
+    }));
+  });
+
   it("maps OCR stream abort errors to Cancelled", async () => {
     const create = vi.fn().mockRejectedValue(new Error("request was aborted"));
     const service = new OpenAiCompatibleLlmService(() => ({

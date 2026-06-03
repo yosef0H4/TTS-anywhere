@@ -2094,7 +2094,8 @@ body {
     color: var(--chunk-active-fg);
 }
 
-.reading-preview span.chunk-not-started {
+.reading-preview span.chunk-not-started,
+.reading-preview span.chunk-not_started {
     opacity: 1;
     background: var(--chunk-idle-bg);
     color: var(--chunk-idle-fg);

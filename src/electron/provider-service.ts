@@ -68,6 +68,23 @@ function joinApiPath(baseUrl: string, path: string, query: Record<string, string
   return url.toString();
 }
 
+function completedTtsResponseFormat(config: ProviderTtsConfig): "mp3" | "wav" | "opus" {
+  const model = config.model.trim().toLowerCase();
+  if (
+    model === "kokoro" ||
+    model.startsWith("piper") ||
+    model.startsWith("kitten") ||
+    model === "windows-natural" ||
+    model.startsWith("windows-natural:")
+  ) {
+    return "wav";
+  }
+  if (model === "edge" || model.startsWith("edge-")) {
+    return "mp3";
+  }
+  return config.format;
+}
+
 function parseOptions(payload: unknown): ProviderOption[] {
   if (!payload || typeof payload !== "object") return [];
   const obj = payload as Record<string, unknown>;
@@ -198,21 +215,22 @@ export class ElectronProviderTtsService {
     options?.signal?.addEventListener("abort", onAbort);
 
     try {
+      const responseFormat = completedTtsResponseFormat(config);
       const response = await createClient(baseUrl, config.apiKey).audio.speech.create({
         model: config.model,
         input: text,
         voice: config.voice,
         speed: config.speed,
-        response_format: config.format
+        response_format: responseFormat
       }, { signal: mergedController.signal });
       const audioBytes = new Uint8Array(await response.arrayBuffer());
       const headerMimeType = typeof (response as { headers?: { get?: (name: string) => string | null } }).headers?.get === "function"
         ? (response as { headers: { get: (name: string) => string | null } }).headers.get("content-type")
         : null;
       const mimeType = headerMimeType?.trim()
-        || (config.format === "wav"
+        || (responseFormat === "wav"
           ? "audio/wav"
-          : config.format === "opus"
+          : responseFormat === "opus"
             ? "audio/ogg; codecs=opus"
             : "audio/mpeg");
       return { audioBytes, mimeType };

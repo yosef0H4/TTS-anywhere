@@ -100,6 +100,21 @@ return await debug.readingPreviewState();
 '@ | npm run pw:stdin
 ```
 
+Clear text before cache-sensitive TTS generation tests:
+
+```powershell
+@'
+await page.evaluate(() => {
+  const raw = document.getElementById('raw-text');
+  if (!(raw instanceof HTMLTextAreaElement)) throw new Error('Missing #raw-text textarea');
+  raw.value = '';
+  raw.dispatchEvent(new Event('input', { bubbles: true }));
+  raw.dispatchEvent(new Event('change', { bubbles: true }));
+});
+return await debug.uiState();
+'@ | npm run pw:stdin
+```
+
 Fake playback hotkeys:
 
 ```powershell
@@ -199,12 +214,77 @@ return await page.locator('#settings-drawer').getAttribute('aria-hidden');
 - If the CLI cannot connect, start or restart `npm run dev:electron:debug`.
 - Treat snippets as arbitrary local code execution; use only in development.
 
+## Live debugging loop
+
+When a bug is confusing, use the CLI as a live diagnostic loop instead of guessing:
+
+1. Capture the current app state, recent logs, and a screenshot before editing code.
+2. Reproduce the bug in the same Electron window with `debug.captureText(...)`, `debug.hotkey(...)`, locators, or direct `page.evaluate(...)`.
+3. Compare what the UI shows with renderer state and recent log events.
+4. Add a tiny temporary log/probe only if the existing logs do not explain the issue.
+5. Make the smallest code change, wait for Vite hot reload, and test the exact scenario again.
+6. Remove temporary probes before finishing unless they are useful permanent diagnostics.
+
+Good first pass:
+
+```powershell
+@'
+return {
+  ui: await debug.uiState(),
+  reading: await debug.readingPreviewState(),
+  logs: logs.tail({ lines: 80 }),
+  screenshot: await debug.screenshot({ path: 'test-results/live-debug.png', fullPage: true })
+};
+'@ | npm run pw:stdin
+```
+
+For playback bugs, narrow logs by category and correlate them with DOM state:
+
+```powershell
+@'
+return {
+  status: await page.locator('#status-text').textContent().catch(() => null),
+  metrics: await page.evaluate(() => window.__e2e?.getPlaybackMetrics?.()),
+  reading: await debug.readingPreviewState(),
+  playbackLogs: logs.tail({ lines: 120, category: 'playback' })
+};
+'@ | npm run pw:stdin
+```
+
+For service or provider bugs, read the service/API logs before changing provider code:
+
+```powershell
+@'
+return {
+  ui: await debug.uiState(),
+  apiLogs: logs.tail({ lines: 80, category: 'api' }),
+  stackLogs: logs.tail({ lines: 80, category: 'stack' }),
+  electronLogs: logs.tail({ lines: 80, category: 'electron' })
+};
+'@ | npm run pw:stdin
+```
+
+For hot reload bugs, make a reversible visible probe, verify it appears without `page.reload()`, then revert it and verify it disappears:
+
+```powershell
+@'
+return {
+  markerVisible: await page.getByText('HMR Probe').count(),
+  url: page.url(),
+  readyState: await page.evaluate(() => document.readyState)
+};
+'@ | npm run pw:stdin
+```
+
+Prefer this style because it gives the agent cause-and-effect evidence: what the renderer believed, what Electron/services logged, what the user could see, and whether the fix changed the live app.
+
 ## Common mistakes
 
 - Do not use `--stdin` through `npm run pw:exec`; npm may swallow or reinterpret it. Use `npm run pw:stdin`.
 - Do not click controls behind the settings drawer. If Playwright says `#settings-drawer` intercepts pointer events, close it with `#btn-settings-toggle` first.
 - Do not wait for text processing to run when the selected text processing service is `__none__`; wait for OCR and TTS chips for playback.
 - Do not assume writing `textarea.value` is enough. Dispatch `input` and `change` events after setting `#raw-text`.
+- Do not test fresh TTS generation by writing the exact same text over existing text. The app reuses matching chunks and cached audio for efficiency. Clear `#raw-text` first, dispatch `input`/`change`, then write the test text.
 - Do not rely only on screenshots to decide whether highlighting is correct. Check `.active-chunk` through `debug.readingPreviewState()`.
 - Do not send real OS/global hotkeys when a fake `debug.hotkey(...)` or `debug.captureText(...)` path can test the same renderer behavior.
 - Do not ignore recent logs; `logs.tail({ category: 'playback' })` often explains chunk/session timing.
