@@ -41,6 +41,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     apiKey: "",
     model: "gemini-2.5-flash-preview-tts",
     voice: "Kore",
+    instructions: "",
     format: "wav",
     speed: 1,
     thinkingMode: "off",
@@ -49,6 +50,7 @@ export const DEFAULT_CONFIG: AppConfig = {
       apiKey: "",
       model: "gpt-4o-mini-tts",
       voice: "alloy",
+      instructions: "",
       format: "mp3",
       speed: 1,
       thinkingMode: "off"
@@ -57,6 +59,7 @@ export const DEFAULT_CONFIG: AppConfig = {
       apiKey: "",
       model: "gemini-2.5-flash-preview-tts",
       voice: "Kore",
+      instructions: "",
       format: "wav",
       speed: 1,
       thinkingMode: "off"

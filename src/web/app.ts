@@ -377,6 +377,7 @@ export class WebApp {
         apiKey: this.config.tts.apiKey,
         model: this.config.tts.model,
         voice: this.config.tts.voice,
+        instructions: this.config.tts.instructions,
         format: this.config.tts.format,
         speed: this.config.tts.speed,
         thinkingMode: this.config.tts.thinkingMode
@@ -388,6 +389,7 @@ export class WebApp {
       apiKey: this.config.tts.apiKey,
       model: this.config.tts.model,
       voice: this.config.tts.voice,
+      instructions: this.config.tts.instructions,
       format: this.config.tts.format,
       speed: this.config.tts.speed,
       thinkingMode: this.config.tts.thinkingMode
@@ -401,6 +403,7 @@ export class WebApp {
       this.config.tts.apiKey = settings.apiKey;
       this.config.tts.model = settings.model;
       this.config.tts.voice = settings.voice;
+      this.config.tts.instructions = settings.instructions ?? "";
       this.config.tts.format = settings.format;
       this.config.tts.speed = settings.speed;
       this.config.tts.thinkingMode = settings.thinkingMode;
@@ -411,6 +414,7 @@ export class WebApp {
     this.config.tts.apiKey = settings.apiKey;
     this.config.tts.model = settings.model;
     this.config.tts.voice = settings.voice;
+    this.config.tts.instructions = settings.instructions ?? "";
     this.config.tts.format = settings.format;
     this.config.tts.speed = settings.speed;
     this.config.tts.thinkingMode = settings.thinkingMode;
@@ -1855,6 +1859,12 @@ export class WebApp {
     }
     if (status.urls?.ttsBaseUrl) {
       this.config.tts.openaiCompatible.baseUrl = status.urls.ttsBaseUrl;
+      if (status.serviceId === "supertonic") {
+        this.config.tts.openaiCompatible.model = "Supertone/supertonic-3";
+        this.config.tts.openaiCompatible.voice = "M1";
+        this.config.tts.openaiCompatible.format = "wav";
+        this.config.reading.chunkTimeoutMs = Math.max(this.config.reading.chunkTimeoutMs, 60000);
+      }
       this.config.tts.provider = "openai_compatible";
       this.applySelectedTtsProviderSettings();
     }
@@ -1971,6 +1981,8 @@ export class WebApp {
       this.setStatus(this.t("stack.electronOnly"));
       return;
     }
+    this.syncTtsInputsToActiveConfig();
+    this.saveActiveTtsToSelectedProvider();
     const launches: Array<{ slot: DiscoveredServiceSlot; service: DiscoveredServiceCatalogItem; presetId: string; label: string; key: string }> = [];
     const seen = new Map<string, DiscoveredServiceSlot>();
     const groupedSelections = new Map<string, {
@@ -2675,6 +2687,7 @@ export class WebApp {
   private syncTtsInputsToActiveConfig(): void {
     this.config.tts.baseUrl = this.must<HTMLInputElement>("tts-url").value;
     this.config.tts.apiKey = this.must<HTMLInputElement>("tts-key").value;
+    this.config.tts.instructions = this.must<HTMLInputElement>("tts-instructions").value;
     this.config.tts.thinkingMode = this.readThinkingMode("tts-thinking-mode");
   }
 
@@ -2698,6 +2711,7 @@ export class WebApp {
     this.must<HTMLSelectElement>("tts-provider").value = this.currentTtsProvider();
     this.must<HTMLInputElement>("tts-url").value = this.config.tts.baseUrl;
     this.must<HTMLInputElement>("tts-key").value = this.config.tts.apiKey;
+    this.must<HTMLInputElement>("tts-instructions").value = this.config.tts.instructions;
     this.must<HTMLSelectElement>("tts-thinking-mode").value = this.config.tts.thinkingMode;
     this.must<HTMLInputElement>("chunk-min").value = String(this.config.reading.minWordsPerChunk);
     this.must<HTMLInputElement>("chunk-max").value = String(this.config.reading.maxWordsPerChunk);

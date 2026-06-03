@@ -72,6 +72,7 @@ function completedTtsResponseFormat(config: ProviderTtsConfig): "mp3" | "wav" | 
   const model = config.model.trim().toLowerCase();
   if (
     model === "kokoro" ||
+    model === "supertone/supertonic-3" ||
     model.startsWith("piper") ||
     model.startsWith("kitten") ||
     model === "windows-natural" ||
@@ -220,6 +221,7 @@ export class ElectronProviderTtsService {
         model: config.model,
         input: text,
         voice: config.voice,
+        ...(config.instructions?.trim() ? { instructions: config.instructions.trim() } : {}),
         speed: config.speed,
         response_format: responseFormat
       }, { signal: mergedController.signal });

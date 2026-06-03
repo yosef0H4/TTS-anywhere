@@ -18,10 +18,12 @@ const serviceRoots = [
   "services/text_processing/rapid",
   "services/text_processing/paddle",
   "services/text_processing/h2ovl",
+  "services/text_processing/katib",
   "services/tts/edge",
   "services/tts/kokoro",
   "services/tts/kitten",
-  "services/tts/piper"
+  "services/tts/piper",
+  "services/tts/supertonic"
 ];
 
 const allowedTopLevelFiles = new Set([

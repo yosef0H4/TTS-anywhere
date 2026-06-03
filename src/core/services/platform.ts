@@ -146,6 +146,7 @@ export interface ProviderTtsConfig {
   apiKey: string;
   model: string;
   voice: string;
+  instructions?: string;
   format: "mp3" | "wav" | "opus";
   speed: number;
   thinkingMode?: "provider_default" | "low" | "off";

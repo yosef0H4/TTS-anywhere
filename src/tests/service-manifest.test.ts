@@ -168,11 +168,13 @@ describe("scanServiceManifests", () => {
     expect(result.services.map((service) => service.manifest.id)).toEqual(expect.arrayContaining([
       "edge",
       "h2ovl",
+      "katib",
       "kitten",
       "kokoro",
       "paddle",
       "piper",
       "rapid",
+      "supertonic",
       "windows-ocr"
     ]));
   });

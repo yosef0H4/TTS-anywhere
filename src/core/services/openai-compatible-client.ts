@@ -18,6 +18,7 @@ interface TtsClient {
         model: string;
         input: string;
         voice: string;
+        instructions?: string;
         speed: number;
         response_format: "mp3" | "wav" | "opus";
       }, requestOptions?: { signal?: AbortSignal }) => Promise<{ arrayBuffer: () => Promise<ArrayBuffer> }>;
@@ -43,6 +44,7 @@ function completedTtsResponseFormat(config: TtsConfig): "mp3" | "wav" | "opus" {
   const model = config.model.trim().toLowerCase();
   if (
     model === "kokoro" ||
+    model === "supertone/supertonic-3" ||
     model.startsWith("piper") ||
     model.startsWith("kitten") ||
     model === "windows-natural" ||
@@ -212,6 +214,7 @@ export class OpenAiCompatibleTtsService {
         model: config.model,
         input: text,
         voice: config.voice,
+        ...(config.instructions?.trim() ? { instructions: config.instructions.trim() } : {}),
         speed: config.speed,
         response_format: completedTtsResponseFormat(config)
       }, { signal: mergedController.signal });

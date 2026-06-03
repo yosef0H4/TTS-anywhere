@@ -1,0 +1,4 @@
+interface:
+  display_name: "TTS Electron Service Builder"
+  short_description: "Build and test TTS Anywhere runtime services."
+  default_prompt: "Build or fix a TTS Anywhere runtime service, including manifest, launcher, adapter API, GPU safety, UI integration, and Electron Playwright validation."

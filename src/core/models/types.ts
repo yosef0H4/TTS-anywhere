@@ -83,6 +83,7 @@ export interface OpenAiCompatibleTtsSettings {
   apiKey: string;
   model: string;
   voice: string;
+  instructions: string;
   format: "mp3" | "wav" | "opus";
   speed: number;
   thinkingMode: ThinkingMode;
@@ -92,6 +93,7 @@ export interface GeminiSdkTtsSettings {
   apiKey: string;
   model: string;
   voice: string;
+  instructions: string;
   format: "mp3" | "wav" | "opus";
   speed: number;
   thinkingMode: ThinkingMode;

@@ -45,6 +45,7 @@ function makeTtsConfig(overrides: Record<string, unknown> = {}) {
     apiKey: "k",
     model: "tts-model",
     voice: "alloy",
+    instructions: "",
     format: "mp3" as const,
     speed: 1,
     thinkingMode: "off" as const,
@@ -53,6 +54,7 @@ function makeTtsConfig(overrides: Record<string, unknown> = {}) {
       apiKey: "k",
       model: "tts-model",
       voice: "alloy",
+      instructions: "",
       format: "mp3" as const,
       speed: 1,
       thinkingMode: "off" as const
@@ -61,6 +63,7 @@ function makeTtsConfig(overrides: Record<string, unknown> = {}) {
       apiKey: "k",
       model: "gemini-2.5-flash-preview-tts",
       voice: "Kore",
+      instructions: "",
       format: "wav" as const,
       speed: 1,
       thinkingMode: "off" as const
@@ -119,6 +122,27 @@ describe("openai compatible clients", () => {
 
     expect(create).toHaveBeenCalledOnce();
     expect(result.audioBlob.size).toBeGreaterThan(0);
+  });
+
+  it("sends TTS instructions when configured", async () => {
+    const create = vi.fn().mockResolvedValue({
+      arrayBuffer: async () => new TextEncoder().encode("audio").buffer
+    });
+
+    const service = new OpenAiCompatibleTtsService(() => ({
+      audio: {
+        speech: {
+          create
+        }
+      }
+    }));
+
+    await service.synthesize("text", makeTtsConfig({ instructions: "Arabic only" }));
+
+    const [firstCallParams] = create.mock.calls[0] ?? [];
+    expect(firstCallParams).toEqual(expect.objectContaining({
+      instructions: "Arabic only"
+    }));
   });
 
   it("uses completed WAV output for local Kokoro TTS", async () => {

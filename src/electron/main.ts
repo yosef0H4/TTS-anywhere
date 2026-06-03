@@ -197,6 +197,7 @@ const PADDLE_CPU_PACKAGE_NAME = "paddlepaddle";
 const PADDLE_CPU_PACKAGE_VERSION = "3.2.0";
 const PADDLE_WARM_START_TIMEOUT_MS = 120000;
 const PADDLE_COLD_START_TIMEOUT_MS = 10 * 60 * 1000;
+const HEAVY_GPU_SERVICE_COLD_START_TIMEOUT_MS = 30 * 60 * 1000;
 const CLIPBOARD_WATCH_POLL_MS = 500;
 const DISCOVERED_SERVICE_LOG_LIMIT = 200;
 
@@ -1062,9 +1063,11 @@ async function launchDiscoveredServiceInternal(
     pid: child.pid,
     port
   });
+  const hasGpuRuntime = preset.runtime?.detect === "gpu" || preset.runtime?.ocr === "gpu" || preset.runtime?.speech === "gpu";
+  const healthTimeoutMs = hasGpuRuntime ? HEAVY_GPU_SERVICE_COLD_START_TIMEOUT_MS : 120000;
   await waitForServiceHealth(
     baseUrl,
-    service.manifest.family === "ocr" ? PADDLE_COLD_START_TIMEOUT_MS : 120000,
+    healthTimeoutMs,
     (payload) => payload.ok === true,
     service.manifest.healthPath ?? "/healthz"
   );

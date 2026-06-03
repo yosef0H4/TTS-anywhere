@@ -258,6 +258,7 @@ export class SettingsStore {
         apiKey: typeof legacyFlat.apiKey === "string" ? legacyFlat.apiKey : openaiCompatible.apiKey,
         model: typeof legacyFlat.model === "string" ? legacyFlat.model : openaiCompatible.model,
         voice: typeof legacyFlat.voice === "string" ? legacyFlat.voice : openaiCompatible.voice,
+        instructions: typeof legacyFlat.instructions === "string" ? legacyFlat.instructions : openaiCompatible.instructions,
         format: legacyFlat.format === "mp3" || legacyFlat.format === "wav" || legacyFlat.format === "opus" ? legacyFlat.format : openaiCompatible.format,
         speed: typeof legacyFlat.speed === "number" ? legacyFlat.speed : openaiCompatible.speed,
         thinkingMode: value.thinkingMode === "provider_default" || value.thinkingMode === "low" || value.thinkingMode === "off"
@@ -272,6 +273,7 @@ export class SettingsStore {
           apiKey: geminiSdk.apiKey,
           model: geminiSdk.model,
           voice: geminiSdk.voice,
+          instructions: geminiSdk.instructions,
           format: geminiSdk.format,
           speed: geminiSdk.speed,
           thinkingMode: geminiSdk.thinkingMode
@@ -281,6 +283,7 @@ export class SettingsStore {
           apiKey: openaiCompatible.apiKey,
           model: openaiCompatible.model,
           voice: openaiCompatible.voice,
+          instructions: openaiCompatible.instructions,
           format: openaiCompatible.format,
           speed: openaiCompatible.speed,
           thinkingMode: openaiCompatible.thinkingMode

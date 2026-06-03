@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "id": "supertonic",
+  "name": "Supertonic TTS",
+  "family": "tts",
+  "description": "OpenAI-compatible Supertonic 3 multilingual TTS adapter with CPU and GPU ONNX Runtime presets.",
+  "healthPath": "/healthz",
+  "launcher": {
+    "executable": "uv",
+    "args": ["run", "python", "launcher.py"]
+  },
+  "selectors": [
+    {
+      "id": "supertonic-cpu",
+      "name": "Supertonic CPU",
+      "presetId": "cpu",
+      "capabilities": ["speech"]
+    },
+    {
+      "id": "supertonic-gpu",
+      "name": "Supertonic GPU",
+      "presetId": "gpu",
+      "capabilities": ["speech"]
+    }
+  ],
+  "presets": [
+    {
+      "id": "cpu",
+      "name": "CPU",
+      "defaultPort": 8017,
+      "args": ["--runtime", "cpu"],
+      "env": {
+        "UV_PROJECT_ENVIRONMENT": ".venv-cpu"
+      },
+      "capabilities": ["speech"],
+      "configTargets": ["tts.baseUrl"],
+      "runtime": {
+        "speech": "cpu"
+      }
+    },
+    {
+      "id": "gpu",
+      "name": "GPU",
+      "defaultPort": 8018,
+      "args": ["--runtime", "gpu"],
+      "env": {
+        "UV_PROJECT_ENVIRONMENT": ".venv-gpu"
+      },
+      "capabilities": ["speech"],
+      "configTargets": ["tts.baseUrl"],
+      "runtime": {
+        "speech": "gpu"
+      }
+    }
+  ]
+}
