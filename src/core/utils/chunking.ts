@@ -3,12 +3,13 @@ import type { ReadingTimeline } from "../models/types";
 export function cleanTextForTts(input: string): string {
   // Match PiperAnywhere behavior: strip decorative symbols/emojis, normalize whitespace,
   // and cap excessive terminal punctuation.
-  // First convert newlines to spaces so they become word boundaries
-  let cleaned = input.replace(/[\r\n]+/g, " ");
+  // Keep line breaks available for chunking while normalizing other whitespace.
+  let cleaned = input.replace(/\r\n?/g, "\n");
   cleaned = cleaned.replace(/[\*「」『』【】《》〈〉]/g, "");
   cleaned = cleaned.replace(/_+/g, " ");
-  cleaned = cleaned.replace(/[^\p{L}\p{N}\p{P}\p{Z}]/gu, "");
-  cleaned = cleaned.replace(/\s+/g, " ").trim();
+  cleaned = cleaned.replace(/[^\p{L}\p{N}\p{P}\p{Z}\n]/gu, "");
+  cleaned = cleaned.replace(/[^\S\n]+/g, " ");
+  cleaned = cleaned.replace(/ *\n+ */g, "\n").trim();
   cleaned = cleaned.replace(/([.!?]){4,}/g, "$1$1$1");
   return cleaned;
 }

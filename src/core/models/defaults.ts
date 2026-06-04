@@ -71,6 +71,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     typingIdleMs: 600,
     minWordsPerChunk: 6,
     maxWordsPerChunk: 25,
+    chunkSeparators: ".!?;:),\n\r؟؛",
     wpmBase: 180,
     punctuationPauseMode: "low",
     streamWindowSize: 3,

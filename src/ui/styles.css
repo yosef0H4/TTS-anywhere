@@ -1378,6 +1378,35 @@ body {
     border-color: var(--accent);
 }
 
+.setting-inline-control {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 42px;
+    gap: 8px;
+    align-items: center;
+}
+
+.setting-reset-button {
+    width: 42px;
+    height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    background: var(--panel-2);
+    color: var(--fg);
+    cursor: pointer;
+}
+
+.setting-reset-button:hover {
+    border-color: var(--accent);
+}
+
+.setting-reset-button .ui-icon {
+    width: 16px;
+    height: 16px;
+}
+
 .setting-inline {
     display: flex;
     gap: 6px;

@@ -25,6 +25,7 @@ export interface ReconcileParams {
   minWordsPerChunk: number;
   maxWordsPerChunk: number;
   wpmBase: number;
+  chunkSeparators?: string;
   activeChunkId?: string;
   speakingChunkId?: string;
   speakingRevision?: number;
@@ -59,23 +60,66 @@ interface Token {
   hasStop: boolean;
 }
 
-const STOP_REGEX = /[.!?;:)؟؛]$/u;
+export const DEFAULT_CHUNK_SEPARATORS = ".!?;:),\n\r؟؛";
 const WORD_PATTERN = /[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/u;
 const WORD_REGEX = /[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu;
 
-function tokenize(text: string): Token[] {
+export function normalizeChunkSeparators(value: string): string {
+  const expanded = value
+    .replace(/\\r/g, "\r")
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, "\t");
+  return Array.from(new Set(expanded)).join("");
+}
+
+function tokenize(text: string, separators: string): Token[] {
+  const stopChars = new Set(Array.from(separators));
+  const tokens: Token[] = [];
   const matches = text.matchAll(/\S+/g);
-  return Array.from(matches, (match) => {
-    const token = match[0];
-    const start = match.index ?? 0;
-    return {
-      text: token,
-      start,
-      end: start + token.length,
-      isWord: WORD_PATTERN.test(token),
-      hasStop: STOP_REGEX.test(token),
-    };
-  });
+
+  for (const match of matches) {
+    const rawToken = match[0];
+    const tokenStart = match.index ?? 0;
+    let segmentStart = 0;
+
+    for (let index = 0; index < rawToken.length; index += 1) {
+      const char = rawToken[index] ?? "";
+      if (!stopChars.has(char)) {
+        continue;
+      }
+
+      const textValue = rawToken.slice(segmentStart, index + 1);
+      tokens.push({
+        text: textValue,
+        start: tokenStart + segmentStart,
+        end: tokenStart + index + 1,
+        isWord: WORD_PATTERN.test(textValue),
+        hasStop: true,
+      });
+      segmentStart = index + 1;
+    }
+
+    if (segmentStart < rawToken.length) {
+      const textValue = rawToken.slice(segmentStart);
+      tokens.push({
+        text: textValue,
+        start: tokenStart + segmentStart,
+        end: tokenStart + rawToken.length,
+        isWord: WORD_PATTERN.test(textValue),
+        hasStop: false,
+      });
+    }
+  }
+
+  for (let index = 1; index < tokens.length; index += 1) {
+    const previous = tokens[index - 1];
+    const current = tokens[index];
+    if (previous && current && text.slice(previous.end, current.start).split("").some((char) => stopChars.has(char))) {
+      previous.hasStop = true;
+    }
+  }
+
+  return tokens;
 }
 
 function countWords(text: string): number {
@@ -235,13 +279,13 @@ function resolveFallbackActiveChunkId(
   return nextChunks[Math.min(Math.max(previousIndex, 0), Math.max(nextChunks.length - 1, 0))]?.id;
 }
 
-export function chunkText(text: string, minWordsPerChunk = 5, maxWordsPerChunk = 25, finalizeTail = false): ChunkDraft[] {
+export function chunkText(text: string, minWordsPerChunk = 5, maxWordsPerChunk = 25, finalizeTail = false, chunkSeparators = DEFAULT_CHUNK_SEPARATORS): ChunkDraft[] {
   const trimmedText = text.trim();
   if (!trimmedText) {
     return [];
   }
 
-  const tokens = tokenize(text);
+  const tokens = tokenize(text, normalizeChunkSeparators(chunkSeparators) || DEFAULT_CHUNK_SEPARATORS);
   if (tokens.length === 0) {
     return [];
   }
@@ -330,9 +374,9 @@ function withTimeline(chunks: ReconciledDraft[], wpmBase: number): ChunkRecord[]
 
 export function createChunkRecords(
   text: string,
-  options: { minWordsPerChunk: number; maxWordsPerChunk: number; wpmBase: number; finalizeTail?: boolean },
+  options: { minWordsPerChunk: number; maxWordsPerChunk: number; wpmBase: number; chunkSeparators?: string; finalizeTail?: boolean },
 ): ChunkRecord[] {
-  const drafts = chunkText(text, options.minWordsPerChunk, options.maxWordsPerChunk, options.finalizeTail).map((chunk, index) => ({
+  const drafts = chunkText(text, options.minWordsPerChunk, options.maxWordsPerChunk, options.finalizeTail, options.chunkSeparators).map((chunk, index) => ({
     ...chunk,
     id: `chunk-${String(index + 1).padStart(4, "0")}`,
     revision: 1,
@@ -348,6 +392,7 @@ export function reconcileChunks(params: ReconcileParams): ReconcileResult {
     minWordsPerChunk,
     maxWordsPerChunk,
     wpmBase,
+    chunkSeparators,
     activeChunkId,
     speakingChunkId,
     speakingRevision,
@@ -355,7 +400,7 @@ export function reconcileChunks(params: ReconcileParams): ReconcileResult {
   } = params;
   const drafts = splitDraftsPreservingReusablePrefixes(
     nextText,
-    chunkText(nextText, minWordsPerChunk, maxWordsPerChunk, finalizeTail),
+    chunkText(nextText, minWordsPerChunk, maxWordsPerChunk, finalizeTail, chunkSeparators),
     previousChunks,
   );
   const allocateId = nextId(previousChunks);

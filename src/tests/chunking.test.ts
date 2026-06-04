@@ -9,7 +9,7 @@ describe("chunking", () => {
   });
 
   it("cleans text for tts", () => {
-    expect(cleanTextForTts("Hi 😊   there!!!!\n\n#ok")).toBe("Hi there!!! #ok");
+    expect(cleanTextForTts("Hi 😊   there!!!!\n\n#ok")).toBe("Hi there!!!\n#ok");
     expect(cleanTextForTts("*hello* **world**")).toBe("hello world");
     expect(cleanTextForTts("「hello」 『world』 【test】 《ok》 〈fine〉")).toBe("hello world test ok fine");
     expect(cleanTextForTts("hello _____ world")).toBe("hello world");
@@ -17,8 +17,8 @@ describe("chunking", () => {
   });
 
   it("preserves word boundaries from newlines", () => {
-    expect(cleanTextForTts("hi\nhi")).toBe("hi hi");
-    expect(cleanTextForTts("word1\r\nword2\nword3")).toBe("word1 word2 word3");
+    expect(cleanTextForTts("hi\nhi")).toBe("hi\nhi");
+    expect(cleanTextForTts("word1\r\nword2\nword3")).toBe("word1\nword2\nword3");
   });
 
   it("maps time to chunk index", () => {

@@ -914,11 +914,12 @@ export class WebApp {
     this.activeChunkIndex = active?.index ?? 0;
   }
 
-  private buildChunkOptions(finalizeTail = false): { minWordsPerChunk: number; maxWordsPerChunk: number; wpmBase: number; finalizeTail?: boolean } {
+  private buildChunkOptions(finalizeTail = false): { minWordsPerChunk: number; maxWordsPerChunk: number; wpmBase: number; chunkSeparators: string; finalizeTail?: boolean } {
     return {
       minWordsPerChunk: this.config.reading.minWordsPerChunk,
       maxWordsPerChunk: this.config.reading.maxWordsPerChunk,
       wpmBase: this.config.reading.wpmBase,
+      chunkSeparators: this.config.reading.chunkSeparators,
       finalizeTail
     };
   }
@@ -2361,6 +2362,7 @@ export class WebApp {
       "tts-thinking-mode",
       "chunk-min",
       "chunk-max",
+      "chunk-separators",
       "clean-text-before-tts",
       "lowercase-text-before-tts",
       "wpm",
@@ -2379,6 +2381,13 @@ export class WebApp {
       this.must<HTMLInputElement>(id).addEventListener("change", () => {
         this.syncConfigFromInputs();
       });
+    });
+    this.must<HTMLButtonElement>("chunk-separators-reset").addEventListener("click", () => {
+      this.must<HTMLInputElement>("chunk-separators").value = DEFAULT_CONFIG.reading.chunkSeparators
+        .replace(/\r/g, "\\r")
+        .replace(/\n/g, "\\n")
+        .replace(/\t/g, "\\t");
+      this.syncConfigFromInputs();
     });
 
     this.must<HTMLInputElement>("detector-url").addEventListener("change", () => {
@@ -2517,6 +2526,11 @@ export class WebApp {
     this.config.reading.maxWordsPerChunk = Number.isFinite(maxWords)
       ? Math.max(this.config.reading.minWordsPerChunk, Math.floor(maxWords))
       : this.config.reading.minWordsPerChunk;
+    const separatorsInput = this.must<HTMLInputElement>("chunk-separators").value
+      .replace(/\\r/g, "\r")
+      .replace(/\\n/g, "\n")
+      .replace(/\\t/g, "\t");
+    this.config.reading.chunkSeparators = separatorsInput.trim() ? separatorsInput : DEFAULT_CONFIG.reading.chunkSeparators;
     this.config.reading.cleanTextBeforeTts = this.must<HTMLInputElement>("clean-text-before-tts").checked;
     this.config.reading.lowercaseTextBeforeTts = this.must<HTMLInputElement>("lowercase-text-before-tts").checked;
     this.config.reading.wpmBase = Number(this.must<HTMLInputElement>("wpm").value);
@@ -2730,6 +2744,10 @@ export class WebApp {
     this.must<HTMLSelectElement>("tts-thinking-mode").value = this.config.tts.thinkingMode;
     this.must<HTMLInputElement>("chunk-min").value = String(this.config.reading.minWordsPerChunk);
     this.must<HTMLInputElement>("chunk-max").value = String(this.config.reading.maxWordsPerChunk);
+    this.must<HTMLInputElement>("chunk-separators").value = this.config.reading.chunkSeparators
+      .replace(/\r/g, "\\r")
+      .replace(/\n/g, "\\n")
+      .replace(/\t/g, "\\t");
     this.must<HTMLInputElement>("clean-text-before-tts").checked = this.config.reading.cleanTextBeforeTts;
     this.must<HTMLInputElement>("lowercase-text-before-tts").checked = this.config.reading.lowercaseTextBeforeTts;
     this.must<HTMLInputElement>("wpm").value = String(this.config.reading.wpmBase);

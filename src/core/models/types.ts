@@ -111,6 +111,7 @@ export interface ReadingConfig {
   typingIdleMs: number;
   minWordsPerChunk: number;
   maxWordsPerChunk: number;
+  chunkSeparators: string;
   wpmBase: number;
   punctuationPauseMode: "off" | "low" | "medium" | "high";
   streamWindowSize: number;

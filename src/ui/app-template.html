@@ -220,6 +220,13 @@
             <div class="setting-group"><label data-i18n="reading.minWords">Min Words / Chunk</label><input type="number" id="chunk-min" min="1"></div>
             <div class="setting-group"><label data-i18n="reading.maxWords">Max Words / Chunk</label><input type="number" id="chunk-max" min="1"></div>
           </div>
+          <div class="setting-group">
+            <label for="chunk-separators" data-i18n="reading.chunkSeparators">Chunk Separators</label>
+            <div class="setting-inline-control">
+              <input type="text" id="chunk-separators" spellcheck="false">
+              <button type="button" id="chunk-separators-reset" class="setting-reset-button" data-i18n-title="reading.resetChunkSeparators" title="Reset chunk separators"><i data-lucide="rotate-ccw" class="ui-icon"></i></button>
+            </div>
+          </div>
           <div class="setting-group setting-toggle-row">
             <label for="clean-text-before-tts" data-i18n="reading.cleanText">Clean Text Before Chunking/TTS</label>
             <label class="setting-switch" for="clean-text-before-tts">
@@ -826,4 +833,3 @@
     </div>
   </div>
 </div>
-

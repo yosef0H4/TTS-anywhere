@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
   chunkText,
   createChunkRecords,
+  DEFAULT_CHUNK_SEPARATORS,
   getPrefetchTargets,
+  normalizeChunkSeparators,
   reconcileChunks,
   type ChunkRecord,
 } from '../core/playback/chunking';
@@ -32,6 +34,40 @@ describe('chunkText', () => {
       'Seven eight nine ten eleven twelve.',
     ]);
     expect(chunks.every((chunk) => chunk.finalized)).toBe(true);
+  });
+
+  it('finalizes at commas and newlines by default', () => {
+    const chunks = chunkText('One two three four five six, Seven eight nine ten eleven twelve\nTail words remain', 6, 25);
+
+    expect(chunks.map((chunk) => chunk.text)).toEqual([
+      'One two three four five six,',
+      'Seven eight nine ten eleven twelve',
+      'Tail words remain',
+    ]);
+    expect(chunks.map((chunk) => chunk.finalized)).toEqual([true, true, false]);
+  });
+
+  it('does not finalize separators before the minimum chunk size', () => {
+    const chunks = chunkText('One two,\nThree four? Five six.', 6, 25);
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]!).toMatchObject({
+      text: 'One two,\nThree four? Five six.',
+      finalized: true,
+      wordCount: 6,
+    });
+  });
+
+  it('allows custom separators', () => {
+    const chunks = chunkText('One two three four five six, Seven eight nine ten eleven twelve.', 6, 25, false, '.');
+
+    expect(chunks.map((chunk) => chunk.text)).toEqual([
+      'One two three four five six, Seven eight nine ten eleven twelve.',
+    ]);
+  });
+
+  it('normalizes escaped newline separators from settings input', () => {
+    expect(normalizeChunkSeparators(DEFAULT_CHUNK_SEPARATORS.replace(/\n/g, '\\n'))).toContain('\n');
   });
 
   it('does not finalize a short punctuated fragment with five words or fewer', () => {
