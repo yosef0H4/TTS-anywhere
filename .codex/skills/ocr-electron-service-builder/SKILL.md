@@ -9,7 +9,9 @@ Use this skill when adding or fixing OCR services under `services/text_processin
 
 ## Core Workflow
 
-1. Read the service manifest, launcher, adapter API, and current UI handoff before changing code.
+1. Read the service manifest, launcher, adapter API, Electron service manager, and current UI handoff before changing code.
+   - Check `src/electron/main.ts` service status reuse logic when changing launch presets.
+   - Check `src/web/app.ts` handoff before assuming the UI will update base URL/model.
 2. Create or reuse stable fixtures under `test-fixtures/ocr/`.
    - Keep at least one English fixture and one Arabic fixture.
    - Add screenshot-sized and slightly degraded fixtures when tuning speed/quality.
@@ -21,14 +23,25 @@ Use this skill when adding or fixing OCR services under `services/text_processin
    - Test `/healthz`, `/v1/models`, and `/v1/chat/completions`.
    - Send `data:image/png;base64,...` image URLs.
    - Test one OCR service/model at a time.
+   - For multi-model services, request each model ID explicitly and verify the service routes to the right engine.
 5. Prove the Electron UI last with `electron-playwright-cli`.
-   - Select only the target OCR service in `#service-ocr-select`.
+   - Select only the target OCR service/model.
    - Clear detect/TTS selectors unless the test explicitly needs them.
    - Use `debug.uploadImage("test-fixtures/ocr/name.png")`.
-   - Check `#raw-text`, service chips, and logs.
+   - Check `#raw-text`, service chips, active model, and logs.
 6. Stop services after each validation pass.
    - Confirm no `python.exe` command line for the OCR service remains.
    - Confirm `nvidia-smi` memory returns to idle for GPU services.
+
+## Multi-Model OCR
+
+For one service exposing several OCR models, such as Paddle English plus Arabic:
+
+- Keep startup lazy. Do not warm every model at service startup; load the selected engine on first request and cache it by model ID or recognition model name.
+- `/v1/models` must list every selectable model ID.
+- Unknown model IDs should use an intentional fallback only if documented; otherwise return a clear error.
+- Add tests that prove model routing, not only response shape.
+- In the UI, do not trust the hidden native `<select>` alone when TomSelect is used. Inspect `document.getElementById("llm-model").tomselect.options` and set values through `tomselect.setValue(...)` in Playwright snippets.
 
 ## GPU-Only Rules
 
@@ -52,6 +65,18 @@ When launching a local OCR service, make the UI update the active OCR settings:
 
 Do not overwrite a user-custom OCR prompt unless the service cannot work without a fixed prompt.
 
+Avoid stale launcher metadata:
+
+- If `launchDiscoveredService` returns an existing running service, verify both `presetId` and normalized `servicePath` match.
+- Service status must report the actual launched service ID and path. A stale `serviceId` breaks UI handoff.
+- If a service launch uses a combined detect+OCR preset, make sure the UI can still apply the OCR base URL.
+
+For Windows launcher scripts:
+
+- Dry-run blocks in `.bat` files need delayed expansion when building command strings inside parentheses.
+- Avoid nested quotes in variables like `set "RUN_CMD="%ENV_PYTHON%" ..."`.
+- Run the service's launcher/script tests after touching host scripts.
+
 ## Performance Tuning
 
 Vision-language OCR can be slow because image size becomes visual tokens.
@@ -66,6 +91,12 @@ Vision-language OCR can be slow because image size becomes visual tokens.
 ## Electron Checks
 
 Use `electron-playwright-cli`; do not use MCP for this repo.
+
+Before launching:
+
+- Remove `ELECTRON_RUN_AS_NODE` before starting Electron.
+- Stop unrelated OCR/TTS services; accidental TTS launch can create misleading playback failures while testing OCR.
+- Prefer preload APIs for service launch when native controls are wrapped or off-screen, but still verify visible UI state afterward.
 
 Useful snippets:
 
@@ -86,7 +117,43 @@ return document.getElementById('raw-text')?.value;
 '@ | npm run pw:stdin
 ```
 
+TomSelect model checks:
+
+```powershell
+@'
+return await page.evaluate(() => {
+  const el = document.getElementById('llm-model');
+  return {
+    value: el?.tomselect?.getValue?.() ?? el?.value,
+    tomOptions: el?.tomselect ? Object.keys(el.tomselect.options) : [],
+    domOptions: Array.from(el?.querySelectorAll('option') ?? []).map((option) => option.value)
+  };
+});
+'@ | npm run pw:stdin
+```
+
+Direct preload model fetch:
+
+```powershell
+@'
+return await page.evaluate(async () => {
+  return await window.electronAPI.fetchProviderModels({
+    provider: 'openai_compatible',
+    kind: 'ocr',
+    baseUrl: document.getElementById('llm-url')?.value,
+    apiKey: ''
+  });
+});
+'@ | npm run pw:stdin
+```
+
 If Electron fails with `The requested module 'electron' does not provide an export named ...`, check `ELECTRON_RUN_AS_NODE`; remove it for app launch.
+
+If the renderer stays on the boot screen:
+
+- Check whether Vite can serve `/src/web/main.ts`.
+- Restart the Electron debug stack after stopping model services.
+- Wait for `#raw-text`, not just the page title.
 
 ## Screenshot Hotkey
 
@@ -106,6 +173,7 @@ If rebuild fails with `EPERM` on `.node`, stop Electron first because the addon 
 - Basic model test passed.
 - Direct API test passed.
 - Electron upload test passed.
+- `/v1/models` and UI model picker include all intended model IDs.
 - Relevant pytest/vitest/build checks passed.
 - All launched services stopped.
 - GPU memory idle.
