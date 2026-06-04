@@ -16,16 +16,12 @@ export default defineConfig({
   },
   reporter: [["list"], ["html", { open: "never" }]],
   webServer: {
-    command: "npm run dev:web -- --host 127.0.0.1 --port 4173",
+    command: "npm run dev:renderer -- --host 127.0.0.1 --port 4173",
     url: "http://127.0.0.1:4173",
     reuseExistingServer: false,
     timeout: 120000
   },
   projects: [
-    {
-      name: "web",
-      testMatch: ["**/playback-stability.spec.ts", "**/typing-gate.spec.ts", "**/tts-dedupe.spec.ts"]
-    },
     {
       name: "electron",
       testMatch: ["**/electron-*.spec.ts"]

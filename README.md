@@ -106,12 +106,6 @@ Build the Windows distributable:
 npm run dist:win
 ```
 
-If you only want the browser renderer during development:
-
-```bash
-npm run dev:web
-```
-
 ## Provider Support
 
 ### Cloud / API Support
@@ -183,7 +177,7 @@ Useful commands:
 ```bash
 npm run typecheck
 npm run test
-npm run build:web
+npm run build:renderer
 npm run build:electron
 ```
 

@@ -30,5 +30,25 @@ bench_results/
 .bundle-resources/
 bin/uv.exe
 bin/uvx.exe
+~/
+bin/
+*.wav
+*.mp3
+*.ogg
+*.png
+*.jpg
+*.jpeg
+*.webp
+!demo/*.webp
+!test-fixtures/**/*.png
+!src/assets/sfx/*.ogg
+services/**/.venv*/
+services/**/.pytest_cache/
+services/**/.mypy_cache/
+services/**/.ruff_cache/
+services/**/.hf-cache/
+services/**/.paddlex-cache/
+services/**/*.log
+services/**/models/
 
 EyeHearYou/

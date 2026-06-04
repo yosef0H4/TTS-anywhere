@@ -1,72 +1,91 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `src/core/` holds chunking, OpenAI-compatible clients, shared models, and pipeline logic for renderer use.
-- `src/web/` contains browser renderer entry/runtime; `src/ui/` contains templates and styles.
-- `src/electron/` contains main/preload process code for desktop runtime.
-- `services/tts-adapter/` is a standalone Python OpenAI-compatible TTS adapter project (FastAPI + CLI).
-- Renderer tests live in `src/tests/*.test.ts`; adapter tests live in `services/tts-adapter/tests/`.
+- `src/core/` holds chunking, OpenAI-compatible clients, shared models, logging, settings, and pipeline logic.
+- `src/web/` contains the Electron renderer runtime. It is still built by Vite, but it is not maintained as a standalone browser app.
+- `src/ui/` contains renderer templates, styles, icons, fonts, and layout helpers.
+- `src/electron/` contains Electron main/preload process code, native capture orchestration, provider IPC, managed service launch, and packaging/runtime service sync.
+- `services/nodehotkey/` is the local native Node package for Windows hotkeys, clipboard, capture, overlays, and input sending.
+- `services/tts/*` contains OpenAI-compatible local TTS adapters.
+- `services/text_processing/*` contains local OCR/text-region services.
+- Renderer/unit tests live in `src/tests/*.test.ts`; Electron E2E tests live in `tests/e2e/electron-*.spec.ts`.
 
 ## Build, Test, and Development Commands
-- Web/Electron app:
-- `npm run dev:web`
-- `npm run dev:electron`
-- `npm run build:web`
-- `npm run build:electron`
-- `npm run typecheck`
-- Python adapter (`services/tts-adapter`):
-- `uv sync --group dev`
-- `uv run tts-adapter-api --host 127.0.0.1 --port 8000`
-- `uv run tts-adapter-cli synth --text "..." --out out.wav`
-- `uv run python -m ruff check .`
-- `uv run python -m mypy src/tts_adapter tests --python-version 3.11`
-- `uv run python -m pytest`
+- `npm run dev:electron`: run the Electron app in development.
+- `npm run dev:electron:debug`: run Electron with the localhost CDP endpoint used by `pw:exec`/`pw:stdin`.
+- `npm run dev:renderer`: start the Vite renderer dev server used by Electron dev/test workflows.
+- `npm run build:renderer`: build the renderer bundle with Vite.
+- `npm run build:electron`: build renderer and Electron main/preload output.
+- `npm run dist:win`: build the Windows distributable.
+- `npm run typecheck`: TypeScript check for the renderer-side TS project.
+- `npm run check:no-any`: ESLint strict `any` check for TS/Electron/test code.
+- `npm run test`: default focused Vitest suite.
+- `npm run test:e2e:electron`: Playwright Electron E2E tests.
+- `npm run pw:exec -- "return await page.title()"`: execute a short Playwright snippet against `dev:electron:debug`.
+- `npm run pw:stdin`: execute a multiline Playwright snippet against `dev:electron:debug`.
+
+## Python Service Commands
+- Run Python service commands from the specific service directory.
+- Common setup: `uv sync --group dev`.
+- Common validation: `uv run python -m pytest`.
+- Many services expose a `launcher.py`, `cli.py`, or README-specific command; prefer the service README and `stack.service.json` for the current launch path.
+- Managed Electron launch currently treats Paddle OCR and Edge TTS as the recommended first-class local stack.
 
 ## Coding Style & Naming Conventions
-- TypeScript (strict) for app code, Python (strict typing) for adapter code.
-- Use explicit types/interfaces; avoid `any` in TS and untyped public defs in Python.
-- Use ES modules in TS and clear module boundaries by domain.
+- TypeScript is strict; avoid `any` and keep module boundaries clear by domain.
+- Python services should keep typed public functions and narrow adapter-specific modules.
+- Use ES modules in TS.
 - Keep files focused; avoid monolithic single-file implementations.
 
 ## Testing Guidelines
-- App: Vitest unit tests for core logic and API boundary behavior.
-- Adapter: pytest for schemas/auth/endpoints/CLI smoke behavior.
-- Before committing, run relevant typecheck + tests for changed area.
+- App logic: Vitest unit tests in `src/tests/`.
+- Desktop behavior: Playwright Electron tests in `tests/e2e/electron-*.spec.ts`.
+- Runtime debugging: use `npm run dev:electron:debug` plus `npm run pw:exec` or `npm run pw:stdin`.
+- Before committing, run the checks relevant to the changed area.
 
 ## Commit & Pull Request Guidelines
-- Use Conventional Commits (for example `feat:`, `fix:`, `chore:`).
+- Use Conventional Commits, for example `feat:`, `fix:`, or `chore:`.
 - Include user impact and commands run in PR/commit notes.
 - Attach screenshots for UI-visible changes.
 
 ## Security & Configuration Tips
-- Never commit secrets. Use env vars (`API_KEY`, OpenAI keys, etc.).
-- For adapter local auth, bearer token is optional unless `API_KEY` is configured.
-- TTS adapter is OpenAI-compatible at `/v1/audio/speech`; app can point TTS Base URL to local adapter.
+- Never commit secrets. Use env vars such as `API_KEY` and provider keys.
+- Local OpenAI-compatible services generally expose `/v1` endpoints; auth is service-specific and often optional unless `API_KEY` is configured.
+- Do not commit generated audio, screenshots, logs, model caches, virtualenvs, or local runtime output.
 
 ## AGENTS.md Self-Maintenance Policy
-- Goal: keep this file aligned with real repo behavior so agents stay reliable.
+- Keep this file aligned with real repo behavior so agents stay reliable.
 - Agents may propose edits to `AGENTS.md` when commands, architecture, or constraints drift.
 - Required for any `AGENTS.md` update:
 - Keep changes minimal and scoped to factual repo behavior.
 - Never add secrets, tokens, machine-local private paths, or personal data.
 - Do not silently change safety-critical policy; include a short rationale in commit/PR message.
 - Validate referenced commands exist before writing them.
-- Preferred workflow:
-- Use a post-task check (hook/script/CI) that detects stale guidance and opens a patch.
-- Human reviews and merges the `AGENTS.md` diff.
 - Suggested CI checks:
 - fail if `AGENTS.md` references removed commands/files
-- fail if banned artifacts are committed (`__pycache__`, `.mypy_cache`, `.pytest_cache`, local venvs)
+- fail if banned artifacts are committed (`__pycache__`, `.mypy_cache`, `.pytest_cache`, `.venv*`, logs, test output)
 
 ## Generated/Cache Artifacts
 - Do not commit caches or local build artifacts.
 - Ignore at minimum:
-- `services/tts-adapter/.venv/`
-- `services/tts-adapter/.mypy_cache/`
-- `services/tts-adapter/.pytest_cache/`
-- `services/tts-adapter/.ruff_cache/`
-- `services/tts-adapter/**/__pycache__/`
-- `services/tts-adapter/**/*.pyc`
+- `dist/`
+- `dist-electron/`
+- `.bundle-resources/`
+- `.cache/`
+- `logs/`
+- `playwright-report/`
+- `test-results/`
+- `bench_data/`
+- `bench_results/`
+- `**/__pycache__/`
+- `**/*.pyc`
+- `services/**/.venv*/`
+- `services/**/.pytest_cache/`
+- `services/**/.mypy_cache/`
+- `services/**/.ruff_cache/`
+- `services/**/.hf-cache/`
+- `services/**/.paddlex-cache/`
+- generated `.wav`, screenshots, benchmark outputs, and service logs
 
 ## Windows Bridge
 - Root scripts provide a lightweight remote command bridge for Windows-host execution:
@@ -75,4 +94,4 @@
 - Suggested start command on Windows host:
 - `python windows_bridge_server.py --host 0.0.0.0 --port 8765 --token <token>`
 - Suggested client command:
-- `python windows_bridge_client.py "uv run python .\\src\\tts_adapter\\cli.py synth --text \"hi\" --out test.wav" --server http://<host>:8765 --token <token>`
+- `python windows_bridge_client.py "npm run typecheck" --server http://<host>:8765 --token <token>`
