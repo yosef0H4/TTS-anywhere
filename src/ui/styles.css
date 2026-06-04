@@ -104,7 +104,7 @@ body {
     position: relative;
     background: var(--bg);
     border-radius: 0;
-    overflow: hidden;
+    overflow: clip;
     display: flex;
     color: var(--fg);
 }
@@ -357,6 +357,9 @@ body {
     gap: 12px;
     padding-right: 6px;
     padding-bottom: 20px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
+    overscroll-behavior: contain;
 }
 
 .setting-section--half {
@@ -367,17 +370,30 @@ body {
     grid-column: 1 / -1;
 }
 
-.settings-layout::-webkit-scrollbar {
+.settings-layout::-webkit-scrollbar,
+.service-slot-log::-webkit-scrollbar,
+.ts-dropdown-content::-webkit-scrollbar {
     width: 6px;
+    height: 6px;
 }
 
-.settings-layout::-webkit-scrollbar-track {
+.settings-layout::-webkit-scrollbar-track,
+.service-slot-log::-webkit-scrollbar-track,
+.ts-dropdown-content::-webkit-scrollbar-track {
     background: transparent;
 }
 
-.settings-layout::-webkit-scrollbar-thumb {
-    background: var(--line-soft);
+.settings-layout::-webkit-scrollbar-thumb,
+.service-slot-log::-webkit-scrollbar-thumb,
+.ts-dropdown-content::-webkit-scrollbar-thumb {
+    background: var(--line);
     border-radius: 10px;
+}
+
+.settings-layout::-webkit-scrollbar-thumb:hover,
+.service-slot-log::-webkit-scrollbar-thumb:hover,
+.ts-dropdown-content::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--line) 75%, var(--accent) 25%);
 }
 
 .setting-section {
@@ -1692,6 +1708,9 @@ body {
     overflow: auto;
     white-space: pre-wrap;
     word-break: break-word;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
 }
 
 .services-dashboard[aria-busy="true"] {
@@ -2389,6 +2408,12 @@ body {
     background: var(--panel-2) !important;
     color: var(--fg) !important;
     border-radius: 10px !important;
+}
+
+.ts-dropdown-content {
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
 }
 
 .ts-dropdown .option,

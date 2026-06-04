@@ -9,13 +9,19 @@ Use the repo CLI. Do not configure or use MCP for this project.
 
 ## Start the app
 
-Run the debug Electron dev process first:
+Run the agent Electron dev process first:
 
 ```bash
-npm run dev:electron:debug
+npm run dev:electron:agent
 ```
 
-This opens the normal dev app and exposes a localhost-only CDP endpoint on `http://127.0.0.1:9222`.
+This opens the normal dev app, forces the renderer to load Vite from `http://localhost:5173`, clears `ELECTRON_RUN_AS_NODE`, and exposes a localhost-only CDP endpoint. The CDP port is selected dynamically, preferring `9333`, and written to `.cache/electron-agent-dev.json`.
+
+Check the dev process health:
+
+```bash
+npm run pw:doctor
+```
 
 ## Execute snippets
 
@@ -28,6 +34,25 @@ npm run pw:exec -- "return await page.title()"
 Available variables are `page`, `context`, `browser`, `expect`, `fs`, `path`, `logs`, and `debug`. Snippets run inside an async function, so use `await` and `return`.
 
 Prefer `npm run pw:stdin` for anything more than a tiny one-liner. It avoids shell quoting mistakes and is easier for coding agents to revise. Prefer Playwright locators and `page.evaluate`. Avoid pixel or coordinate interaction unless there is no semantic alternative.
+
+The CLI auto-connects to the CDP endpoint from `.cache/electron-agent-dev.json`. Use `--endpoint` only when attaching to a manually started Electron instance.
+
+## Helper API
+
+The snippet globals include `debug`, a repo-specific helper object for common Electron app workflows:
+
+- `debug.pages()` lists attached Electron pages with CDP target id, URL, title, and selected state.
+- `debug.snapshot({ maxItems? })` returns an AI-readable visible UI tree with roles, ids, text, values, disabled, pressed, and expanded state.
+- `debug.inspect({ logLines?, maxItems?, screenshot? })` returns pages, service state, UI state, reading preview, recent logs, semantic snapshot, and an optional screenshot path.
+- `debug.screenshot({ path?, fullPage? })` writes screenshots. Without `path`, it writes under `test-results/agent/`.
+- `debug.writeFile(name, data)` and `debug.saveJson(name, data)` write artifacts under `test-results/agent/`.
+- `debug.layout(label?)` reports root shell, settings drawer, and settings scroller positions. Use it when the UI looks shifted.
+- `debug.settings.open()`, `debug.settings.scrollTo(selector, { block? })`, and `debug.settings.click(selector, { block? })` operate inside the settings drawer without scrolling the root app shell.
+- `debug.services.state()` reads service selectors, chips, and status text.
+- `debug.services.select(slot, label)` selects a TomSelect-backed service by visible label.
+- `debug.services.launchSelected()` and `debug.services.stopSelected()` click service controls through DOM events.
+- `debug.services.waitFor({ detect?, ocr?, tts? }, { timeout?, timeoutMs?, intervals? })` waits for service chip states.
+- `debug.captureText(text, options)`, `debug.hotkey(action)`, `debug.readingPreviewState()`, and `debug.uiState()` use renderer test hooks when available.
 
 ## Common commands
 
@@ -49,6 +74,18 @@ Click a control:
 npm run pw:exec -- "await page.locator('#btn-settings-toggle').click(); return await page.locator('#settings-drawer').getAttribute('aria-hidden')"
 ```
 
+Click a settings control that may be below the visible drawer fold:
+
+```powershell
+@'
+await debug.settings.open();
+await debug.settings.click('#service-tts-select-ts-control', { block: 'center' });
+return await debug.layout('after settings click');
+'@ | npm run pw:stdin
+```
+
+Prefer `debug.settings.click` over raw `locator.click` for offscreen settings controls. Playwright's built-in scroll-into-view can otherwise try to scroll the Electron root surface instead of the settings pane.
+
 Take a screenshot:
 
 ```bash
@@ -59,6 +96,30 @@ Inspect visible text:
 
 ```bash
 npm run pw:exec -- "return await page.locator('body').innerText()"
+```
+
+List attached Electron pages:
+
+```powershell
+@'
+return await debug.pages();
+'@ | npm run pw:stdin
+```
+
+Get an AI-readable UI snapshot before deciding what to click:
+
+```powershell
+@'
+return await debug.snapshot();
+'@ | npm run pw:stdin
+```
+
+Get a full first-pass inspection report:
+
+```powershell
+@'
+return await debug.inspect({ logLines: 60 });
+'@ | npm run pw:stdin
 ```
 
 Read recent app logs:
@@ -81,7 +142,16 @@ Take a screenshot:
 
 ```powershell
 @'
-return await debug.screenshot({ path: 'test-results/agent-window.png', fullPage: true });
+return await debug.screenshot({ fullPage: true });
+'@ | npm run pw:stdin
+```
+
+Save structured debug output under `test-results/agent/`:
+
+```powershell
+@'
+const report = await debug.inspect({ screenshot: false });
+return await debug.saveJson('inspect-report.json', report);
 '@ | npm run pw:stdin
 ```
 
@@ -128,21 +198,10 @@ Launch selected services, wait for OCR/TTS, write text, and play:
 
 ```powershell
 @'
-await page.locator('#btn-launch-selected-services').click();
-
-const readServices = async () => ({
-  ocr: (await page.locator('#service-ocr-status-chip').textContent())?.trim(),
-  tts: (await page.locator('#service-tts-status-chip').textContent())?.trim(),
-  ttsUrl: await page.locator('#tts-url').inputValue().catch(() => '')
-});
-
-await expect.poll(readServices, {
-  timeout: 20 * 60_000,
-  intervals: [1000, 2000, 5000, 10000]
-}).toMatchObject({
-  ocr: 'Running',
-  tts: 'Running'
-});
+await debug.services.select('ocr', 'Hiro-MOSS NVIDIA');
+await debug.services.select('tts', 'Supertonic NVIDIA');
+await debug.services.launchSelected();
+await debug.services.waitFor({ ocr: 'Running', tts: 'Running' }, { timeout: 20 * 60_000 });
 
 const drawer = page.locator('#settings-drawer');
 if ((await drawer.getAttribute('aria-hidden').catch(() => 'true')) === 'false') {
@@ -166,8 +225,17 @@ await expect.poll(async () => {
 return await page.evaluate(() => ({
   state: window.__e2e?.getState?.(),
   metrics: window.__e2e?.getPlaybackMetrics?.(),
+  services: window.__e2e?.getServiceState?.(),
   statusText: document.getElementById('status-text')?.textContent ?? null
 }));
+'@ | npm run pw:stdin
+```
+
+Inspect service controls without relying on screenshots:
+
+```powershell
+@'
+return await debug.services.state();
 '@ | npm run pw:stdin
 ```
 
@@ -208,11 +276,40 @@ return await page.locator('#settings-drawer').getAttribute('aria-hidden');
 - Use `window.__e2e` for renderer test hooks when present.
 - Use `window.electronAPI` to inspect preload-backed Electron behavior from the renderer.
 - Use `logs.tail(...)` before changing code when the bug may involve Electron, service launchers, OCR/TTS requests, or playback timing.
+- Use `debug.snapshot()` before guessing selectors on an unfamiliar screen.
+- Use `debug.inspect()` for a first-pass report with pages, service state, UI state, recent logs, semantic snapshot, and screenshot path.
 - Use `debug.screenshot(...)` for visual context, but pair it with DOM state like `debug.readingPreviewState()` when checking highlights/classes.
 - Use `debug.captureText(...)` and `debug.hotkey(...)` instead of real global hotkeys for deterministic bug reproduction.
 - Use `--page <pattern>` if multiple pages are attached.
-- If the CLI cannot connect, start or restart `npm run dev:electron:debug`.
+- If the CLI cannot connect, run `npm run pw:doctor`. If it reports a stale or missing endpoint, restart `npm run dev:electron:agent`.
 - Treat snippets as arbitrary local code execution; use only in development.
+
+## Self-Maintenance
+
+This skill and its CLI are allowed to evolve. The purpose of `scripts/pw-electron-exec.mjs`, `scripts/electron-agent-dev.mjs`, and this `SKILL.md` is to make agents able to operate the app reliably.
+
+When an agent hits friction while using the Electron UI, it should fix the tool or skill if the problem is repeatable and not just a one-off app bug. Good reasons to patch the tooling:
+
+- A repeated UI flow requires fragile one-off snippets.
+- A selector, TomSelect control, hidden drawer, viewport issue, stale CDP endpoint, or launch timing issue makes automation unreliable.
+- The agent needs the same inspection data more than once.
+- Screenshots or reports are being written to random paths instead of `test-results/agent/`.
+- The skill docs describe an old command, port, helper, or app behavior.
+
+Prefer small reusable helpers over adding more single-purpose npm commands. Add helpers to `scripts/pw-electron-exec.mjs`, document them here, and verify with:
+
+```bash
+npm run test:pw-exec
+npm run check:no-any
+```
+
+If the change touches Electron launch behavior, also run:
+
+```bash
+npm run pw:doctor
+```
+
+Then exercise the helper with a real multiline `npm run pw:stdin` snippet against the running app. Keep generated screenshots, reports, and other artifacts under `test-results/agent/`.
 
 ## Live debugging loop
 
@@ -229,12 +326,7 @@ Good first pass:
 
 ```powershell
 @'
-return {
-  ui: await debug.uiState(),
-  reading: await debug.readingPreviewState(),
-  logs: logs.tail({ lines: 80 }),
-  screenshot: await debug.screenshot({ path: 'test-results/live-debug.png', fullPage: true })
-};
+return await debug.inspect({ logLines: 80 });
 '@ | npm run pw:stdin
 ```
 
@@ -281,11 +373,15 @@ Prefer this style because it gives the agent cause-and-effect evidence: what the
 ## Common mistakes
 
 - Do not use `--stdin` through `npm run pw:exec`; npm may swallow or reinterpret it. Use `npm run pw:stdin`.
+- Do not use one npm command per UI action. Put the flow in a multiline `pw:stdin` snippet, and add reusable helpers to `scripts/pw-electron-exec.mjs` when a pattern repeats.
 - Do not click controls behind the settings drawer. If Playwright says `#settings-drawer` intercepts pointer events, close it with `#btn-settings-toggle` first.
+- Do not raw-click service launch controls when viewport/layout can hide them. Use `debug.services.launchSelected()` and `debug.services.stopSelected()`.
+- Do not set TomSelect-backed service dropdown DOM values directly. Use `debug.services.select(slot, label)` so the visible selection and renderer state update together.
 - Do not wait for text processing to run when the selected text processing service is `__none__`; wait for OCR and TTS chips for playback.
 - Do not assume writing `textarea.value` is enough. Dispatch `input` and `change` events after setting `#raw-text`.
 - Do not test fresh TTS generation by writing the exact same text over existing text. The app reuses matching chunks and cached audio for efficiency. Clear `#raw-text` first, dispatch `input`/`change`, then write the test text.
 - Do not rely only on screenshots to decide whether highlighting is correct. Check `.active-chunk` through `debug.readingPreviewState()`.
 - Do not send real OS/global hotkeys when a fake `debug.hotkey(...)` or `debug.captureText(...)` path can test the same renderer behavior.
 - Do not ignore recent logs; `logs.tail({ category: 'playback' })` often explains chunk/session timing.
+- Do not write screenshots/reports to random repo paths. Prefer `debug.screenshot()`, `debug.writeFile(...)`, and `debug.saveJson(...)`, which default to `test-results/agent/`.
 - Do not close the browser or Electron app from snippets unless explicitly asked. The CLI already disconnects without closing the dev window.

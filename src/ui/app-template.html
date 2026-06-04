@@ -151,60 +151,60 @@
 
         <section class="setting-section setting-section--full" data-section="services">
           <div class="setting-section-head">
-            <h3>Services</h3>
-            <span class="advanced-hint">Launch local OCR and TTS services</span>
+            <h3 data-i18n="services.title">Services</h3>
+            <span class="advanced-hint" data-i18n="services.hint">Launch local OCR and TTS services</span>
           </div>
           <div class="setting-group">
-            <label for="services-external-root">Services Folder</label>
+            <label for="services-external-root" data-i18n="services.folder">Services Folder</label>
             <div class="setting-inline">
-              <input type="text" id="services-external-root" placeholder="Leave blank to use the bundled services folder">
-              <button type="button" id="btn-refresh-services-dashboard" class="stack-action-btn"><i data-lucide="refresh-cw" class="ui-icon"></i><span>Refresh</span></button>
-              <button type="button" id="btn-open-runtime-services" class="stack-action-btn"><i data-lucide="folder-open" class="ui-icon"></i><span>Open Folder</span></button>
+              <input type="text" id="services-external-root" data-i18n-placeholder="services.folderPlaceholder" placeholder="Leave blank to use the bundled services folder">
+              <button type="button" id="btn-refresh-services-dashboard" class="stack-action-btn"><i data-lucide="refresh-cw" class="ui-icon"></i><span data-i18n="services.refresh">Refresh</span></button>
+              <button type="button" id="btn-open-runtime-services" class="stack-action-btn"><i data-lucide="folder-open" class="ui-icon"></i><span data-i18n="services.openFolder">Open Folder</span></button>
             </div>
-            <div class="setting-footnote" id="services-dashboard-footnote">Only one services folder is scanned at a time. Leave this blank for the bundled default, or point it somewhere else to ignore bundled services.</div>
+            <div class="setting-footnote" id="services-dashboard-footnote" data-i18n="services.footnote">Only one services folder is scanned at a time. Leave this blank for the bundled default, or point it somewhere else to ignore bundled services.</div>
           </div>
           <div class="setting-group">
-            <label>Selections</label>
+            <label data-i18n="services.selections">Selections</label>
             <div class="services-dashboard" id="services-dashboard">
               <div class="service-slot-row">
-                <label for="service-detect-select">Text Processing</label>
+                <label for="service-detect-select" data-i18n="services.detect">Text Processing</label>
                 <div class="service-slot-controls">
                   <select id="service-detect-select"></select>
-                  <button type="button" id="btn-view-service-detect-log" class="stack-action-btn">View</button>
+                  <button type="button" id="btn-view-service-detect-log" class="stack-action-btn" data-i18n="services.view">View</button>
                   <span class="status-chip" id="service-detect-status-chip">Stopped</span>
                 </div>
                 <div class="service-slot-view" id="service-detect-view" hidden>
-                  <div class="service-slot-launch" id="service-detect-launch">No launch recorded.</div>
-                  <pre class="service-slot-log" id="service-detect-log">No output yet.</pre>
+                  <div class="service-slot-launch" id="service-detect-launch" data-i18n="services.noLaunch">No launch recorded.</div>
+                  <pre class="service-slot-log" id="service-detect-log" data-i18n="services.noOutput">No output yet.</pre>
                 </div>
               </div>
               <div class="service-slot-row">
-                <label for="service-ocr-select">OCR</label>
+                <label for="service-ocr-select" data-i18n="services.ocr">OCR</label>
                 <div class="service-slot-controls">
                   <select id="service-ocr-select"></select>
-                  <button type="button" id="btn-view-service-ocr-log" class="stack-action-btn">View</button>
+                  <button type="button" id="btn-view-service-ocr-log" class="stack-action-btn" data-i18n="services.view">View</button>
                   <span class="status-chip" id="service-ocr-status-chip">Stopped</span>
                 </div>
                 <div class="service-slot-view" id="service-ocr-view" hidden>
-                  <div class="service-slot-launch" id="service-ocr-launch">No launch recorded.</div>
-                  <pre class="service-slot-log" id="service-ocr-log">No output yet.</pre>
+                  <div class="service-slot-launch" id="service-ocr-launch" data-i18n="services.noLaunch">No launch recorded.</div>
+                  <pre class="service-slot-log" id="service-ocr-log" data-i18n="services.noOutput">No output yet.</pre>
                 </div>
               </div>
               <div class="service-slot-row">
-                <label for="service-tts-select">Text to Speech</label>
+                <label for="service-tts-select" data-i18n="services.tts">Text to Speech</label>
                 <div class="service-slot-controls">
                   <select id="service-tts-select"></select>
-                  <button type="button" id="btn-view-service-tts-log" class="stack-action-btn">View</button>
+                  <button type="button" id="btn-view-service-tts-log" class="stack-action-btn" data-i18n="services.view">View</button>
                   <span class="status-chip" id="service-tts-status-chip">Stopped</span>
                 </div>
                 <div class="service-slot-view" id="service-tts-view" hidden>
-                  <div class="service-slot-launch" id="service-tts-launch">No launch recorded.</div>
-                  <pre class="service-slot-log" id="service-tts-log">No output yet.</pre>
+                  <div class="service-slot-launch" id="service-tts-launch" data-i18n="services.noLaunch">No launch recorded.</div>
+                  <pre class="service-slot-log" id="service-tts-log" data-i18n="services.noOutput">No output yet.</pre>
                 </div>
               </div>
               <div class="stack-controls">
-                <button type="button" id="btn-launch-selected-services" class="stack-action-btn stack-action-btn-primary"><i data-lucide="play" class="ui-icon"></i><span>Launch Selected</span></button>
-                <button type="button" id="btn-stop-selected-services" class="stack-action-btn"><i data-lucide="square" class="ui-icon"></i><span>Stop Selected</span></button>
+                <button type="button" id="btn-launch-selected-services" class="stack-action-btn stack-action-btn-primary"><i data-lucide="play" class="ui-icon"></i><span data-i18n="services.launchSelected">Launch Selected</span></button>
+                <button type="button" id="btn-stop-selected-services" class="stack-action-btn"><i data-lucide="square" class="ui-icon"></i><span data-i18n="services.stopSelected">Stop Selected</span></button>
               </div>
             </div>
           </div>

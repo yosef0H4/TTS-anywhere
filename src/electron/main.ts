@@ -793,6 +793,20 @@ function buildDiscoveredServiceStatus(
 ): DiscoveredServiceRunStatus {
   const normalizedPath = normalizeDiscoveredServicePath(service.servicePath);
   const current = discoveredServiceStatuses.get(slot);
+  const carry = current && normalizeDiscoveredServicePath(current.servicePath) === normalizedPath
+    ? {
+        presetId: current.presetId,
+        pid: current.pid,
+        state: current.state,
+        managed: current.managed,
+        url: current.url,
+        urls: current.urls,
+        launchCwd: current.launchCwd,
+        launchCommand: current.launchCommand,
+        logLines: current.logLines,
+        error: current.error
+      }
+    : {};
   return {
     slot,
     servicePath: normalizedPath,
@@ -808,7 +822,7 @@ function buildDiscoveredServiceStatus(
     launchCommand: null,
     logLines: [],
     error: null,
-    ...(current ?? {}),
+    ...carry,
     ...(next ?? {})
   };
 }

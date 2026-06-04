@@ -683,10 +683,14 @@ export class WebApp {
     this.logBootstrapStep("template.rendered");
     this.applyUiState();
     this.logBootstrapStep("ui.state.applied");
+    this.bindRootScrollLock();
+    this.logBootstrapStep("root.scroll.lock.bound");
     this.renderIcons();
     this.logBootstrapStep("icons.rendered");
     this.bindModelSelectors();
     this.logBootstrapStep("model.selectors.bound");
+    this.bindScrollContainment();
+    this.logBootstrapStep("scroll.containment.bound");
     this.bindSettings();
     this.logBootstrapStep("settings.bound");
     this.bindCapture();
@@ -1170,21 +1174,21 @@ export class WebApp {
       create: false,
       persist: false,
       maxOptions: 500,
-      placeholder: "Text Processing"
+      placeholder: this.t("services.detect")
     });
 
     this.ocrServiceSelect = new TomSelect(this.must<HTMLSelectElement>("service-ocr-select"), {
       create: false,
       persist: false,
       maxOptions: 500,
-      placeholder: "OCR"
+      placeholder: this.t("services.ocr")
     });
 
     this.ttsServicePresetSelect = new TomSelect(this.must<HTMLSelectElement>("service-tts-select"), {
       create: false,
       persist: false,
       maxOptions: 500,
-      placeholder: "Text to Speech"
+      placeholder: this.t("services.tts")
     });
 
     this.bindSelectorFetchBehavior(this.llmModelSelect, "llm-model", () => this.fetchLlmModels(false));
@@ -1247,6 +1251,37 @@ export class WebApp {
     };
     select.control_input.addEventListener("focus", trigger);
     el.addEventListener("focus", trigger);
+  }
+
+  private bindRootScrollLock(): void {
+    const shell = this.must<HTMLElement>("app-shell");
+    const reset = () => {
+      if (shell.scrollTop !== 0 || shell.scrollLeft !== 0) {
+        shell.scrollTop = 0;
+        shell.scrollLeft = 0;
+      }
+    };
+    shell.addEventListener("scroll", reset, { passive: true });
+    requestAnimationFrame(reset);
+  }
+
+  private bindScrollContainment(): void {
+    const contain = (event: WheelEvent) => {
+      const target = event.currentTarget;
+      if (!(target instanceof HTMLElement)) return;
+      const canScroll = target.scrollHeight > target.clientHeight || target.scrollWidth > target.clientWidth;
+      if (canScroll) {
+        event.stopPropagation();
+      }
+    };
+    for (const id of ["service-detect-log", "service-ocr-log", "service-tts-log"]) {
+      this.must<HTMLElement>(id).addEventListener("wheel", contain, { passive: true });
+    }
+    document.addEventListener("wheel", (event) => {
+      if (event.target instanceof Element && event.target.closest(".ts-dropdown, .ts-dropdown-content")) {
+        event.stopPropagation();
+      }
+    }, { passive: true, capture: true });
   }
 
   private async fetchLlmModels(force: boolean): Promise<void> {
@@ -1921,19 +1956,19 @@ export class WebApp {
     }
 
     if (this.serviceDashboardLoading) {
-      footnote.textContent = "Refreshing services...";
+      footnote.textContent = this.t("services.refreshing");
     } else {
       const count = this.discoveredServices?.services.length ?? 0;
       footnote.textContent = this.config.services.externalRoot.trim().length > 0
-        ? `Detected ${count} service${count === 1 ? "" : "s"} from the selected folder. Launching a service applies its local URLs automatically.`
-        : `Detected ${count} bundled service${count === 1 ? "" : "s"}. Launching a service applies its local URLs automatically.`;
+        ? this.t("services.detectedExternal", { count })
+        : this.t("services.detectedBundled", { count });
     }
 
     const snapshot = this.discoveredServices;
     for (const slot of ["detect", "ocr", "tts"] as const) {
       const select = this.getServiceSlotSelect(slot);
       const options = snapshot ? this.buildServiceSlotOptions(slot) : [];
-      this.applyOptions(select, options, this.getSelectedServiceOptionValue(slot));
+      this.applyServiceOptions(select, options, this.getSelectedServiceOptionValue(slot));
       const chip = this.must<HTMLSpanElement>(this.getServiceSlotStatusChipId(slot));
       const viewButton = this.must<HTMLButtonElement>(this.getServiceSlotViewButtonId(slot));
       const viewPanel = this.must<HTMLDivElement>(this.getServiceSlotViewPanelId(slot));
@@ -1941,17 +1976,17 @@ export class WebApp {
       const logText = this.must<HTMLPreElement>(this.getServiceSlotLogId(slot));
       const status = this.getDiscoveredServiceStatus(slot);
       if (status?.state === "running") {
-        this.setLooseStatusChip(chip, "Running", "ok");
+        this.setLooseStatusChip(chip, this.t("stack.status.running"), "ok");
       } else if (status?.state === "starting") {
-        this.setLooseStatusChip(chip, "Starting", "idle");
+        this.setLooseStatusChip(chip, this.t("stack.status.starting"), "idle");
       } else if (status?.state === "failed") {
-        this.setLooseStatusChip(chip, "Failed", "error");
+        this.setLooseStatusChip(chip, this.t("stack.status.failed"), "error");
       } else {
-        this.setLooseStatusChip(chip, "Stopped", "idle");
+        this.setLooseStatusChip(chip, this.t("stack.status.stopped"), "idle");
       }
       const canView = Boolean(status?.launchCommand) || Boolean(status?.logLines.length);
       viewButton.disabled = !canView;
-      viewButton.textContent = this.serviceLogViews[slot] ? "Hide" : "View";
+      viewButton.textContent = this.serviceLogViews[slot] ? this.t("services.hide") : this.t("services.view");
       viewButton.setAttribute("aria-expanded", this.serviceLogViews[slot] ? "true" : "false");
       viewPanel.hidden = !this.serviceLogViews[slot];
       const launchParts = [
@@ -1959,21 +1994,21 @@ export class WebApp {
         status?.launchCwd ? `cd /d "${status.launchCwd}"` : "",
         status?.launchCommand ?? ""
       ].filter((part) => part.length > 0);
-      launchText.textContent = launchParts.length > 0 ? launchParts.join("\n") : "No launch recorded.";
+      launchText.textContent = launchParts.length > 0 ? launchParts.join("\n") : this.t("services.noLaunch");
       logText.textContent = status?.logLines.length
         ? status.logLines.join("\n")
         : status?.state === "starting"
-          ? "Waiting for output..."
-          : "No output yet.";
+          ? this.t("services.waitingOutput")
+          : this.t("services.noOutput");
     }
 
     errors.textContent = snapshot && snapshot.errors.length > 0
-      ? `${snapshot.errors.length} manifest error${snapshot.errors.length === 1 ? "" : "s"}. ${snapshot.errors.map((error) => error.manifestPath).join(" | ")}`
+      ? this.t("services.manifestErrors", { count: snapshot.errors.length, paths: snapshot.errors.map((error) => error.manifestPath).join(" | ") })
       : snapshot || this.serviceDashboardLoading
         ? ""
         : this.config.services.externalRoot.trim().length > 0
-          ? "No services detected in the selected folder."
-          : "No bundled services detected.";
+          ? this.t("services.noExternal")
+          : this.t("services.noBundled");
   }
 
   private async refreshDiscoveredServicesDashboard(): Promise<void> {
@@ -2005,6 +2040,7 @@ export class WebApp {
       this.setStatus(this.t("stack.electronOnly"));
       return;
     }
+    const launchDiscoveredService = window.electronAPI.launchDiscoveredService;
     this.syncTtsInputsToActiveConfig();
     this.saveActiveTtsToSelectedProvider();
     const launches: Array<{ slot: DiscoveredServiceSlot; service: DiscoveredServiceCatalogItem; presetId: string; label: string; key: string }> = [];
@@ -2045,7 +2081,7 @@ export class WebApp {
         ? this.resolveSelectorPreset(group.selection.service, group.selection.selector, group.slots)
         : null);
       if (!preset) {
-        this.setStatus(`Failed to resolve a launch preset for ${group.selection.label}.`);
+        this.setStatus(this.t("services.resolvePresetFailed", { label: group.selection.label }));
         return;
       }
       launches.push({
@@ -2057,7 +2093,7 @@ export class WebApp {
       });
     }
     if (launches.length === 0) {
-      this.setStatus("Select at least one service preset first.");
+      this.setStatus(this.t("services.selectAtLeastOne"));
       return;
     }
     for (const launch of launches) {
@@ -2079,14 +2115,17 @@ export class WebApp {
       });
     }
     this.renderDiscoveredServicesDashboard();
-    const startedLabels: string[] = [];
-    for (const launch of launches) {
-      const status = await window.electronAPI.launchDiscoveredService({
+    const results = await Promise.all(launches.map(async (launch) => {
+      const status = await launchDiscoveredService({
         slot: launch.slot,
         servicePath: launch.service.servicePath,
         presetId: launch.presetId,
         externalRoot: this.config.services.externalRoot
       });
+      return { launch, status };
+    }));
+    const startedLabels: string[] = [];
+    for (const { launch, status } of results) {
       this.updateDiscoveredServiceStatus(status);
       this.applyDiscoveredServiceUrls(status);
       startedLabels.push(`${this.getServiceSlotLabel(launch.slot)}: ${launch.label}`);
@@ -2100,10 +2139,10 @@ export class WebApp {
     const failed = launches.find((launch) => this.getDiscoveredServiceStatus(launch.slot)?.state === "failed");
     if (failed) {
       const status = this.getDiscoveredServiceStatus(failed.slot);
-      this.setStatus(`Failed to launch ${failed.label}: ${status?.error ?? "unknown error"}`);
+      this.setStatus(this.t("services.launchFailed", { label: failed.label, error: status?.error ?? "unknown error" }));
       return;
     }
-    this.setStatus(`Launched ${startedLabels.join(" | ")}.`);
+    this.setStatus(this.t("services.launchedSelected", { labels: startedLabels.join(" | ") }));
   }
 
   private async stopSelectedServices(): Promise<void> {
@@ -2128,7 +2167,7 @@ export class WebApp {
     }
     this.serviceSlotAliases = {};
     this.renderDiscoveredServicesDashboard();
-    this.setStatus("Stopped selected services.");
+    this.setStatus(this.t("services.stoppedSelected"));
   }
 
   private async fetchTtsVoicesFromElectron(provider: TtsProvider, baseUrl: string | undefined, apiKey: string, model: string): Promise<NamedOption[]> {
@@ -2217,6 +2256,36 @@ export class WebApp {
     }
 
     select.refreshOptions(false);
+  }
+
+  private optionsMatch(select: TomSelect | null, options: NamedOption[]): boolean {
+    if (!select) return false;
+    const existing = Object.entries(select.options).map(([value, option]) => ({
+      value,
+      label: String(option.text ?? option.label ?? "")
+    }));
+    return existing.length === options.length && existing.every((option, index) => {
+      const next = options[index];
+      if (!next) return false;
+      return option.value === next.value && option.label === next.label;
+    });
+  }
+
+  private applyServiceOptions(select: TomSelect | null, options: NamedOption[], current: string): void {
+    if (!select) return;
+    const open = select.isOpen;
+    const focused = select.isFocused;
+    const selected = select.getValue();
+    const selectedValue = typeof selected === "string" ? selected : selected[0] ?? "";
+    const shouldRefreshOptions = !this.optionsMatch(select, options);
+    if (shouldRefreshOptions) {
+      this.applyOptions(select, options, current);
+    } else if (selectedValue !== current) {
+      select.setValue(current, true);
+    }
+    if ((open || focused) && shouldRefreshOptions) {
+      select.open();
+    }
   }
 
   private resolveVoiceSelectionForModel(model: string, preferredVoice: string): string {
