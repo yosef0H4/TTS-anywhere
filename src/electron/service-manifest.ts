@@ -153,30 +153,40 @@ function validateLauncher(value: unknown): ServiceLauncher | null {
   return launcher;
 }
 
-function validatePreset(value: unknown, seenIds: Set<string>): ServicePreset | null {
-  if (!isRecord(value)) return null;
+function validateIdName(value: Record<string, unknown>, seenIds: Set<string>): { id: string; name: string } | null {
   if (typeof value.id !== "string" || !SERVICE_ID_PATTERN.test(value.id)) return null;
   if (seenIds.has(value.id)) return null;
   if (typeof value.name !== "string" || value.name.trim().length === 0) return null;
+  seenIds.add(value.id);
+  return { id: value.id, name: value.name.trim() };
+}
+
+function validateCapabilities(value: unknown): ServiceCapability[] | null {
+  if (!Array.isArray(value) || value.length === 0 || !value.every(isServiceCapability)) return null;
+  return [...value];
+}
+
+function validatePreset(value: unknown, seenIds: Set<string>): ServicePreset | null {
+  if (!isRecord(value)) return null;
+  const idName = validateIdName(value, seenIds);
+  if (idName === null) return null;
   if (typeof value.defaultPort !== "number" || !Number.isInteger(value.defaultPort) || value.defaultPort < 1 || value.defaultPort > 65535) {
     return null;
   }
   if (value.args !== undefined && !isStringArray(value.args)) return null;
   if (value.env !== undefined && !isEnvMap(value.env)) return null;
-  if (!Array.isArray(value.capabilities) || value.capabilities.length === 0 || !value.capabilities.every(isServiceCapability)) {
-    return null;
-  }
+  const capabilities = validateCapabilities(value.capabilities);
+  if (capabilities === null) return null;
   if (!Array.isArray(value.configTargets) || value.configTargets.length === 0 || !value.configTargets.every(isServiceConfigTarget)) {
     return null;
   }
   if (value.runtime !== undefined && !isRuntimeMode(value.runtime)) return null;
 
-  seenIds.add(value.id);
   const preset: ServicePreset = {
-    id: value.id,
-    name: value.name.trim(),
+    id: idName.id,
+    name: idName.name,
     defaultPort: value.defaultPort,
-    capabilities: [...value.capabilities],
+    capabilities,
     configTargets: [...value.configTargets]
   };
   if (value.args !== undefined) preset.args = value.args;
@@ -187,12 +197,10 @@ function validatePreset(value: unknown, seenIds: Set<string>): ServicePreset | n
 
 function validateSelector(value: unknown, presetIds: Set<string>, seenIds: Set<string>): ServiceSelector | null {
   if (!isRecord(value)) return null;
-  if (typeof value.id !== "string" || !SERVICE_ID_PATTERN.test(value.id)) return null;
-  if (seenIds.has(value.id)) return null;
-  if (typeof value.name !== "string" || value.name.trim().length === 0) return null;
-  if (!Array.isArray(value.capabilities) || value.capabilities.length === 0 || !value.capabilities.every(isServiceCapability)) {
-    return null;
-  }
+  const idName = validateIdName(value, seenIds);
+  if (idName === null) return null;
+  const capabilities = validateCapabilities(value.capabilities);
+  if (capabilities === null) return null;
   const presetId = typeof value.presetId === "string" ? value.presetId : undefined;
   if (presetId !== undefined && !presetIds.has(presetId)) return null;
   const runtime = value.runtime !== undefined
@@ -200,11 +208,10 @@ function validateSelector(value: unknown, presetIds: Set<string>, seenIds: Set<s
     : undefined;
   if (runtime === null) return null;
   if (presetId === undefined && runtime === undefined) return null;
-  seenIds.add(value.id);
   return {
-    id: value.id,
-    name: value.name.trim(),
-    capabilities: [...value.capabilities],
+    id: idName.id,
+    name: idName.name,
+    capabilities,
     ...(presetId ? { presetId } : {}),
     ...(runtime ? { runtime } : {})
   };

@@ -9,9 +9,15 @@ import type {
   ProviderTtsConfig,
   ProviderVoicesRequest
 } from "./provider-ipc.js";
+import {
+  completedTtsResponseFormat,
+  extractProviderErrorMessage,
+  normalizeOpenAiBaseUrl,
+  resolveReasoningEffort
+} from "./openai-compatible-utils.js";
 
 function normalizeBaseUrl(baseUrl: string): string {
-  return baseUrl.trim().replace(/\/+$/, "");
+  return normalizeOpenAiBaseUrl(baseUrl);
 }
 
 function requireBaseUrl(baseUrl: string | undefined): string {
@@ -41,16 +47,6 @@ function buildMessages(dataUrl: string, config: ProviderLlmConfig): ChatCompleti
   ];
 }
 
-function extractErrorMessage(error: unknown): string {
-  if (typeof error === "object" && error !== null) {
-    const record = error as Record<string, unknown>;
-    const status = typeof record.status === "number" ? `status=${record.status} ` : "";
-    const message = typeof record.message === "string" ? record.message : JSON.stringify(record);
-    return `${status}${message}`.trim();
-  }
-  return String(error);
-}
-
 function authHeaders(apiKey: string): HeadersInit {
   return apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
 }
@@ -66,24 +62,6 @@ function joinApiPath(baseUrl: string, path: string, query: Record<string, string
     }
   });
   return url.toString();
-}
-
-function completedTtsResponseFormat(config: ProviderTtsConfig): "mp3" | "wav" | "opus" {
-  const model = config.model.trim().toLowerCase();
-  if (
-    model === "kokoro" ||
-    model === "supertone/supertonic-3" ||
-    model.startsWith("piper") ||
-    model.startsWith("kitten") ||
-    model === "windows-natural" ||
-    model.startsWith("windows-natural:")
-  ) {
-    return "wav";
-  }
-  if (model === "edge" || model.startsWith("edge-")) {
-    return "mp3";
-  }
-  return config.format;
 }
 
 function parseOptions(payload: unknown): ProviderOption[] {
@@ -118,29 +96,6 @@ function parseOptions(payload: unknown): ProviderOption[] {
   }
 
   return [];
-}
-
-function resolveReasoningEffort(
-  model: string,
-  thinkingMode: "provider_default" | "low" | "off" | undefined
-): "none" | "low" | null {
-  const normalized = model.trim().toLowerCase();
-  if (thinkingMode === "off") {
-    return normalized.includes("gemini-3") ? "low" : "none";
-  }
-  if (thinkingMode === "low") {
-    return "low";
-  }
-  if (thinkingMode === "provider_default") {
-    return null;
-  }
-  if (normalized.includes("gemini-2.5")) {
-    return "none";
-  }
-  if (normalized.includes("gemini-3")) {
-    return "low";
-  }
-  return null;
 }
 
 export class ElectronProviderLlmService {
@@ -276,4 +231,4 @@ export async function fetchProviderVoices(request: ProviderVoicesRequest): Promi
   return [];
 }
 
-export { extractErrorMessage, normalizeBaseUrl };
+export { extractProviderErrorMessage as extractErrorMessage, normalizeBaseUrl };

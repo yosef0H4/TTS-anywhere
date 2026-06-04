@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 
-import type { BundledServicesManifest } from "./service-bundle-manifest.js";
+import { parseBundledServicesManifest, type BundledServicesManifest } from "./service-bundle-manifest.js";
 
 export interface RuntimeServicesSyncOptions {
   isPackaged: boolean;
@@ -65,23 +65,7 @@ function copyBundledServiceTree(sourceDir: string, targetDir: string): void {
 function readRuntimeServicesManifest(manifestFile: string): BundledServicesManifest | null {
   try {
     const raw = fs.readFileSync(manifestFile, "utf-8");
-    const parsed = JSON.parse(raw) as Partial<BundledServicesManifest>;
-    if (parsed.schemaVersion !== 1) return null;
-    if (typeof parsed.generatedAt !== "string") return null;
-    if (typeof parsed.hash !== "string" || parsed.hash.length === 0) return null;
-    if (!Array.isArray(parsed.services)) return null;
-    return {
-      schemaVersion: 1,
-      generatedAt: parsed.generatedAt,
-      hash: parsed.hash,
-      services: parsed.services.filter(
-        (entry): entry is BundledServicesManifest["services"][number] =>
-          typeof entry === "object" &&
-          entry !== null &&
-          typeof entry.path === "string" &&
-          typeof entry.sha256 === "string"
-      )
-    };
+    return parseBundledServicesManifest(raw);
   } catch {
     return null;
   }

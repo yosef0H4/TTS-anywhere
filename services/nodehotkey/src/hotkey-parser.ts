@@ -46,16 +46,32 @@ export function keyTokenToVk(token: string): number | null {
   return null;
 }
 
-export function parseHotkeySpec(input: string): HotkeySpec {
+export interface ParsedKeyCombo {
+  label: string;
+  modifiers: number;
+  keyToken: string;
+  vk: number;
+}
+
+export function parseKeyCombo(input: string, options: {
+  emptyMessage: string;
+  minimumTokenCount: number;
+  minimumTokenMessage: string;
+  multipleKeysMessage: (left: string, right: string) => string;
+  requireModifier: boolean;
+  missingModifierMessage?: string;
+  missingKeyMessage: string;
+  unsupportedKeyMessage: (token: string) => string;
+}): ParsedKeyCombo {
   const normalized = String(input).trim().toLowerCase();
-  if (!normalized) throw new Error("Hotkey string is empty");
+  if (!normalized) throw new Error(options.emptyMessage);
 
   const tokens = normalized
     .split("+")
     .map((t) => t.trim())
     .filter(Boolean);
 
-  if (tokens.length < 2) throw new Error("Hotkey must include at least one modifier and one key");
+  if (tokens.length < options.minimumTokenCount) throw new Error(options.minimumTokenMessage);
 
   let modifiers = 0;
   let keyToken: string | null = null;
@@ -66,20 +82,37 @@ export function parseHotkeySpec(input: string): HotkeySpec {
       modifiers |= mod;
       continue;
     }
-    if (keyToken) throw new Error(`Hotkey contains multiple non-modifier keys: \"${keyToken}\" and \"${token}\"`);
+    if (keyToken) throw new Error(options.multipleKeysMessage(keyToken, token));
     keyToken = token;
   }
 
-  if (!modifiers) throw new Error("Hotkey must include at least one modifier");
-  if (!keyToken) throw new Error("Hotkey must include a base key");
+  if (options.requireModifier && !modifiers) {
+    throw new Error(options.missingModifierMessage ?? "Hotkey must include at least one modifier");
+  }
+  if (!keyToken) throw new Error(options.missingKeyMessage);
 
   const vk = keyTokenToVk(keyToken);
-  if (vk == null) throw new Error(`Unsupported key token: \"${keyToken}\"`);
+  if (vk == null) throw new Error(options.unsupportedKeyMessage(keyToken));
+
+  return { label: tokens.join("+"), modifiers, keyToken, vk };
+}
+
+export function parseHotkeySpec(input: string): HotkeySpec {
+  const combo = parseKeyCombo(input, {
+    emptyMessage: "Hotkey string is empty",
+    minimumTokenCount: 2,
+    minimumTokenMessage: "Hotkey must include at least one modifier and one key",
+    multipleKeysMessage: (left, right) => `Hotkey contains multiple non-modifier keys: \"${left}\" and \"${right}\"`,
+    requireModifier: true,
+    missingModifierMessage: "Hotkey must include at least one modifier",
+    missingKeyMessage: "Hotkey must include a base key",
+    unsupportedKeyMessage: (token) => `Unsupported key token: \"${token}\"`
+  });
 
   return {
-    label: tokens.join("+"),
-    modifiers: modifiers | MOD_NOREPEAT,
-    vk,
-    releaseVk: vk
+    label: combo.label,
+    modifiers: combo.modifiers | MOD_NOREPEAT,
+    vk: combo.vk,
+    releaseVk: combo.vk
   };
 }

@@ -2,6 +2,13 @@ import OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { loggers } from "../logging";
 import type { LlmConfig, OcrResult, TtsAudioResult, TtsConfig } from "../models/types";
+import {
+  completedTtsResponseFormat,
+  extractProviderErrorMessage,
+  isProviderAbortError,
+  normalizeOpenAiBaseUrl,
+  resolveReasoningEffort
+} from "../../electron/openai-compatible-utils";
 
 interface LlmClient {
   chat: {
@@ -33,64 +40,6 @@ function createClient(baseUrl: string, apiKey: string): OpenAI {
     apiKey,
     dangerouslyAllowBrowser: true
   });
-}
-
-function normalizeOpenAiBaseUrl(baseUrl: string): string {
-  const trimmed = baseUrl.trim().replace(/\/+$/, "");
-  return trimmed;
-}
-
-function completedTtsResponseFormat(config: TtsConfig): "mp3" | "wav" | "opus" {
-  const model = config.model.trim().toLowerCase();
-  if (
-    model === "kokoro" ||
-    model === "supertone/supertonic-3" ||
-    model.startsWith("piper") ||
-    model.startsWith("kitten") ||
-    model === "windows-natural" ||
-    model.startsWith("windows-natural:")
-  ) {
-    return "wav";
-  }
-  if (model === "edge" || model.startsWith("edge-")) {
-    return "mp3";
-  }
-  return config.format;
-}
-
-function resolveReasoningEffort(model: string, thinkingMode: "provider_default" | "low" | "off" | undefined): "none" | "low" | null {
-  const normalized = model.trim().toLowerCase();
-  if (thinkingMode === "off") {
-    return normalized.includes("gemini-3") ? "low" : "none";
-  }
-  if (thinkingMode === "low") {
-    return "low";
-  }
-  if (thinkingMode === "provider_default") {
-    return null;
-  }
-  if (normalized.includes("gemini-2.5")) {
-    return "none";
-  }
-  if (normalized.includes("gemini-3")) {
-    return "low";
-  }
-  return null;
-}
-
-function extractErrorMessage(error: unknown): string {
-  if (typeof error === "object" && error !== null) {
-    const record = error as Record<string, unknown>;
-    const status = typeof record.status === "number" ? `status=${record.status} ` : "";
-    const message = typeof record.message === "string" ? record.message : JSON.stringify(record);
-    return `${status}${message}`.trim();
-  }
-  return String(error);
-}
-
-function isAbortError(error: unknown): boolean {
-  const text = extractErrorMessage(error).toLowerCase();
-  return text.includes("abort") || text.includes("cancel");
 }
 
 export class OpenAiCompatibleLlmService {
@@ -132,8 +81,8 @@ export class OpenAiCompatibleLlmService {
 
       return { text };
     } catch (error) {
-      const message = extractErrorMessage(error);
-      if (isAbortError(error)) {
+      const message = extractProviderErrorMessage(error);
+      if (isProviderAbortError(error)) {
         loggers.api.info("OCR request cancelled", { endpoint, model: config.model });
         throw new Error("Cancelled");
       }
@@ -179,8 +128,8 @@ export class OpenAiCompatibleLlmService {
       loggers.api.info("OCR stream completed", { textLength: text.length });
       return { text };
     } catch (error) {
-      const message = extractErrorMessage(error);
-      if (isAbortError(error)) {
+      const message = extractProviderErrorMessage(error);
+      if (isProviderAbortError(error)) {
         loggers.api.info("OCR stream cancelled", { endpoint, model: config.model });
         throw new Error("Cancelled");
       }
@@ -224,8 +173,8 @@ export class OpenAiCompatibleTtsService {
       loggers.api.info("TTS request completed", { bytes: audioArrayBuffer.byteLength });
       return { audioBlob: new Blob([audioArrayBuffer]) };
     } catch (error) {
-      const message = extractErrorMessage(error);
-      if (isAbortError(error)) {
+      const message = extractProviderErrorMessage(error);
+      if (isProviderAbortError(error)) {
         loggers.api.info("TTS request cancelled", { endpoint, model: config.model, voice: config.voice });
         throw new Error("Cancelled");
       }

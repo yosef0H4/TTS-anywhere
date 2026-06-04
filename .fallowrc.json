@@ -1,0 +1,48 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "entry": [
+    "index.html",
+    "src/web/main.ts",
+    "src/electron/main.ts",
+    "src/electron/preload.cts",
+    "scripts/*.mjs",
+    "tests/e2e/*.ts"
+  ],
+  "ignorePatterns": [
+    "dist/**",
+    "dist-electron/**",
+    ".bundle-resources/**",
+    "services/**/.venv*/**",
+    "services/**/build/**",
+    "services/**/dist/**",
+    "services/**/node_modules/**"
+  ],
+  "ignoreDependencies": [
+    "@eslint/js",
+    "nodehotkey",
+    "node-addon-api"
+  ],
+  "duplicates": {
+    "mode": "mild",
+    "minTokens": 50,
+    "minLines": 5,
+    "ignoreImports": true
+  },
+  "health": {
+    "maxCyclomatic": 20,
+    "maxCognitive": 15,
+    "maxCrap": 30
+  },
+  "rules": {
+    "unused-files": "error",
+    "unused-dependencies": "error",
+    "unused-dev-dependencies": "error",
+    "unlisted-dependencies": "error",
+    "unresolved-imports": "error",
+    "unused-exports": "warn",
+    "unused-types": "warn",
+    "unused-class-members": "warn",
+    "duplicate-exports": "warn",
+    "circular-dependencies": "warn"
+  }
+}

@@ -1,4 +1,4 @@
-import { MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, TOKEN_TO_MOD, keyTokenToVk } from "./hotkey-parser.js";
+import { MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, parseKeyCombo } from "./hotkey-parser.js";
 import type { MouseButton, MouseClickOptions, SendHotkeyOptions, SendMode, SendSpec } from "./types.js";
 import {
   GetLastError,
@@ -153,33 +153,21 @@ export function parseSendSpec(input: string): SendSpec {
     };
   }
 
-  const tokens = normalized
-    .split("+")
-    .map((t) => t.trim())
-    .filter(Boolean);
-  if (tokens.length < 1) throw new Error("Send hotkey string is empty");
-
-  let modifiers = 0;
-  let keyToken: string | null = null;
-  for (const token of tokens) {
-    const mod = TOKEN_TO_MOD.get(token);
-    if (mod) {
-      modifiers |= mod;
-      continue;
-    }
-    if (keyToken) throw new Error(`Send hotkey has multiple keys: "${keyToken}" and "${token}"`);
-    keyToken = token;
-  }
-
-  if (!keyToken) throw new Error("Send hotkey must include a base key");
-  const vk = keyTokenToVk(keyToken);
-  if (vk == null) throw new Error(`Unsupported send key token: "${keyToken}"`);
+  const combo = parseKeyCombo(normalized, {
+    emptyMessage: "Send hotkey string is empty",
+    minimumTokenCount: 1,
+    minimumTokenMessage: "Send hotkey string is empty",
+    multipleKeysMessage: (left, right) => `Send hotkey has multiple keys: "${left}" and "${right}"`,
+    requireModifier: false,
+    missingKeyMessage: "Send hotkey must include a base key",
+    unsupportedKeyMessage: (token) => `Unsupported send key token: "${token}"`
+  });
 
   return {
     kind: "keyboard",
-    label: tokens.join("+"),
-    modifiers,
-    vk
+    label: combo.label,
+    modifiers: combo.modifiers,
+    vk: combo.vk
   };
 }
 

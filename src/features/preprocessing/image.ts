@@ -1,5 +1,6 @@
 import type { DrawRect, PreprocessSettings } from "./types";
 import { dataUrlToBlob } from "../../core/utils/data-url";
+import { cropNormalizedDataUrl } from "../../core/utils/image-data";
 
 function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
@@ -127,24 +128,5 @@ export async function scaleDataUrlMaxDimension(dataUrl: string, maxDim: number):
 }
 
 export async function cropNormalizedRect(dataUrl: string, rect: DrawRect): Promise<string> {
-  const blob = dataUrlToBlob(dataUrl);
-  const bitmap = await createImageBitmap(blob);
-  const x = Math.max(0, Math.floor(rect.nx * bitmap.width));
-  const y = Math.max(0, Math.floor(rect.ny * bitmap.height));
-  const w = Math.max(1, Math.floor(rect.nw * bitmap.width));
-  const h = Math.max(1, Math.floor(rect.nh * bitmap.height));
-
-  const cw = Math.min(bitmap.width - x, w);
-  const ch = Math.min(bitmap.height - y, h);
-  const canvas = document.createElement("canvas");
-  canvas.width = cw;
-  canvas.height = ch;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    bitmap.close();
-    throw new Error("Canvas context unavailable");
-  }
-  ctx.drawImage(bitmap, x, y, cw, ch, 0, 0, cw, ch);
-  bitmap.close();
-  return canvas.toDataURL("image/png");
+  return cropNormalizedDataUrl(dataUrl, rect);
 }

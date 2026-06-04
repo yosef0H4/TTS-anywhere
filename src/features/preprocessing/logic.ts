@@ -28,6 +28,19 @@ function isSelected(nx: number, ny: number, baseState: boolean, ops: SelectionOp
   return selected;
 }
 
+function rawBoxFromPixels(id: string, x1: number, y1: number, x2: number, y2: number, imageW: number, imageH: number): RawBox {
+  return {
+    id,
+    px: { x1, y1, x2, y2 },
+    norm: {
+      x: x1 / Math.max(1, imageW),
+      y: y1 / Math.max(1, imageH),
+      w: (x2 - x1) / Math.max(1, imageW),
+      h: (y2 - y1) / Math.max(1, imageH)
+    }
+  };
+}
+
 export function selectionKeepRatio(box: RawBox, imageW: number, imageH: number, baseState: boolean, ops: SelectionOp[]): number {
   const w = Math.max(1, box.px.x2 - box.px.x1);
   const h = Math.max(1, box.px.y2 - box.px.y1);
@@ -158,16 +171,7 @@ export function mergeCloseBoxes(boxes: RawBox[], merge: MergeSettings, imageW: n
     const y1 = Math.min(...group.map((g) => g.px.y1));
     const x2 = Math.max(...group.map((g) => g.px.x2));
     const y2 = Math.max(...group.map((g) => g.px.y2));
-    const rect: RawBox = {
-      id: crypto.randomUUID(),
-      px: { x1, y1, x2, y2 },
-      norm: {
-        x: x1 / Math.max(1, imageW),
-        y: y1 / Math.max(1, imageH),
-        w: (x2 - x1) / Math.max(1, imageW),
-        h: (y2 - y1) / Math.max(1, imageH)
-      }
-    };
+    const rect = rawBoxFromPixels(crypto.randomUUID(), x1, y1, x2, y2, imageW, imageH);
     out.push({ rect, members: group });
   }
 
@@ -209,16 +213,7 @@ export function adjustBoxPadding(box: RawBox, imageW: number, imageH: number, ad
   if (x2 <= x1) x2 = Math.min(imageW, x1 + 1);
   if (y2 <= y1) y2 = Math.min(imageH, y1 + 1);
 
-  return {
-    id: box.id,
-    px: { x1, y1, x2, y2 },
-    norm: {
-      x: x1 / Math.max(1, imageW),
-      y: y1 / Math.max(1, imageH),
-      w: (x2 - x1) / Math.max(1, imageW),
-      h: (y2 - y1) / Math.max(1, imageH)
-    }
-  };
+  return rawBoxFromPixels(box.id, x1, y1, x2, y2, imageW, imageH);
 }
 
 export function finalizeOcrBoxes(params: {

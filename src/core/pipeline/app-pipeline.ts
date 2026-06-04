@@ -1,7 +1,7 @@
 import type { AppConfig } from "../models/types";
 import { loggers } from "../logging";
-import { dataUrlToBlob } from "../utils/data-url";
 import { OpenAiCompatibleLlmService, OpenAiCompatibleTtsService } from "../services/openai-compatible-client";
+import { cropNormalizedDataUrl } from "../utils/image-data";
 
 export interface PipelineResult {
   text: string;
@@ -34,6 +34,13 @@ interface TtsServiceLike {
     config: AppConfig["tts"],
     options?: { signal?: AbortSignal; timeoutMs?: number }
   ) => Promise<{ audioBlob: Blob }>;
+}
+
+interface StreamOcrOptions {
+  signal?: AbortSignal;
+  onToken: (token: string) => void;
+  onOcrRequestStart?: () => void;
+  onOcrRequestEnd?: () => void;
 }
 
 export class AppPipeline {
@@ -71,21 +78,9 @@ export class AppPipeline {
     let text = "";
 
     if (!regions.length) {
-      options.onOcrRequestStart?.();
-      const streamed = await this.llm.extractTextFromImageStream(
-        imageDataUrl,
-        config.llm,
-        {
-          ...(options.signal ? { signal: options.signal } : {}),
-          onToken: (token) => {
-            text += token;
-            options.onToken(token);
-          }
-        }
-      ).finally(() => {
-        options.onOcrRequestEnd?.();
+      text = await this.streamOcrRequest(imageDataUrl, config, options, (token) => {
+        text += token;
       });
-      text = streamed.text;
     } else {
       const parts: string[] = [];
       for (let i = 0; i < regions.length; i += 1) {
@@ -101,22 +96,11 @@ export class AppPipeline {
           const cropped = await this.cropDataUrl(imageDataUrl, region);
           this.throwIfAborted(options.signal);
           const startLen = text.length;
-          options.onOcrRequestStart?.();
-          const streamed = await this.llm.extractTextFromImageStream(
-            cropped,
-            config.llm,
-            {
-              ...(options.signal ? { signal: options.signal } : {}),
-              onToken: (token) => {
-                text += token;
-                options.onToken(token);
-              }
-            }
-          ).finally(() => {
-            options.onOcrRequestEnd?.();
+          const streamedText = await this.streamOcrRequest(cropped, config, options, (token) => {
+            text += token;
           });
-          if (streamed.text.trim()) {
-            parts.push(streamed.text.trim());
+          if (streamedText.trim()) {
+            parts.push(streamedText.trim());
           } else {
             // Revert separator if this region produced no text.
             text = text.slice(0, startLen);
@@ -128,21 +112,9 @@ export class AppPipeline {
       }
       if (!parts.length) {
         text = "";
-        options.onOcrRequestStart?.();
-        const streamed = await this.llm.extractTextFromImageStream(
-          imageDataUrl,
-          config.llm,
-          {
-            ...(options.signal ? { signal: options.signal } : {}),
-            onToken: (token) => {
-              text += token;
-              options.onToken(token);
-            }
-          }
-        ).finally(() => {
-          options.onOcrRequestEnd?.();
+        text = await this.streamOcrRequest(imageDataUrl, config, options, (token) => {
+          text += token;
         });
-        text = streamed.text;
       }
     }
 
@@ -202,25 +174,30 @@ export class AppPipeline {
     return text.includes("abort") || text.includes("cancel");
   }
 
+  private async streamOcrRequest(
+    imageDataUrl: string,
+    config: AppConfig,
+    options: StreamOcrOptions,
+    onTextToken: (token: string) => void
+  ): Promise<string> {
+    options.onOcrRequestStart?.();
+    const streamed = await this.llm.extractTextFromImageStream(
+      imageDataUrl,
+      config.llm,
+      {
+        ...(options.signal ? { signal: options.signal } : {}),
+        onToken: (token) => {
+          onTextToken(token);
+          options.onToken(token);
+        }
+      }
+    ).finally(() => {
+      options.onOcrRequestEnd?.();
+    });
+    return streamed.text;
+  }
+
   private async cropDataUrl(dataUrl: string, region: OcrRegion): Promise<string> {
-    const blob = dataUrlToBlob(dataUrl);
-    const bitmap = await createImageBitmap(blob);
-    const x = Math.max(0, Math.floor(region.nx * bitmap.width));
-    const y = Math.max(0, Math.floor(region.ny * bitmap.height));
-    const w = Math.max(1, Math.floor(region.nw * bitmap.width));
-    const h = Math.max(1, Math.floor(region.nh * bitmap.height));
-    const cw = Math.min(w, Math.max(1, bitmap.width - x));
-    const ch = Math.min(h, Math.max(1, bitmap.height - y));
-    const canvas = document.createElement("canvas");
-    canvas.width = cw;
-    canvas.height = ch;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      bitmap.close();
-      throw new Error("Canvas context unavailable");
-    }
-    ctx.drawImage(bitmap, x, y, cw, ch, 0, 0, cw, ch);
-    bitmap.close();
-    return canvas.toDataURL("image/png");
+    return cropNormalizedDataUrl(dataUrl, region);
   }
 }

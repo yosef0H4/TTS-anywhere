@@ -1,4 +1,4 @@
-export type ProviderKind = "openai_compatible" | "gemini_sdk";
+export type ProviderKind = "openai-compatible" | "gemini_sdk";
 export type ElectronHotkeyKey =
   | "capture"
   | "ocrClipboard"
@@ -40,8 +40,8 @@ export interface ProviderTtsConfig {
   model: string;
   voice: string;
   instructions?: string;
-  format: "mp3" | "wav" | "opus";
   speed: number;
+  format: "mp3" | "wav" | "opus";
   thinkingMode?: "provider_default" | "low" | "off";
 }
 
