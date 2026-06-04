@@ -599,6 +599,60 @@ body {
     cursor: pointer;
 }
 
+#app-shell input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 18px;
+    background: transparent;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+
+#app-shell input[type="range"]::-webkit-slider-runnable-track {
+    height: 6px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--line) 74%, var(--panel-2) 26%);
+    border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+}
+
+#app-shell input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    margin-top: -6px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid color-mix(in srgb, var(--panel-2) 88%, var(--fg) 12%);
+    box-shadow: 0 1px 3px color-mix(in srgb, #000 28%, transparent);
+}
+
+#app-shell input[type="range"]:focus-visible {
+    outline: none;
+}
+
+#app-shell input[type="range"]:focus-visible::-webkit-slider-thumb {
+    box-shadow:
+        0 0 0 3px color-mix(in srgb, var(--accent) 24%, transparent),
+        0 1px 3px color-mix(in srgb, #000 28%, transparent);
+}
+
+#app-shell input[type="range"]::-moz-range-track {
+    height: 6px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--line) 74%, var(--panel-2) 26%);
+    border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+}
+
+#app-shell input[type="range"]::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid color-mix(in srgb, var(--panel-2) 88%, var(--fg) 12%);
+    box-shadow: 0 1px 3px color-mix(in srgb, #000 28%, transparent);
+}
+
 .preproc-input-row {
     display: flex;
     align-items: center;
