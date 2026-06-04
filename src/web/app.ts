@@ -1863,6 +1863,14 @@ export class WebApp {
         }
         this.config.llm.openaiCompatible.ocrStreamingEnabled = false;
         this.config.llm.openaiCompatible.maxTokens = 512;
+      } else if (status.serviceId === "moss") {
+        const defaultPrompt = DEFAULT_CONFIG.llm.openaiCompatible.promptTemplate;
+        this.config.llm.openaiCompatible.model = "PatSnap/Hiro-MOSS-OCR-0.3B";
+        if (!this.config.llm.openaiCompatible.promptTemplate.trim() || this.config.llm.openaiCompatible.promptTemplate === defaultPrompt) {
+          this.config.llm.openaiCompatible.promptTemplate = "Extract all text from this image. Return only the extracted text.";
+        }
+        this.config.llm.openaiCompatible.ocrStreamingEnabled = false;
+        this.config.llm.openaiCompatible.maxTokens = 1024;
       } else if (status.serviceId === "paddle") {
         this.config.llm.openaiCompatible.model = "paddle";
       }
@@ -2718,6 +2726,7 @@ export class WebApp {
     this.config.tts.apiKey = this.must<HTMLInputElement>("tts-key").value;
     this.config.tts.instructions = this.must<HTMLInputElement>("tts-instructions").value;
     this.config.tts.thinkingMode = this.readThinkingMode("tts-thinking-mode");
+    this.saveActiveTtsToSelectedProvider();
   }
 
   private readThinkingMode(id: "llm-thinking-mode" | "tts-thinking-mode"): "provider_default" | "low" | "off" {
@@ -4857,6 +4866,7 @@ export class WebApp {
         throw new Error("Cancelled");
       }
       try {
+        this.syncTtsInputsToActiveConfig();
         const done = loggers.tts.time(`chunk.${index + 1}.synthesize`);
         const blob = await this.pipeline.synthesizeText(text, this.config, {
           signal,

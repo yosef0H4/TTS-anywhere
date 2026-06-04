@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "moss",
+  "name": "Hiro-MOSS OCR",
+  "family": "ocr",
+  "description": "OpenAI-compatible GPU OCR service for PatSnap/Hiro-MOSS-OCR-0.3B.",
+  "healthPath": "/healthz",
+  "launcher": {
+    "executable": "uv",
+    "args": ["run", "python", "launcher.py"]
+  },
+  "selectors": [
+    {
+      "id": "moss-nvidia",
+      "name": "Hiro-MOSS NVIDIA",
+      "presetId": "nvidia-ocr",
+      "capabilities": ["ocr"]
+    }
+  ],
+  "presets": [
+    {
+      "id": "nvidia-ocr",
+      "name": "NVIDIA OCR",
+      "defaultPort": 8098,
+      "env": {
+        "UV_PROJECT_ENVIRONMENT": ".venv-gpu"
+      },
+      "capabilities": ["ocr"],
+      "configTargets": ["textProcessing.detectorBaseUrl"],
+      "runtime": {
+        "ocr": "gpu"
+      }
+    }
+  ]
+}

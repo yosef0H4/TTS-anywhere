@@ -117,7 +117,7 @@ def main() -> int:
     serve = sub.add_parser("serve", help="Start the API server")
     serve.add_argument("--host", default="127.0.0.1", help="Host to bind to")
     serve.add_argument("--port", type=int, default=None, help="Port to bind to")
-    serve.add_argument("--runtime", choices=["cpu", "gpu"], default=os.environ.get("SUPERTONIC_RUNTIME", "cpu"))
+    serve.add_argument("--runtime", choices=["cpu", "gpu", "nvidia"], default=os.environ.get("SUPERTONIC_RUNTIME", "cpu"))
 
     sub.add_parser("models", help="List available models")
     sub.add_parser("voices", help="List available voices")
@@ -127,7 +127,7 @@ def main() -> int:
     synth.add_argument("--out", required=True, help="Output WAV file path")
     synth.add_argument("--voice", required=False, default=None, help="Voice to use")
     synth.add_argument("--speed", type=float, required=False, default=None, help="Speech speed")
-    synth.add_argument("--runtime", choices=["cpu", "gpu"], default=os.environ.get("SUPERTONIC_RUNTIME", "cpu"))
+    synth.add_argument("--runtime", choices=["cpu", "gpu", "nvidia"], default=os.environ.get("SUPERTONIC_RUNTIME", "cpu"))
 
     args = parser.parse_args()
     if args.command == "serve":

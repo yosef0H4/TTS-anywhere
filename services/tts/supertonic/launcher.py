@@ -18,7 +18,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Supertonic TTS launcher")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=None)
-    parser.add_argument("--runtime", choices=["cpu", "gpu"], default=os.environ.get("SUPERTONIC_RUNTIME", "cpu"))
+    parser.add_argument("--runtime", choices=["cpu", "gpu", "nvidia"], default=os.environ.get("SUPERTONIC_RUNTIME", "cpu"))
     return parser.parse_args(argv)
 
 
@@ -43,6 +43,8 @@ def ensure_nvidia_gpu_available() -> None:
 
 
 def env_dir_for_runtime(runtime: str) -> Path:
+    if runtime == "nvidia":
+        return PROJECT_ROOT / ".venv-nvidia"
     return PROJECT_ROOT / (".venv-gpu" if runtime == "gpu" else ".venv-cpu")
 
 
@@ -55,7 +57,7 @@ def package_installed(env_python_path: Path, module_name: str) -> bool:
 
 
 def ensure_env(args: argparse.Namespace) -> Path:
-    if args.runtime == "gpu":
+    if args.runtime in {"gpu", "nvidia"}:
         ensure_nvidia_gpu_available()
 
     env_dir = env_dir_for_runtime(args.runtime)
@@ -73,8 +75,12 @@ def ensure_env(args: argparse.Namespace) -> Path:
         run(["uv", "sync", "--group", "dev", "--inexact"], env=env)
 
     env_python_path = venv_python(env_dir)
-    ensure_onnxruntime(env_python_path, env, args.runtime)
-    ensure_runtime(env_python_path, args.runtime)
+    if args.runtime == "nvidia":
+        ensure_torch_cuda(env_python_path, env)
+        ensure_torch_runtime(env_python_path)
+    else:
+        ensure_onnxruntime(env_python_path, env, args.runtime)
+        ensure_runtime(env_python_path, args.runtime)
     ensure_adapter_package(env_python_path, env)
     return env_python_path
 
@@ -107,6 +113,30 @@ def ensure_runtime(env_python_path: Path, runtime: str) -> None:
     print(f"[supertonic] ONNX providers for {runtime}: {providers}", flush=True)
 
 
+def ensure_torch_cuda(env_python_path: Path, env: dict[str, str]) -> None:
+    if package_installed(env_python_path, "torch"):
+        print("[supertonic] torch already installed for nvidia; skipping download.", flush=True)
+    else:
+        run(["uv", "pip", "install", "--python", str(env_python_path), "torch", "--index-url", "https://download.pytorch.org/whl/cu128"], env=env)
+    for package in ("onnx", "huggingface_hub"):
+        if not package_installed(env_python_path, package):
+            run(["uv", "pip", "install", "--python", str(env_python_path), package], env=env)
+
+
+def ensure_torch_runtime(env_python_path: Path) -> None:
+    script = (
+        "import json, torch\n"
+        "print(json.dumps({'cuda': torch.cuda.is_available(), 'device': torch.cuda.get_device_name(0) if torch.cuda.is_available() else None}))\n"
+    )
+    result = subprocess.run([str(env_python_path), "-c", script], cwd=PROJECT_ROOT, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError((result.stderr or result.stdout or "Torch CUDA probe failed").strip())
+    payload = json.loads(result.stdout)
+    if not payload.get("cuda"):
+        raise SystemExit(f"Supertonic NVIDIA requires CUDA Torch. Probe result: {payload}")
+    print(f"[supertonic] Torch CUDA device: {payload.get('device')}", flush=True)
+
+
 def ensure_adapter_package(env_python_path: Path, env: dict[str, str]) -> None:
     run(["uv", "pip", "install", "--python", str(env_python_path), "--editable", str(PROJECT_ROOT)], env=env)
 
@@ -122,7 +152,7 @@ def main(argv: list[str] | None = None) -> None:
     env.setdefault("PYTHONIOENCODING", "utf-8")
     env.setdefault("PYTHONUTF8", "1")
     env["SUPERTONIC_RUNTIME"] = args.runtime
-    env["SUPERTONIC_PORT"] = str(args.port or (8018 if args.runtime == "gpu" else 8017))
+    env["SUPERTONIC_PORT"] = str(args.port or (8019 if args.runtime == "nvidia" else (8018 if args.runtime == "gpu" else 8017)))
     env["PYTHONPATH"] = str(PROJECT_ROOT / "src") + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
     print(f"[supertonic] HF_HOME={env['HF_HOME']}", flush=True)
     cmd = [

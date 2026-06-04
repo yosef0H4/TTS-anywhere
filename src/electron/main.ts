@@ -4417,7 +4417,15 @@ ipcMain.handle("provider:start-ocr-stream", async (_event, request: ProviderOcrR
 });
 ipcMain.handle("provider:synthesize-text", async (_event, request: ProviderTtsRequest) => {
   const controller = createProviderController(request.requestId);
-  diag("provider.tts.request.begin", { requestId: request.requestId, provider: request.provider, model: request.config.model, voice: request.config.voice });
+  const instructions = request.config.instructions?.trim() ?? "";
+  diag("provider.tts.request.begin", {
+    requestId: request.requestId,
+    provider: request.provider,
+    model: request.config.model,
+    voice: request.config.voice,
+    instructionsPreview: instructions ? instructions.slice(0, 80) : "",
+    instructionsLength: instructions.length
+  });
   try {
     const result = request.provider === "gemini_sdk"
       ? await geminiSdkTtsService.synthesize(request.text, request.config)

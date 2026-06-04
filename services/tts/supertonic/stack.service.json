@@ -3,7 +3,7 @@
   "id": "supertonic",
   "name": "Supertonic TTS",
   "family": "tts",
-  "description": "OpenAI-compatible Supertonic 3 multilingual TTS adapter with CPU and GPU ONNX Runtime presets.",
+  "description": "OpenAI-compatible Supertonic 3 multilingual TTS adapter with ONNX and NVIDIA PyTorch CUDA presets.",
   "healthPath": "/healthz",
   "launcher": {
     "executable": "uv",
@@ -18,8 +18,14 @@
     },
     {
       "id": "supertonic-gpu",
-      "name": "Supertonic GPU",
+      "name": "Supertonic ONNX GPU",
       "presetId": "gpu",
+      "capabilities": ["speech"]
+    },
+    {
+      "id": "supertonic-nvidia",
+      "name": "Supertonic NVIDIA",
+      "presetId": "nvidia",
       "capabilities": ["speech"]
     }
   ],
@@ -45,6 +51,20 @@
       "args": ["--runtime", "gpu"],
       "env": {
         "UV_PROJECT_ENVIRONMENT": ".venv-gpu"
+      },
+      "capabilities": ["speech"],
+      "configTargets": ["tts.baseUrl"],
+      "runtime": {
+        "speech": "gpu"
+      }
+    },
+    {
+      "id": "nvidia",
+      "name": "NVIDIA PyTorch CUDA",
+      "defaultPort": 8019,
+      "args": ["--runtime", "nvidia"],
+      "env": {
+        "UV_PROJECT_ENVIRONMENT": ".venv-nvidia"
       },
       "capabilities": ["speech"],
       "configTargets": ["tts.baseUrl"],
