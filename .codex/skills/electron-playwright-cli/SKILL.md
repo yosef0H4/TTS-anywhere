@@ -49,7 +49,7 @@ The snippet globals include `debug`, a repo-specific helper object for common El
 - `debug.layout(label?)` reports root shell, settings drawer, and settings scroller positions. Use it when the UI looks shifted.
 - `debug.settings.open()`, `debug.settings.scrollTo(selector, { block? })`, and `debug.settings.click(selector, { block? })` operate inside the settings drawer without scrolling the root app shell.
 - `debug.services.state()` reads service selectors, chips, and status text.
-- `debug.services.select(slot, label)` selects a TomSelect-backed service by visible label.
+- `debug.services.select(slot, label)` selects a combobox-backed service by visible label.
 - `debug.services.launchSelected()` and `debug.services.stopSelected()` click service controls through DOM events.
 - `debug.services.waitFor({ detect?, ocr?, tts? }, { timeout?, timeoutMs?, intervals? })` waits for service chip states.
 - `debug.captureText(text, options)`, `debug.hotkey(action)`, `debug.readingPreviewState()`, and `debug.uiState()` use renderer test hooks when available.
@@ -79,12 +79,46 @@ Click a settings control that may be below the visible drawer fold:
 ```powershell
 @'
 await debug.settings.open();
-await debug.settings.click('#service-tts-select-ts-control', { block: 'center' });
+await debug.settings.click('#service-tts-select + .app-combo .app-combo-input', { block: 'center' });
 return await debug.layout('after settings click');
 '@ | npm run pw:stdin
 ```
 
 Prefer `debug.settings.click` over raw `locator.click` for offscreen settings controls. Playwright's built-in scroll-into-view can otherwise try to scroll the Electron root surface instead of the settings pane.
+
+Test editable comboboxes:
+
+```powershell
+@'
+await debug.settings.open();
+await debug.settings.scrollTo('#service-ocr-select', { block: 'center' });
+
+const input = page.locator('#service-ocr-select + .app-combo .app-combo-input');
+await input.click();
+const browse = await page.evaluate(() => ({
+  open: Boolean(document.querySelector('.app-combo-dropdown:not([hidden])')),
+  options: Array.from(document.querySelectorAll('.app-combo-option')).map((option) => option.textContent?.trim() ?? '')
+}));
+
+await input.fill('hiro');
+const filtered = await page.evaluate(() => ({
+  input: document.querySelector('#service-ocr-select + .app-combo .app-combo-input')?.value ?? null,
+  options: Array.from(document.querySelectorAll('.app-combo-option')).map((option) => option.textContent?.trim() ?? '')
+}));
+
+return { browse, filtered };
+'@ | npm run pw:stdin
+```
+
+Combobox behavior to verify after UI changes:
+
+- Clicking/focusing a combobox with an existing value must show the full option list, not only the current value.
+- Typing must switch into fuzzy filtering.
+- Free-entry comboboxes such as model and voice fields must commit arbitrary typed values on Enter/blur.
+- Forced-choice comboboxes such as launcher/service selectors must allow temporary typing, then revert invalid text on Enter/blur.
+- ArrowDown should open suggestions and move the highlight.
+- Scrolling the settings pane while a combobox is open should keep the dropdown attached to the input or close cleanly if the control scrolls fully away.
+- Closing the settings drawer or clicking outside should hide the dropdown and leave no leftover bars, surfaces, or stale results.
 
 Take a screenshot:
 
@@ -105,6 +139,55 @@ List attached Electron pages:
 return await debug.pages();
 '@ | npm run pw:stdin
 ```
+
+## Visual QA
+
+DOM state is not enough for UI work. After changing visible controls, always take screenshots and inspect them visually with `view_image` before finishing. A state check can pass while the screen is still wrong.
+
+Minimum visual loop for settings UI changes:
+
+```powershell
+@'
+await page.reload({ waitUntil: 'domcontentloaded' });
+await page.waitForSelector('#app-shell', { state: 'attached', timeout: 30000 });
+await page.waitForTimeout(700);
+await debug.settings.open();
+await debug.settings.scrollTo('#llm-model', { block: 'center' });
+const shot = await debug.screenshot({ path: 'test-results/agent/settings-control-check.png', fullPage: false });
+const metrics = await page.evaluate(() => {
+  const combo = document.querySelector('#llm-model + .app-combo');
+  const input = document.querySelector('#llm-model + .app-combo .app-combo-input');
+  if (!(combo instanceof HTMLElement) || !(input instanceof HTMLInputElement)) return null;
+  const comboRect = combo.getBoundingClientRect();
+  const inputRect = input.getBoundingClientRect();
+  return {
+    comboRect: comboRect.toJSON(),
+    inputRect: inputRect.toJSON(),
+    topGap: inputRect.top - comboRect.top,
+    bottomGap: comboRect.bottom - inputRect.bottom,
+    value: input.value
+  };
+});
+return { shot, metrics };
+'@ | npm run pw:stdin
+```
+
+Then open the returned screenshot path with `view_image`. Check:
+
+- Text is vertically centered in inputs and buttons.
+- Dropdowns inherit the app theme and are not transparent, black-on-black, or unstyled.
+- Dropdowns are anchored under the field after drawer animations finish.
+- Dropdowns do not overlap unrelated controls in an incoherent way.
+- Hidden overlays have no visible leftovers. If an overlay uses `[hidden]`, confirm its computed display is `none` and its rect is zero.
+- Scrollbars match the app style and do not use default bright browser scrollbars in dark mode.
+
+For dropdown or combobox changes, save at least these screenshots under `test-results/agent/`:
+
+- closed resting control
+- open full-list state
+- filtered state after typing
+- state after scrolling the settings pane while open
+- closed drawer/restored workspace state
 
 Get an AI-readable UI snapshot before deciding what to click:
 
@@ -291,7 +374,7 @@ This skill and its CLI are allowed to evolve. The purpose of `scripts/pw-electro
 When an agent hits friction while using the Electron UI, it should fix the tool or skill if the problem is repeatable and not just a one-off app bug. Good reasons to patch the tooling:
 
 - A repeated UI flow requires fragile one-off snippets.
-- A selector, TomSelect control, hidden drawer, viewport issue, stale CDP endpoint, or launch timing issue makes automation unreliable.
+- A selector, combobox control, hidden drawer, viewport issue, stale CDP endpoint, or launch timing issue makes automation unreliable.
 - The agent needs the same inspection data more than once.
 - Screenshots or reports are being written to random paths instead of `test-results/agent/`.
 - The skill docs describe an old command, port, helper, or app behavior.
@@ -376,7 +459,7 @@ Prefer this style because it gives the agent cause-and-effect evidence: what the
 - Do not use one npm command per UI action. Put the flow in a multiline `pw:stdin` snippet, and add reusable helpers to `scripts/pw-electron-exec.mjs` when a pattern repeats.
 - Do not click controls behind the settings drawer. If Playwright says `#settings-drawer` intercepts pointer events, close it with `#btn-settings-toggle` first.
 - Do not raw-click service launch controls when viewport/layout can hide them. Use `debug.services.launchSelected()` and `debug.services.stopSelected()`.
-- Do not set TomSelect-backed service dropdown DOM values directly. Use `debug.services.select(slot, label)` so the visible selection and renderer state update together.
+- Do not set service combobox DOM values directly. Use `debug.services.select(slot, label)` so the visible selection and renderer state update together.
 - Do not wait for text processing to run when the selected text processing service is `__none__`; wait for OCR and TTS chips for playback.
 - Do not assume writing `textarea.value` is enough. Dispatch `input` and `change` events after setting `#raw-text`.
 - Do not test fresh TTS generation by writing the exact same text over existing text. The app reuses matching chunks and cached audio for efficiency. Clear `#raw-text` first, dispatch `input`/`change`, then write the test text.
