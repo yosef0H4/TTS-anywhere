@@ -1,5 +1,3 @@
-import TomSelect from "tom-select";
-import "tom-select/dist/css/tom-select.css";
 import { createIcons } from "lucide";
 import {
   addTransport,
@@ -78,6 +76,404 @@ if (import.meta.hot) {
 interface NamedOption {
   value: string;
   label: string;
+}
+
+type ComboChangeHandler = (value: string) => void;
+
+class AppComboSelect {
+  private static overlay: HTMLDivElement | null = null;
+  private static active: AppComboSelect | null = null;
+  private readonly handlers: ComboChangeHandler[] = [];
+  private readonly wrapper = document.createElement("div");
+  private readonly input = document.createElement("input");
+  private readonly button = document.createElement("button");
+  private optionsList: NamedOption[] = [];
+  private currentValue = "";
+  private committedValue = "";
+  private searchQuery = "";
+  private highlightedIndex = 0;
+  private openState = false;
+  private focusedState = false;
+
+  constructor(
+    private readonly select: HTMLSelectElement,
+    private readonly settings: { create: boolean; placeholder: string }
+  ) {
+    this.currentValue = select.value;
+    this.committedValue = select.value;
+    this.optionsList = Array.from(select.options).map((option) => ({
+      value: option.value,
+      label: option.textContent?.trim() || option.value
+    }));
+    this.bind();
+  }
+
+  static closeActive(): void {
+    AppComboSelect.active?.close();
+  }
+
+  get isOpen(): boolean {
+    return this.openState;
+  }
+
+  get isFocused(): boolean {
+    return this.focusedState;
+  }
+
+  getValue(): string {
+    return this.currentValue;
+  }
+
+  on(event: "change", handler: ComboChangeHandler): void {
+    if (event === "change") this.handlers.push(handler);
+  }
+
+  setPlaceholder(placeholder: string): void {
+    this.settings.placeholder = placeholder;
+    this.input.placeholder = placeholder;
+    this.select.setAttribute("placeholder", placeholder);
+  }
+
+  setOptions(options: NamedOption[], current: string): void {
+    this.optionsList = options;
+    this.select.innerHTML = "";
+    for (const option of options) {
+      const el = document.createElement("option");
+      el.value = option.value;
+      el.textContent = option.label;
+      this.select.appendChild(el);
+    }
+    if (current && !options.some((option) => option.value === current)) {
+      const option = document.createElement("option");
+      option.value = current;
+      option.textContent = current;
+      this.select.appendChild(option);
+      if (this.settings.create) {
+        this.optionsList = [...options, { value: current, label: current }];
+      }
+    }
+    this.setValue(current, true);
+  }
+
+  optionsMatch(options: NamedOption[]): boolean {
+    return this.optionsList.length === options.length && this.optionsList.every((option, index) => {
+      const next = options[index];
+      return Boolean(next && option.value === next.value && option.label === next.label);
+    });
+  }
+
+  setValue(value: string, silent = false): void {
+    const normalized = this.normalizeValue(value);
+    this.currentValue = normalized;
+    this.committedValue = normalized;
+    this.ensureSelectOption(normalized);
+    this.select.value = normalized;
+    this.input.value = this.labelForValue(normalized);
+    if (!silent) this.emitChange();
+  }
+
+  open(resetQuery = true): void {
+    if (this.select.disabled) return;
+    if (AppComboSelect.active && AppComboSelect.active !== this) {
+      AppComboSelect.active.close();
+    }
+    AppComboSelect.active = this;
+    if (resetQuery) {
+      this.searchQuery = "";
+      const currentIndex = this.optionsList.findIndex((option) => option.value === this.currentValue);
+      this.highlightedIndex = Math.max(0, currentIndex);
+    }
+    this.openState = true;
+    this.wrapper.classList.add("is-open");
+    this.button.setAttribute("aria-expanded", "true");
+    this.renderOverlay();
+  }
+
+  close(): void {
+    if (!this.openState && AppComboSelect.active !== this) return;
+    this.openState = false;
+    this.wrapper.classList.remove("is-open");
+    this.button.setAttribute("aria-expanded", "false");
+    if (AppComboSelect.active === this) AppComboSelect.active = null;
+    const overlay = AppComboSelect.overlay;
+    if (overlay) {
+      overlay.hidden = true;
+      overlay.innerHTML = "";
+    }
+  }
+
+  refreshDisabled(): void {
+    this.input.disabled = this.select.disabled;
+    this.button.disabled = this.select.disabled;
+    this.wrapper.classList.toggle("is-disabled", this.select.disabled);
+  }
+
+  private bind(): void {
+    this.wrapper.className = "app-combo";
+    this.wrapper.dataset.comboMode = this.settings.create ? "free" : "force";
+    this.input.type = "text";
+    this.input.className = "app-combo-input";
+    this.input.autocomplete = "off";
+    this.input.spellcheck = false;
+    this.input.placeholder = this.settings.placeholder;
+    this.input.value = this.labelForValue(this.currentValue);
+    this.button.type = "button";
+    this.button.className = "app-combo-button";
+    this.button.setAttribute("aria-haspopup", "listbox");
+    this.button.setAttribute("aria-expanded", "false");
+    this.button.setAttribute("aria-label", this.settings.placeholder);
+    this.wrapper.append(this.input, this.button);
+
+    this.select.classList.add("app-native-select-source");
+    this.select.insertAdjacentElement("afterend", this.wrapper);
+    this.refreshDisabled();
+
+    this.input.addEventListener("focus", () => {
+      this.focusedState = true;
+      this.open(!this.openState);
+    });
+    this.input.addEventListener("input", () => {
+      this.searchQuery = this.input.value.trim();
+      this.highlightedIndex = 0;
+      this.open(false);
+      this.renderOverlay();
+    });
+    this.input.addEventListener("keydown", (event) => this.handleKeydown(event));
+    this.input.addEventListener("blur", () => {
+      window.setTimeout(() => {
+        if (this.wrapper.contains(document.activeElement) || AppComboSelect.overlay?.contains(document.activeElement)) return;
+        this.focusedState = false;
+        this.commitInput();
+        this.close();
+      }, 0);
+    });
+    this.button.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+    });
+    this.button.addEventListener("click", () => {
+      if (this.openState) {
+        this.close();
+        this.input.focus();
+        return;
+      }
+      this.input.focus();
+      this.open(!this.openState);
+    });
+    this.select.addEventListener("change", () => {
+      if (this.select.value !== this.currentValue) this.setValue(this.select.value, true);
+    });
+  }
+
+  private handleKeydown(event: KeyboardEvent): void {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      this.open();
+      this.moveHighlight(1);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      this.open();
+      this.moveHighlight(-1);
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      this.commitHighlightedOrInput();
+      this.close();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      this.input.value = this.labelForValue(this.committedValue);
+      this.close();
+    }
+  }
+
+  private commitHighlightedOrInput(): void {
+    const matches = this.filteredOptions();
+    const highlighted = matches[this.highlightedIndex];
+    if (highlighted) {
+      this.commitValue(highlighted.value);
+      return;
+    }
+    this.commitInput();
+  }
+
+  private commitInput(): void {
+    const raw = this.input.value.trim();
+    if (this.settings.create) {
+      this.commitValue(raw);
+      return;
+    }
+    const exact = this.optionsList.find((option) => option.label.toLocaleLowerCase() === raw.toLocaleLowerCase() || option.value === raw);
+    if (exact) {
+      this.commitValue(exact.value);
+      return;
+    }
+    this.input.value = this.labelForValue(this.committedValue);
+  }
+
+  private commitValue(value: string): void {
+    const normalized = this.normalizeValue(value);
+    if (normalized === this.currentValue && this.input.value === this.labelForValue(normalized)) return;
+    this.currentValue = normalized;
+    this.committedValue = normalized;
+    this.ensureSelectOption(normalized);
+    this.select.value = normalized;
+    this.input.value = this.labelForValue(normalized);
+    this.emitChange();
+  }
+
+  private emitChange(): void {
+    this.select.dispatchEvent(new Event("input", { bubbles: true }));
+    this.select.dispatchEvent(new Event("change", { bubbles: true }));
+    for (const handler of this.handlers) handler(this.currentValue);
+  }
+
+  private normalizeValue(value: string): string {
+    if (this.settings.create) return value;
+    return this.optionsList.some((option) => option.value === value) ? value : this.committedValue;
+  }
+
+  private ensureSelectOption(value: string): void {
+    if (!value || Array.from(this.select.options).some((option) => option.value === value)) return;
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    this.select.appendChild(option);
+  }
+
+  private labelForValue(value: string): string {
+    return this.optionsList.find((option) => option.value === value)?.label ?? value;
+  }
+
+  private filteredOptions(): NamedOption[] {
+    const query = this.searchQuery;
+    if (!query) return this.optionsList;
+    return this.optionsList
+      .map((option) => ({ option, score: this.matchScore(option.label, query) }))
+      .filter((entry) => entry.score >= 0)
+      .sort((left, right) => left.score - right.score || left.option.label.localeCompare(right.option.label))
+      .map((entry) => entry.option);
+  }
+
+  private matchScore(label: string, query: string): number {
+    const text = label.toLocaleLowerCase();
+    const needle = query.toLocaleLowerCase();
+    if (text === needle) return 0;
+    if (text.startsWith(needle)) return 1;
+    const index = text.indexOf(needle);
+    if (index >= 0) return 10 + index;
+    let textIndex = 0;
+    let gaps = 0;
+    for (const char of needle) {
+      const next = text.indexOf(char, textIndex);
+      if (next < 0) return -1;
+      gaps += next - textIndex;
+      textIndex = next + 1;
+    }
+    return 100 + gaps;
+  }
+
+  private moveHighlight(delta: number): void {
+    const matches = this.filteredOptions();
+    if (matches.length === 0) return;
+    this.highlightedIndex = Math.max(0, Math.min(matches.length - 1, this.highlightedIndex + delta));
+    this.renderOverlay();
+  }
+
+  private renderOverlay(): void {
+    if (!this.openState) return;
+    const overlay = this.getOverlay();
+    overlay.innerHTML = "";
+    const list = document.createElement("div");
+    list.className = "app-combo-list";
+    list.setAttribute("role", "listbox");
+    const matches = this.filteredOptions();
+    this.highlightedIndex = Math.max(0, Math.min(this.highlightedIndex, Math.max(0, matches.length - 1)));
+    if (matches.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "app-combo-empty";
+      empty.textContent = this.settings.create ? "Press Enter to use typed value" : "No matching choices";
+      list.appendChild(empty);
+    }
+    matches.forEach((option, index) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "app-combo-option";
+      item.setAttribute("role", "option");
+      item.setAttribute("aria-selected", String(option.value === this.currentValue));
+      item.dataset.highlighted = String(index === this.highlightedIndex);
+      item.textContent = option.label;
+      item.addEventListener("pointerdown", (event) => event.preventDefault());
+      item.addEventListener("click", () => {
+        this.commitValue(option.value);
+        this.close();
+        this.input.focus();
+      });
+      list.appendChild(item);
+    });
+    overlay.appendChild(list);
+    this.positionOverlay(overlay);
+    overlay.hidden = false;
+  }
+
+  private getOverlay(): HTMLDivElement {
+    if (AppComboSelect.overlay) return AppComboSelect.overlay;
+    const overlay = document.createElement("div");
+    overlay.className = "app-combo-dropdown";
+    overlay.hidden = true;
+    document.getElementById("app-shell")?.appendChild(overlay);
+    document.addEventListener("pointerdown", (event) => {
+      const active = AppComboSelect.active;
+      if (!active || overlay.hidden) return;
+      const target = event.target;
+      if (target instanceof Node && (overlay.contains(target) || active.wrapper.contains(target))) return;
+      active.commitInput();
+      active.close();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") AppComboSelect.active?.close();
+    });
+    window.addEventListener("resize", () => AppComboSelect.active?.close());
+    window.addEventListener("scroll", (event) => {
+      const target = event.target;
+      if (target instanceof Node && overlay.contains(target)) return;
+      AppComboSelect.active?.repositionOrClose();
+    }, true);
+    AppComboSelect.overlay = overlay;
+    return overlay;
+  }
+
+  private positionOverlay(overlay: HTMLDivElement): void {
+    const rect = this.wrapper.getBoundingClientRect();
+    const viewportPadding = 12;
+    const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+    const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+    const left = Math.max(viewportPadding, rect.left);
+    const width = Math.max(180, Math.min(rect.width, viewportWidth - left - viewportPadding));
+    const maxHeight = Math.min(320, viewportHeight - viewportPadding * 2);
+    const below = viewportHeight - rect.bottom - viewportPadding;
+    const above = rect.top - viewportPadding;
+    const openAbove = below < Math.min(maxHeight, 180) && above > below;
+    overlay.style.left = `${left}px`;
+    overlay.style.width = `${width}px`;
+    overlay.style.maxHeight = `${Math.max(120, openAbove ? Math.min(maxHeight, above) : Math.min(maxHeight, below))}px`;
+    overlay.style.top = openAbove ? "" : `${rect.bottom + 4}px`;
+    overlay.style.bottom = openAbove ? `${viewportHeight - rect.top + 4}px` : "";
+  }
+
+  private repositionOrClose(): void {
+    if (!this.openState || !AppComboSelect.overlay) return;
+    const rect = this.wrapper.getBoundingClientRect();
+    const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+    if (rect.bottom < 0 || rect.top > viewportHeight) {
+      this.close();
+      return;
+    }
+    this.positionOverlay(AppComboSelect.overlay);
+  }
 }
 
 const SERVICE_NONE_OPTION = "__none__";
@@ -194,12 +590,12 @@ export class WebApp {
   private speakingChunkId: string | null = null;
   private speakingRevision: number | null = null;
   private readonly optionCache = new Map<string, NamedOption[]>();
-  private llmModelSelect: TomSelect | null = null;
-  private ttsModelSelect: TomSelect | null = null;
-  private ttsVoiceSelect: TomSelect | null = null;
-  private detectServiceSelect: TomSelect | null = null;
-  private ocrServiceSelect: TomSelect | null = null;
-  private ttsServicePresetSelect: TomSelect | null = null;
+  private llmModelSelect: AppComboSelect | null = null;
+  private ttsModelSelect: AppComboSelect | null = null;
+  private ttsVoiceSelect: AppComboSelect | null = null;
+  private detectServiceSelect: AppComboSelect | null = null;
+  private ocrServiceSelect: AppComboSelect | null = null;
+  private ttsServicePresetSelect: AppComboSelect | null = null;
   private settingsPeekOpen = false;
   private chunkPlaybackMode = false;
   private chunkPlaybackSession = 0;
@@ -258,6 +654,7 @@ export class WebApp {
   };
   private preprocessModal: PreprocessModalController | null = null;
   private mainPreviewRenderer: PreprocPreviewRenderer | null = null;
+  private readonly enhancedNativeSelects = new WeakMap<HTMLSelectElement, AppComboSelect>();
   private lastOriginalImageDataUrl: string | null = null;
   private currentOcrImageDataUrl: string | null = null;
   private currentOcrRegions: DrawRect[] = [];
@@ -1149,52 +1546,39 @@ export class WebApp {
   }
 
   private bindModelSelectors(): void {
-    this.llmModelSelect = new TomSelect(this.must<HTMLSelectElement>("llm-model"), {
+    this.llmModelSelect = new AppComboSelect(this.must<HTMLSelectElement>("llm-model"), {
       create: true,
-      persist: false,
-      maxOptions: 500,
       placeholder: this.t("ocr.model")
     });
 
-    this.ttsModelSelect = new TomSelect(this.must<HTMLSelectElement>("tts-model"), {
+    this.ttsModelSelect = new AppComboSelect(this.must<HTMLSelectElement>("tts-model"), {
       create: true,
-      persist: false,
-      maxOptions: 500,
       placeholder: this.t("tts.model")
     });
 
-    this.ttsVoiceSelect = new TomSelect(this.must<HTMLSelectElement>("tts-voice"), {
+    this.ttsVoiceSelect = new AppComboSelect(this.must<HTMLSelectElement>("tts-voice"), {
       create: true,
-      persist: false,
-      maxOptions: 500,
       placeholder: this.t("tts.voice")
     });
 
-    this.detectServiceSelect = new TomSelect(this.must<HTMLSelectElement>("service-detect-select"), {
+    this.detectServiceSelect = new AppComboSelect(this.must<HTMLSelectElement>("service-detect-select"), {
       create: false,
-      persist: false,
-      maxOptions: 500,
       placeholder: this.t("services.detect")
     });
 
-    this.ocrServiceSelect = new TomSelect(this.must<HTMLSelectElement>("service-ocr-select"), {
+    this.ocrServiceSelect = new AppComboSelect(this.must<HTMLSelectElement>("service-ocr-select"), {
       create: false,
-      persist: false,
-      maxOptions: 500,
       placeholder: this.t("services.ocr")
     });
 
-    this.ttsServicePresetSelect = new TomSelect(this.must<HTMLSelectElement>("service-tts-select"), {
+    this.ttsServicePresetSelect = new AppComboSelect(this.must<HTMLSelectElement>("service-tts-select"), {
       create: false,
-      persist: false,
-      maxOptions: 500,
       placeholder: this.t("services.tts")
     });
-
     this.bindSelectorFetchBehavior(this.llmModelSelect, "llm-model", () => this.fetchLlmModels(false));
     this.bindSelectorFetchBehavior(this.ttsModelSelect, "tts-model", () => this.fetchTtsModels(false));
     this.bindSelectorFetchBehavior(this.ttsVoiceSelect, "tts-voice", () => this.fetchTtsVoices(false));
-    this.updateTomSelectPlaceholders();
+    this.updateComboPlaceholders();
 
     this.must<HTMLButtonElement>("llm-refetch").addEventListener("click", () => {
       void this.fetchLlmModels(true);
@@ -1244,12 +1628,12 @@ export class WebApp {
     });
   }
 
-  private bindSelectorFetchBehavior(select: TomSelect, id: string, fetcher: () => Promise<void>): void {
+  private bindSelectorFetchBehavior(select: AppComboSelect, id: string, fetcher: () => Promise<void>): void {
     const el = this.must<HTMLElement>(id);
     const trigger = () => {
       void fetcher();
     };
-    select.control_input.addEventListener("focus", trigger);
+    el.nextElementSibling?.addEventListener("focusin", trigger);
     el.addEventListener("focus", trigger);
   }
 
@@ -1278,7 +1662,7 @@ export class WebApp {
       this.must<HTMLElement>(id).addEventListener("wheel", contain, { passive: true });
     }
     document.addEventListener("wheel", (event) => {
-      if (event.target instanceof Element && event.target.closest(".ts-dropdown, .ts-dropdown-content")) {
+      if (event.target instanceof Element && event.target.closest(".app-combo-dropdown, .app-combo-list")) {
         event.stopPropagation();
       }
     }, { passive: true, capture: true });
@@ -1561,7 +1945,7 @@ export class WebApp {
     }
   }
 
-  private getServiceSlotSelect(slot: DiscoveredServiceSlot): TomSelect | null {
+  private getServiceSlotSelect(slot: DiscoveredServiceSlot): AppComboSelect | null {
     return slot === "detect"
       ? this.detectServiceSelect
       : slot === "ocr"
@@ -2241,42 +2625,22 @@ export class WebApp {
     }
   }
 
-  private applyOptions(select: TomSelect | null, options: NamedOption[], current: string): void {
+  private applyOptions(select: AppComboSelect | null, options: NamedOption[], current: string): void {
     if (!select) return;
-    select.clearOptions();
-    options.forEach((option) => {
-      select.addOption({ value: option.value, text: option.label });
-    });
-
-    if (current) {
-      if (!options.some((option) => option.value === current)) {
-        select.addOption({ value: current, text: current });
-      }
-      select.setValue(current, true);
-    }
-
-    select.refreshOptions(false);
+    select.setOptions(options, current);
   }
 
-  private optionsMatch(select: TomSelect | null, options: NamedOption[]): boolean {
+  private optionsMatch(select: AppComboSelect | null, options: NamedOption[]): boolean {
     if (!select) return false;
-    const existing = Object.entries(select.options).map(([value, option]) => ({
-      value,
-      label: String(option.text ?? option.label ?? "")
-    }));
-    return existing.length === options.length && existing.every((option, index) => {
-      const next = options[index];
-      if (!next) return false;
-      return option.value === next.value && option.label === next.label;
-    });
+    return select.optionsMatch(options);
   }
 
-  private applyServiceOptions(select: TomSelect | null, options: NamedOption[], current: string): void {
+  private applyServiceOptions(select: AppComboSelect | null, options: NamedOption[], current: string): void {
     if (!select) return;
     const open = select.isOpen;
     const focused = select.isFocused;
     const selected = select.getValue();
-    const selectedValue = typeof selected === "string" ? selected : selected[0] ?? "";
+    const selectedValue = selected;
     const shouldRefreshOptions = !this.optionsMatch(select, options);
     if (shouldRefreshOptions) {
       this.applyOptions(select, options, current);
@@ -2340,20 +2704,18 @@ export class WebApp {
     applyTranslationsToElement(document, this.currentLanguage());
   }
 
-  private updateTomSelectPlaceholders(): void {
-    const pairs: Array<[TomSelect | null, string]> = [
+  private updateComboPlaceholders(): void {
+    const pairs: Array<[AppComboSelect | null, string]> = [
       [this.llmModelSelect, this.t("ocr.model")],
       [this.ttsModelSelect, this.t("tts.model")],
       [this.ttsVoiceSelect, this.t("tts.voice")],
-      [this.detectServiceSelect, "Text Processing"],
-      [this.ocrServiceSelect, "OCR"],
-      [this.ttsServicePresetSelect, "Text to Speech"]
+      [this.detectServiceSelect, this.t("services.detect")],
+      [this.ocrServiceSelect, this.t("services.ocr")],
+      [this.ttsServicePresetSelect, this.t("services.tts")]
     ];
     for (const [select, placeholder] of pairs) {
       if (!select) continue;
-      select.settings.placeholder = placeholder;
-      select.control_input.placeholder = placeholder;
-      select.input.setAttribute("placeholder", placeholder);
+      select.setPlaceholder(placeholder);
     }
   }
 
@@ -2361,9 +2723,51 @@ export class WebApp {
     document.documentElement.lang = this.currentLanguage();
     document.documentElement.dir = this.currentLanguage() === "ar" ? "rtl" : "ltr";
     this.applyStaticTranslations();
-    this.updateTomSelectPlaceholders();
+    this.updateComboPlaceholders();
+    this.refreshNativeSelectTriggers();
     this.renderPlayState();
     this.renderAlwaysOnTopButton();
+  }
+
+  private bindNativeSelectEnhancers(): void {
+    for (const select of Array.from(document.querySelectorAll<HTMLSelectElement>("select"))) {
+      if (this.shouldSkipNativeSelectEnhancer(select) || this.enhancedNativeSelects.has(select)) continue;
+      const combo = new AppComboSelect(select, {
+        create: this.isFreeEntrySelect(select.id),
+        placeholder: this.comboPlaceholderForSelect(select)
+      });
+      this.enhancedNativeSelects.set(select, combo);
+    }
+  }
+
+  private shouldSkipNativeSelectEnhancer(select: HTMLSelectElement): boolean {
+    return !select.id
+      || Boolean(this.enhancedNativeSelects.get(select))
+      || Boolean(select.nextElementSibling?.classList.contains("app-combo"));
+  }
+
+  private isFreeEntrySelect(id: string): boolean {
+    return new Set(["llm-model", "tts-model", "tts-voice", "llm-thinking-mode", "tts-thinking-mode", "tts-format"]).has(id);
+  }
+
+  private comboPlaceholderForSelect(select: HTMLSelectElement): string {
+    const label = select.labels?.[0]?.textContent?.trim();
+    return label || select.getAttribute("aria-label") || select.id;
+  }
+
+  private refreshNativeSelectTriggers(): void {
+    for (const select of Array.from(document.querySelectorAll<HTMLSelectElement>("select"))) {
+      const combo = this.enhancedNativeSelects.get(select);
+      if (!combo) continue;
+      combo.setOptions(
+        Array.from(select.options).map((option) => ({
+          value: option.value,
+          label: option.textContent?.trim() || option.value
+        })),
+        select.value
+      );
+      combo.refreshDisabled();
+    }
   }
 
   private bindSettings(): void {
@@ -2436,6 +2840,7 @@ export class WebApp {
       "detector-url",
       "tts-url",
       "tts-key",
+      "tts-format",
       "tts-thinking-mode",
       "chunk-min",
       "chunk-max",
@@ -2708,6 +3113,7 @@ export class WebApp {
     for (const label of Array.from(document.querySelectorAll<HTMLLabelElement>("[for$='-sound-volume'], [for='global-error-sound-volume']"))) {
       label.textContent = this.t("system.soundVolume");
     }
+    this.refreshNativeSelectTriggers();
   }
 
   private renderHotkeySoundSelect(id: string, selected: HotkeySoundId): void {
@@ -2794,8 +3200,14 @@ export class WebApp {
     this.config.tts.baseUrl = this.must<HTMLInputElement>("tts-url").value;
     this.config.tts.apiKey = this.must<HTMLInputElement>("tts-key").value;
     this.config.tts.instructions = this.must<HTMLInputElement>("tts-instructions").value;
+    this.config.tts.format = this.readTtsFormat();
     this.config.tts.thinkingMode = this.readThinkingMode("tts-thinking-mode");
     this.saveActiveTtsToSelectedProvider();
+  }
+
+  private readTtsFormat(): AppConfig["tts"]["format"] {
+    const value = this.must<HTMLSelectElement>("tts-format").value;
+    return value === "mp3" || value === "opus" ? value : "wav";
   }
 
   private readThinkingMode(id: "llm-thinking-mode" | "tts-thinking-mode"): "provider_default" | "low" | "off" {
@@ -2819,6 +3231,7 @@ export class WebApp {
     this.must<HTMLInputElement>("tts-url").value = this.config.tts.baseUrl;
     this.must<HTMLInputElement>("tts-key").value = this.config.tts.apiKey;
     this.must<HTMLInputElement>("tts-instructions").value = this.config.tts.instructions;
+    this.must<HTMLSelectElement>("tts-format").value = this.config.tts.format;
     this.must<HTMLSelectElement>("tts-thinking-mode").value = this.config.tts.thinkingMode;
     this.must<HTMLInputElement>("chunk-min").value = String(this.config.reading.minWordsPerChunk);
     this.must<HTMLInputElement>("chunk-max").value = String(this.config.reading.maxWordsPerChunk);
@@ -2884,6 +3297,8 @@ export class WebApp {
     this.renderDiscoveredServicesDashboard();
     this.renderAlwaysOnTopButton();
     this.renderMainPreviewOverlay();
+    this.bindNativeSelectEnhancers();
+    this.refreshNativeSelectTriggers();
   }
 
   private renderAlwaysOnTopButton(): void {
@@ -2929,6 +3344,9 @@ export class WebApp {
     shell.dataset.showDiagnostics = this.config.ui.showChunkDiagnostics ? "true" : "false";
 
     this.must<HTMLElement>("settings-drawer").setAttribute("aria-hidden", this.config.ui.settingsDrawerOpen ? "false" : "true");
+    if (!this.config.ui.settingsDrawerOpen && !this.settingsPeekOpen) {
+      AppComboSelect.closeActive();
+    }
 
     this.must<HTMLInputElement>("ui-dark-mode").checked = this.config.ui.darkMode;
     this.must<HTMLButtonElement>("theme-zen").classList.toggle("active", this.config.ui.theme === "zen");
@@ -3453,11 +3871,15 @@ export class WebApp {
 
     this.must<HTMLButtonElement>("btn-preprocess-lab").addEventListener("click", async () => {
       await this.preprocessModal?.open();
+      this.bindNativeSelectEnhancers();
+      this.refreshNativeSelectTriggers();
     });
 
     this.must<HTMLDivElement>("preview-viewer").addEventListener("click", async () => {
       if (!this.lastOriginalImageDataUrl) return;
       await this.preprocessModal?.open();
+      this.bindNativeSelectEnhancers();
+      this.refreshNativeSelectTriggers();
     });
   }
 

@@ -372,27 +372,27 @@ body {
 
 .settings-layout::-webkit-scrollbar,
 .service-slot-log::-webkit-scrollbar,
-.ts-dropdown-content::-webkit-scrollbar {
+.app-combo-list::-webkit-scrollbar {
     width: 6px;
     height: 6px;
 }
 
 .settings-layout::-webkit-scrollbar-track,
 .service-slot-log::-webkit-scrollbar-track,
-.ts-dropdown-content::-webkit-scrollbar-track {
+.app-combo-list::-webkit-scrollbar-track {
     background: transparent;
 }
 
 .settings-layout::-webkit-scrollbar-thumb,
 .service-slot-log::-webkit-scrollbar-thumb,
-.ts-dropdown-content::-webkit-scrollbar-thumb {
+.app-combo-list::-webkit-scrollbar-thumb {
     background: var(--line);
     border-radius: 10px;
 }
 
 .settings-layout::-webkit-scrollbar-thumb:hover,
 .service-slot-log::-webkit-scrollbar-thumb:hover,
-.ts-dropdown-content::-webkit-scrollbar-thumb:hover {
+.app-combo-list::-webkit-scrollbar-thumb:hover {
     background: color-mix(in srgb, var(--line) 75%, var(--accent) 25%);
 }
 
@@ -1487,14 +1487,181 @@ body {
 .setting-inline > :first-child,
 .setting-inline select,
 .setting-inline input,
-.setting-inline .ts-wrapper {
+.setting-inline .app-combo {
     flex: 1 1 auto;
     min-width: 0;
 }
 
-.setting-inline .ts-wrapper {
+.setting-inline .app-combo {
     width: 100%;
 }
+
+.app-combo {
+    width: 100%;
+    min-width: 0;
+    min-height: 42px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 38px;
+    align-items: stretch;
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    background: var(--panel-2);
+    color: var(--fg);
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.app-combo:focus-within,
+.app-combo.is-open {
+    border-color: var(--accent);
+}
+
+.app-combo.is-disabled {
+    opacity: 0.55;
+}
+
+.app-combo-input {
+    width: 100%;
+    min-width: 0;
+    height: 40px;
+    border: 0 !important;
+    background: transparent !important;
+    color: var(--fg) !important;
+    outline: none;
+    padding: 0 0 0 12px !important;
+    font: inherit;
+    font-size: 14px !important;
+}
+
+.app-combo-input::placeholder {
+    color: var(--muted-fg);
+}
+
+.app-combo-button {
+    width: 38px;
+    border: 0;
+    background: transparent;
+    color: var(--muted-fg);
+    cursor: pointer;
+    position: relative;
+}
+
+.app-combo-button::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 8px;
+    height: 8px;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: translate(-50%, -65%) rotate(45deg);
+}
+
+.app-combo-button:hover,
+.app-combo:focus-within .app-combo-button {
+    color: var(--fg);
+}
+
+.app-combo-dropdown {
+    position: fixed;
+    z-index: 1000;
+    overflow: hidden;
+    overscroll-behavior: contain;
+    border: 1px solid var(--line-soft);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--panel-2) 96%, var(--fg) 4%);
+    color: var(--fg);
+    box-shadow: 0 18px 42px var(--shadow);
+    padding: 4px;
+}
+
+.app-combo-dropdown[hidden] {
+    display: none;
+}
+
+.app-combo-list {
+    max-height: inherit;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
+}
+
+.app-combo-option {
+    width: 100%;
+    min-height: 36px;
+    padding: 10px 12px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--fg);
+    font: inherit;
+    font-size: 14px;
+    line-height: 1.2;
+    text-align: left;
+    cursor: pointer;
+}
+
+.app-combo-option:hover,
+.app-combo-option:focus-visible,
+.app-combo-option[data-highlighted="true"] {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    outline: none;
+}
+
+.app-combo-option[aria-selected="true"] {
+    background: color-mix(in srgb, var(--accent) 24%, transparent);
+    color: var(--accent-strong);
+}
+
+.app-combo-empty {
+    padding: 12px;
+    color: var(--muted-fg);
+    font-size: 13px;
+}
+
+[dir="rtl"] .app-combo {
+    grid-template-columns: 38px minmax(0, 1fr);
+}
+
+[dir="rtl"] .app-combo-input {
+    grid-column: 2;
+    padding: 0 12px 0 0 !important;
+    text-align: right;
+}
+
+[dir="rtl"] .app-combo-button {
+    grid-column: 1;
+    grid-row: 1;
+}
+
+[dir="rtl"] .app-combo-option {
+    text-align: right;
+}
+
+.app-native-select-source {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+
+.preproc-sidebar .control-row .app-combo {
+    flex: 1;
+    min-height: 32px;
+}
+
+.preproc-sidebar .control-row .app-combo-input {
+    height: 30px;
+    font-size: 13px !important;
+}
+
+.preproc-sidebar .control-row .app-combo-button {
+    width: 32px;
+}
+
 
 .refetch-btn {
     width: 34px;
@@ -1719,7 +1886,7 @@ body {
     flex-wrap: wrap;
 }
 
-.service-slot-controls .ts-wrapper,
+.service-slot-controls .app-combo,
 .service-slot-controls select {
     flex: 1 1 260px;
     min-width: 180px;
@@ -2434,46 +2601,6 @@ body {
     border: 1px solid var(--accent-strong);
 }
 
-.ts-control {
-    border-color: var(--line-soft) !important;
-    border-radius: 8px !important;
-    min-height: 42px !important;
-    padding: 7px 12px !important;
-    background: var(--panel-2) !important;
-    color: var(--fg) !important;
-    display: flex !important;
-    align-items: center !important;
-}
-
-.ts-control input {
-    min-width: 6ch !important;
-}
-
-.ts-dropdown,
-.ts-dropdown .option,
-.ts-dropdown .create,
-.ts-control,
-.ts-control input {
-    font-size: 14px !important;
-}
-
-.ts-dropdown {
-    border-color: var(--line-soft) !important;
-    background: var(--panel-2) !important;
-    color: var(--fg) !important;
-    border-radius: 10px !important;
-}
-
-.ts-dropdown-content {
-    overscroll-behavior: contain;
-    scrollbar-width: thin;
-    scrollbar-color: var(--line) transparent;
-}
-
-.ts-dropdown .option,
-.ts-dropdown .create {
-    padding: 10px 12px !important;
-}
 
 @media (max-width: 1200px) {
     .settings-drawer {
@@ -2535,4 +2662,3 @@ body {
         z-index: 45;
     }
 }
-

@@ -66,8 +66,7 @@
     "ignore": "^7.0.5",
     "lucide": "^0.576.0",
     "nodehotkey": "file:services/nodehotkey",
-    "openai": "^6.25.0",
-    "tom-select": "^2.5.2"
+    "openai": "^6.25.0"
   },
   "build": {
     "appId": "com.ttsanywhere.app",

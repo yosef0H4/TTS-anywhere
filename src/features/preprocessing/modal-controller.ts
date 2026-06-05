@@ -319,12 +319,14 @@ export class PreprocessModalController {
       this.schedulePreprocessAndDetect();
     });
 
-    this.mustById<HTMLSelectElement>("preproc-direction").addEventListener("input", () => {
+    const handleDirectionChange = () => {
       this.renderLabels();
       this.activeFilterRule = null;
       this.setOverlayMode("merge-preview");
       this.recomputeLiveBoxes();
-    });
+    };
+    this.mustById<HTMLSelectElement>("preproc-direction").addEventListener("input", handleDirectionChange);
+    this.mustById<HTMLSelectElement>("preproc-direction").addEventListener("change", handleDirectionChange);
 
     this.mustById<HTMLButtonElement>("preproc-tool-none").addEventListener("click", () => this.setTool("none"));
     this.mustById<HTMLButtonElement>("preproc-tool-add").addEventListener("click", () => this.setTool("add"));

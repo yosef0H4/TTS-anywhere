@@ -53,6 +53,12 @@ function spawnLogged(name, command, args, extraEnv = {}) {
   return child;
 }
 
+function assertChildAlive(child, name) {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    throw new Error(`${name} exited before startup completed`);
+  }
+}
+
 function appendChildLog(name, chunk) {
   for (const line of String(chunk).split(/\r?\n/u)) {
     if (line.trim()) log(`${name}: ${line}`);
@@ -222,7 +228,9 @@ async function start() {
   const mainWatch = spawnLogged("main-watch", "npx", ["tsc", "-p", "tsconfig.electron.json", "--watch"]);
 
   await waitFor(() => isPortOpen(VITE_PORT), 30000, `Vite port ${VITE_PORT}`);
+  assertChildAlive(renderer, "renderer");
   await waitFor(() => fs.existsSync(path.join(ROOT, "dist-electron", "main.js")), 30000, "dist-electron/main.js");
+  assertChildAlive(mainWatch, "main-watch");
 
   const electron = spawnLogged("electron", "npx", [
     "electron",
